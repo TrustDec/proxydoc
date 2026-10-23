@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use std::process::Command;
 
-use crate::doctor::{get_cargo_proxy, get_macos_system_proxy, get_npm_config, verify_proxy_url};
+use crate::doctor::{get_cargo_proxy, get_curlrc_proxy, get_macos_system_proxy, get_npm_config, get_pip_proxy, verify_proxy_url};
 use crate::scanner;
 
 pub async fn run() -> Result<()> {
@@ -18,7 +18,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(val) = git_http {
         if !verify_proxy_url(&val).await {
-            println!("  [1/5] Found dead Git http.proxy (`{}`), cleaning...", val.yellow());
+            println!("  [1/6] Found dead Git http.proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("git").args(["config", "--global", "--unset", "http.proxy"]).status();
             git_cleaned = true;
             fixed_count += 1;
@@ -26,7 +26,7 @@ pub async fn run() -> Result<()> {
     }
     if let Some(val) = git_https {
         if !verify_proxy_url(&val).await {
-            println!("  [1/5] Found dead Git https.proxy (`{}`), cleaning...", val.yellow());
+            println!("  [1/6] Found dead Git https.proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("git").args(["config", "--global", "--unset", "https.proxy"]).status();
             git_cleaned = true;
             fixed_count += 1;
@@ -36,7 +36,7 @@ pub async fn run() -> Result<()> {
     if git_cleaned {
         println!("  {} Cleared broken Git global proxy.", "✔".green());
     } else {
-        println!("  [1/5] Git global proxy: {}", "Clean or healthy".dimmed());
+        println!("  [1/6] Git global proxy: {}", "Clean or healthy".dimmed());
     }
 
     // 2. Clean dead NPM proxy
@@ -46,7 +46,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(val) = npm_http {
         if !verify_proxy_url(&val).await {
-            println!("  [2/5] Found dead NPM proxy (`{}`), cleaning...", val.yellow());
+            println!("  [2/6] Found dead NPM proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("npm").args(["config", "delete", "proxy"]).status();
             npm_cleaned = true;
             fixed_count += 1;
@@ -54,7 +54,7 @@ pub async fn run() -> Result<()> {
     }
     if let Some(val) = npm_https {
         if !verify_proxy_url(&val).await {
-            println!("  [2/5] Found dead NPM https-proxy (`{}`), cleaning...", val.yellow());
+            println!("  [2/6] Found dead NPM https-proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("npm").args(["config", "delete", "https-proxy"]).status();
             npm_cleaned = true;
             fixed_count += 1;
@@ -64,25 +64,50 @@ pub async fn run() -> Result<()> {
     if npm_cleaned {
         println!("  {} Cleared broken NPM proxy.", "✔".green());
     } else {
-        println!("  [2/5] NPM proxy: {}", "Clean or healthy".dimmed());
+        println!("  [2/6] NPM proxy: {}", "Clean or healthy".dimmed());
     }
 
-    // 3. Inspect Cargo config
+    // 3. Clean dead Pip proxy
+    if let Some(val) = get_pip_proxy() {
+        if !verify_proxy_url(&val).await {
+            println!("  [3/6] Found dead Pip global.proxy (`{}`), cleaning...", val.yellow());
+            let _ = Command::new("pip").args(["config", "unset", "global.proxy"]).status();
+            println!("  {} Cleared broken Pip global proxy.", "✔".green());
+            fixed_count += 1;
+        } else {
+            println!("  [3/6] Pip global proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [3/6] Pip global proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 4. Inspect Cargo and cURL config
+    let mut config_issue = false;
     if let Some(val) = get_cargo_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [3/5] {} Cargo config has dead proxy `{}`! Please remove `proxy` in ~/.cargo/config.toml",
+                "  [4/6] {} Cargo config has dead proxy `{}`! Please remove `proxy` in ~/.cargo/config.toml",
                 "▲".yellow(),
                 val.yellow()
             );
-        } else {
-            println!("  [3/5] Cargo proxy: {}", "Reachable".green());
+            config_issue = true;
         }
-    } else {
-        println!("  [3/5] Cargo proxy: {}", "Not set".dimmed());
+    }
+    if let Some(val) = get_curlrc_proxy() {
+        if !verify_proxy_url(&val).await {
+            println!(
+                "  [4/6] {} ~/.curlrc has dead proxy `{}`! Please edit ~/.curlrc",
+                "▲".yellow(),
+                val.yellow()
+            );
+            config_issue = true;
+        }
+    }
+    if !config_issue {
+        println!("  [4/6] Cargo & cURL static configs: {}", "Clean or healthy".dimmed());
     }
 
-    // 4. Sync active system/daemon proxy to terminal
+    // 5. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_macos_system_proxy() {
         Some(sys) if sys.http_enabled && sys.http_port > 0 => {
             if scanner::check_host_port(&sys.http_host, sys.http_port).await {
@@ -101,7 +126,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [4/5] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [5/6] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -109,14 +134,15 @@ pub async fn run() -> Result<()> {
         println!("\n    {}", format!("export http_proxy=\"{}\"", proxy_url).cyan());
         println!("    {}", format!("export https_proxy=\"{}\"", proxy_url).cyan());
         println!("    {}", format!("export all_proxy=\"{}\"", proxy_url).cyan());
+        println!("    {}", "export no_proxy=\"localhost,127.0.0.1,::1,localaddress,.local\"".cyan());
         println!();
         fixed_count += 1;
     } else {
-        println!("  [4/5] No active local proxy client found. Ensure your proxy software is open.");
+        println!("  [5/6] No active local proxy client found. Ensure your proxy software is open.");
     }
 
-    // 5. Flush macOS DNS cache
-    println!("  [5/5] Flushing local DNS cache to fix resolution stalls...");
+    // 6. Flush macOS DNS cache
+    println!("  [6/6] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

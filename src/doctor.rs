@@ -174,6 +174,100 @@ pub fn get_cargo_proxy() -> Option<String> {
     None
 }
 
+pub fn parse_curlrc_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = trim.strip_prefix("proxy") {
+            let val = rest.trim_start_matches(|c: char| c == '=' || c.is_whitespace());
+            let val = val.trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        } else if let Some(rest) = trim.strip_prefix("-x") {
+            let val = rest.trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        } else if let Some(rest) = trim.strip_prefix("--proxy") {
+            let val = rest.trim_start_matches(|c: char| c == '=' || c.is_whitespace());
+            let val = val.trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn get_curlrc_proxy() -> Option<String> {
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".curlrc");
+        if let Ok(content) = std::fs::read_to_string(path) {
+            return parse_curlrc_proxy(&content);
+        }
+    }
+    None
+}
+
+pub fn parse_pip_config_proxy(content: &str) -> Option<String> {
+    let mut in_global = false;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.starts_with('[') {
+            let sec = trim.trim_matches(|c| c == '[' || c == ']').trim();
+            in_global = sec.eq_ignore_ascii_case("global");
+            continue;
+        }
+        if in_global {
+            if let Some((k, v)) = trim.split_once('=') {
+                if k.trim().eq_ignore_ascii_case("proxy") {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pip_proxy() -> Option<String> {
+    if let Ok(val) = std::env::var("PIP_PROXY") {
+        if !val.trim().is_empty() {
+            return Some(val.trim().to_string());
+        }
+    }
+    if let Ok(out) = Command::new("pip").args(["config", "get", "global.proxy"]).output() {
+        if out.status.success() {
+            let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !val.is_empty() && val != "null" && val != "undefined" {
+                return Some(val);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let paths = [
+            home.join(".config").join("pip").join("pip.conf"),
+            home.join(".pip").join("pip.conf"),
+        ];
+        for path in paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Some(p) = parse_pip_config_proxy(&content) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -253,6 +347,42 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             "(not set)".dimmed().to_string(),
             "○ Direct (Inherits nothing)".dimmed().to_string(),
         ));
+    } else {
+        // Inspect no_proxy / NO_PROXY to guarantee localhost / 127.0.0.1 bypass
+        let no_proxy = std::env::var("no_proxy").or_else(|_| std::env::var("NO_PROXY")).ok();
+        match no_proxy {
+            Some(ref val) => {
+                let has_localhost = val.contains("localhost") && (val.contains("127.0.0.1") || val.contains("::1"));
+                if !has_localhost {
+                    root_issues.push(format!(
+                        "NO_PROXY is set (`{}`) but misses `localhost` or `127.0.0.1` (local dev servers like Vite/Docker will route to proxy and fail)",
+                        val
+                    ));
+                    items.push(DiagItem::new(
+                        "Shell Env",
+                        "no_proxy / NO_PROXY",
+                        val.clone(),
+                        "▲ Missing localhost bypass".yellow().to_string(),
+                    ));
+                } else {
+                    items.push(DiagItem::new(
+                        "Shell Env",
+                        "no_proxy / NO_PROXY",
+                        val.clone(),
+                        "● Localhost bypass configured".green().to_string(),
+                    ));
+                }
+            }
+            None => {
+                root_issues.push("Terminal proxy is set, but `no_proxy` is MISSING! (Local dev servers like Vite/Next.js/Docker will fail)".to_string());
+                items.push(DiagItem::new(
+                    "Shell Env",
+                    "no_proxy / NO_PROXY",
+                    "(not set)".yellow().to_string(),
+                    "▲ Missing (Local servers might hang)".yellow().bold().to_string(),
+                ));
+            }
+        }
     }
 
     // 3. Git Config
@@ -350,7 +480,49 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 6. DNS Poisoning & Resolution Check
+    // 6. Pip Config
+    if let Some(val) = get_pip_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!("Pip proxy points to dead port `{}` (pip install will fail)", val));
+        }
+        items.push(DiagItem::new(
+            "Pip",
+            "pip global.proxy",
+            val,
+            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (pip install will fail)".red().bold().to_string() },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Pip",
+            "pip global.proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 7. cURL Config (~/.curlrc)
+    if let Some(val) = get_curlrc_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!("~/.curlrc points to dead proxy `{}` (curl commands & bash installers will fail)", val));
+        }
+        items.push(DiagItem::new(
+            "cURL",
+            "~/.curlrc proxy",
+            val,
+            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (curl commands fail)".red().bold().to_string() },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "cURL",
+            "~/.curlrc proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 8. DNS Poisoning & Resolution Check
     let dns_targets = [
         ("github.com", 443),
         ("raw.githubusercontent.com", 443),
@@ -395,7 +567,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         }
     }
 
-    // 7. Active Daemons
+    // 9. Active Daemons
     let active_client = scanner::find_first_active_proxy().await;
     match active_client {
         Some(p) => {
@@ -535,6 +707,37 @@ jobs = 8
 jobs = 4
 "#;
         assert_eq!(parse_cargo_proxy_toml(empty), None);
+    }
+
+    #[test]
+    fn test_parse_curlrc_proxy() {
+        let c1 = "proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_curlrc_proxy(c1), Some("http://127.0.0.1:7890".to_string()));
+
+        let c2 = "# some comment\n-x 127.0.0.1:1080\n";
+        assert_eq!(parse_curlrc_proxy(c2), Some("127.0.0.1:1080".to_string()));
+
+        let c3 = "--proxy socks5://127.0.0.1:1082\n";
+        assert_eq!(parse_curlrc_proxy(c3), Some("socks5://127.0.0.1:1082".to_string()));
+
+        let c4 = "# no proxy here\nsilent\n";
+        assert_eq!(parse_curlrc_proxy(c4), None);
+    }
+
+    #[test]
+    fn test_parse_pip_config_proxy() {
+        let c1 = r#"
+[global]
+index-url = https://pypi.org/simple
+proxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(parse_pip_config_proxy(c1), Some("http://127.0.0.1:7890".to_string()));
+
+        let c2 = r#"
+[install]
+trusted-host = pypi.org
+"#;
+        assert_eq!(parse_pip_config_proxy(c2), None);
     }
 
     #[tokio::test]

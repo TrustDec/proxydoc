@@ -22,7 +22,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// 🩺 Deep diagnostics (System vs Terminal sync, DNS poisoning, Git/NPM/Cargo dead ports)
+    /// 🩺 Deep diagnostics (System vs Terminal sync, DNS poisoning, Git/NPM/Cargo/Pip/cURL dead ports)
     Doctor {
         /// Show verbose diagnostic details
         #[arg(short, long)]
@@ -38,6 +38,12 @@ enum Commands {
         /// Custom proxy URL to test (e.g. http://127.0.0.1:7890 or socks5://127.0.0.1:1082)
         #[arg(short, long)]
         proxy: Option<String>,
+        /// Force direct connection ignoring any active proxy
+        #[arg(short, long)]
+        direct: bool,
+        /// Benchmark and compare Direct vs Proxy side-by-side
+        #[arg(short, long)]
+        compare: bool,
         /// Output test results and egress info in JSON format
         #[arg(long)]
         json: bool,
@@ -59,7 +65,10 @@ enum Commands {
         /// Also configure npm proxy
         #[arg(long)]
         npm: bool,
-        /// Also configure both git and npm proxy
+        /// Also configure pip global proxy
+        #[arg(long)]
+        pip: bool,
+        /// Also configure git, npm, and pip proxy
         #[arg(short, long)]
         all: bool,
     },
@@ -71,7 +80,10 @@ enum Commands {
         /// Also unset npm proxy
         #[arg(long)]
         npm: bool,
-        /// Also unset both git and npm proxy
+        /// Also unset pip global proxy
+        #[arg(long)]
+        pip: bool,
+        /// Also unset git, npm, and pip proxy
         #[arg(short, long)]
         all: bool,
     },
@@ -93,17 +105,17 @@ async fn main() -> Result<()> {
         Some(Commands::Fix) => {
             fixer::run().await?;
         }
-        Some(Commands::Test { proxy, json }) => {
-            checker::run(proxy, json).await?;
+        Some(Commands::Test { proxy, direct, compare, json }) => {
+            checker::run(proxy, direct, compare, json).await?;
         }
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, npm, all }) => {
-            manager::turn_on(&target, git, npm, all).await?;
+        Some(Commands::On { target, git, npm, pip, all }) => {
+            manager::turn_on(&target, git, npm, pip, all).await?;
         }
-        Some(Commands::Off { git, npm, all }) => {
-            manager::turn_off(git, npm, all)?;
+        Some(Commands::Off { git, npm, pip, all }) => {
+            manager::turn_off(git, npm, pip, all)?;
         }
         Some(Commands::Init) => {
             manager::print_init_script();
@@ -133,9 +145,35 @@ mod tests {
     fn test_cli_parse_test_options() {
         let cli = Cli::try_parse_from(["proxydoc", "test", "--proxy", "http://127.0.0.1:7890", "--json"]).unwrap();
         match cli.command {
-            Some(Commands::Test { proxy, json }) => {
+            Some(Commands::Test { proxy, direct, compare, json }) => {
                 assert_eq!(proxy, Some("http://127.0.0.1:7890".to_string()));
+                assert!(!direct);
+                assert!(!compare);
                 assert!(json);
+            }
+            _ => panic!("Expected Test command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_test_compare() {
+        let cli = Cli::try_parse_from(["proxydoc", "test", "--compare"]).unwrap();
+        match cli.command {
+            Some(Commands::Test { compare, direct, .. }) => {
+                assert!(compare);
+                assert!(!direct);
+            }
+            _ => panic!("Expected Test command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_test_direct() {
+        let cli = Cli::try_parse_from(["proxydoc", "test", "-d"]).unwrap();
+        match cli.command {
+            Some(Commands::Test { direct, compare, .. }) => {
+                assert!(direct);
+                assert!(!compare);
             }
             _ => panic!("Expected Test command"),
         }
@@ -145,11 +183,34 @@ mod tests {
     fn test_cli_parse_on_all() {
         let cli = Cli::try_parse_from(["proxydoc", "on", "7890", "--all"]).unwrap();
         match cli.command {
-            Some(Commands::On { target, all, .. }) => {
+            Some(Commands::On { target, all, pip, .. }) => {
                 assert_eq!(target, "7890");
                 assert!(all);
+                assert!(!pip);
             }
             _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_pip() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--pip"]).unwrap();
+        match cli.command {
+            Some(Commands::On { pip, .. }) => {
+                assert!(pip);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_all() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "-a"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { all, .. }) => {
+                assert!(all);
+            }
+            _ => panic!("Expected Off command"),
         }
     }
 }

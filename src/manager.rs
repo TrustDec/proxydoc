@@ -5,9 +5,10 @@ use std::process::Command;
 use crate::doctor::get_macos_system_proxy;
 use crate::scanner;
 
-pub async fn turn_on(target: &str, git: bool, npm: bool, all: bool) -> Result<()> {
+pub async fn turn_on(target: &str, git: bool, npm: bool, pip: bool, all: bool) -> Result<()> {
     let set_git = git || all;
     let set_npm = npm || all;
+    let set_pip = pip || all;
 
     // Resolve target proxy address
     let proxy_url = if target == "auto" {
@@ -42,6 +43,8 @@ pub async fn turn_on(target: &str, git: bool, npm: bool, all: bool) -> Result<()
     println!("export HTTP_PROXY=\"{}\"", proxy_url);
     println!("export HTTPS_PROXY=\"{}\"", proxy_url);
     println!("export ALL_PROXY=\"{}\"", proxy_url);
+    println!("export no_proxy=\"localhost,127.0.0.1,::1,localaddress,.local\"");
+    println!("export NO_PROXY=\"localhost,127.0.0.1,::1,localaddress,.local\"");
 
     if set_git {
         let _ = Command::new("git").args(["config", "--global", "http.proxy", &proxy_url]).status();
@@ -55,15 +58,21 @@ pub async fn turn_on(target: &str, git: bool, npm: bool, all: bool) -> Result<()
         eprintln!("{}", format!("✔ NPM proxy set to {}", proxy_url).green());
     }
 
+    if set_pip {
+        let _ = Command::new("pip").args(["config", "set", "global.proxy", &proxy_url]).status();
+        eprintln!("{}", format!("✔ Pip global proxy set to {}", proxy_url).green());
+    }
+
     eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
     eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
 
     Ok(())
 }
 
-pub fn turn_off(git: bool, npm: bool, all: bool) -> Result<()> {
+pub fn turn_off(git: bool, npm: bool, pip: bool, all: bool) -> Result<()> {
     let unset_git = git || all;
     let unset_npm = npm || all;
+    let unset_pip = pip || all;
 
     println!("unset http_proxy");
     println!("unset https_proxy");
@@ -71,6 +80,8 @@ pub fn turn_off(git: bool, npm: bool, all: bool) -> Result<()> {
     println!("unset HTTP_PROXY");
     println!("unset HTTPS_PROXY");
     println!("unset ALL_PROXY");
+    println!("unset no_proxy");
+    println!("unset NO_PROXY");
 
     if unset_git {
         let _ = Command::new("git").args(["config", "--global", "--unset", "http.proxy"]).status();
@@ -82,6 +93,11 @@ pub fn turn_off(git: bool, npm: bool, all: bool) -> Result<()> {
         let _ = Command::new("npm").args(["config", "delete", "proxy"]).status();
         let _ = Command::new("npm").args(["config", "delete", "https-proxy"]).status();
         eprintln!("{}", "✔ NPM proxy unset".green());
+    }
+
+    if unset_pip {
+        let _ = Command::new("pip").args(["config", "unset", "global.proxy"]).status();
+        eprintln!("{}", "✔ Pip global proxy unset".green());
     }
 
     eprintln!("{}", "🔴 Proxy disabled across terminal session!".yellow().bold());
@@ -105,5 +121,6 @@ alias poff="proxydoc-off"
 alias pdoc="proxydoc doctor"
 alias pfix="proxydoc fix"
 alias ptest="proxydoc test"
+alias pcomp="proxydoc test --compare"
 "#);
 }
