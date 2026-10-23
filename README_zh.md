@@ -6,8 +6,8 @@
 [![GitHub Stars](https://img.shields.io/github/stars/TrustDec/proxydoc.svg?style=social)](https://github.com/TrustDec/proxydoc)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)]()
 
-**专为开发者打造的全终端代理环境体检、延迟测速与快捷管理 CLI。**  
-*一秒解决终端报 Connection refused、Git 卡死、AI 接口连不上的网络玄学。*
+**专为开发者打造的终端代理深度根因诊断、DNS 投毒检测与一键自动修复 CLI。**  
+*一秒搞定系统与终端代理脱节、死端口导致的 Connection refused、以及 AI 接口断连。*
 
 [English](README.md) | [简体中文](README_zh.md)
 
@@ -15,78 +15,53 @@
 
 ---
 
-## ⚡ 解决的核心痛点
+## ⚡ 解决的核心根因问题
 
-很多开发者都遇到过以下抓狂场景：
-- ❌ 浏览器能正常上网，但终端里 `git clone` 或 `brew update` 一直卡死。
-- ❌ 关了代理客户端后，终端一直报错 `curl: (7) Failed to connect to 127.0.0.1 port 7890: Connection refused`，不知道哪个配置文件没删干净。
-- ❌ 环境变量（`http_proxy`）、Git 全局配置、NPM 配置、Docker 以及各 AI Coding 客户端（Claude Code、Cursor、Codex 等）各自为战。
+绝大多数开发者的终端网络问题，本质上都是由于以下三类暗坑引起的：
+1. **系统代理与终端脱节**：浏览器能访问是因为 macOS 系统设置里开了 Web Proxy，但终端 Shell 没有继承，导致 `git clone` 或终端工具一直超时挂起；
+2. **退出代理软件后的死端口残留**：关了 Clash/Shadowrocket，但 Git 全局配置或终端还留着 `7890`/`1080`，狂报 `Connection refused`；
+3. **DNS 投毒与污染**：`github.com`、`api.openai.com` 本地解析被劫持解析到了 `0.0.0.0` 或无效 IP。
 
-**`proxydoc` 提供 1 秒全系统环境诊断、本地代理软件端口自动探测、AI 接口延迟实测，以及全工具链一键开/关。**
+**`proxydoc` 能够一键揪出深层根因，并通过 `proxydoc fix` 自动修复。**
 
 ---
 
 ## ✨ 核心特性
 
-- 🩺 **全链路环境体检 (`proxydoc doctor`)**：一键检测 Shell 环境变量、Git 全局配置、NPM 配置、Homebrew 镜像源及本地代理端口健康度。
-- 🔍 **本地代理客户端扫描 (`proxydoc scan`)**：智能识别 Clash、Clash Verge、Shadowrocket、Sing-box、V2Ray、Surge、CLI-Proxy-API 等常见监听端口。
-- ⚡ **AI 接口与外网连通性测速 (`proxydoc test`)**：多线程秒级测试对 **GitHub、OpenAI、Anthropic、Google、Cloudflare、HuggingFace** 的真实连通性与毫秒延迟。
-- 🟢 **一键开/关 (`proxydoc on` / `proxydoc off`)**：一秒设置/清空当前终端、Git、NPM 的代理配置。
-- 🚀 **单二进制极简交付**：基于 Rust 编写，无任何运行时依赖，运行极快（毫秒级响应）。
-
----
-
-## 📦 安装方式
-
-### 极速一键安装 (macOS / Linux)
-```bash
-curl -fsSL https://raw.githubusercontent.com/TrustDec/proxydoc/main/install.sh | bash
-```
-
-### 通过 Cargo 源码安装
-```bash
-cargo install proxydoc
-```
+- 🩺 **深度环境与根因体检 (`proxydoc doctor`)**：
+  - 自动对比 macOS 系统代理（`scutil --proxy`）与当前终端 Shell 状态，揪出“浏览器能上、终端上不了”的脱节问题；
+  - 深度校验已配置端口是否真实存活，杜绝幽灵死代理；
+  - 检测 `github.com`、`raw.githubusercontent.com`、`api.openai.com`、`api.anthropic.com` 的本地 DNS 解析完整性。
+- 🩹 **一键自动修复 (`proxydoc fix`)**：
+  - 自动清理 Git 残留的失效死代理；
+  - 将系统有效代理一键生成同步注入到终端；
+  - 自动刷新本地 DNS 解析缓存。
+- ⚡ **AI 接口与外网延迟测速 (`proxydoc test`)**：多线程秒级测试对 OpenAI、Anthropic、GitHub、Google 等服务的真实延迟。
+- 🔍 **本地代理客户端扫描 (`proxydoc scan`)**：智能探测 Shadowrocket、Clash、Sing-box、Surge 等端口。
+- 🟢 **极简切换 (`proxydoc on` / `proxydoc off`)**：一秒开闭终端代理。
 
 ---
 
 ## 🚀 常用命令
 
-### 1. 运行全面体检
 ```bash
+# 1. 深度诊断
 proxydoc doctor
-```
 
-### 2. 测试 AI 接口与外网延迟
-```bash
-# 测试当前终端代理环境
+# 2. 一键自动修复
+proxydoc fix
+
+# 3. 实测 AI 与外网接口连通性
 proxydoc test
-
-# 指定特定代理节点测试
-proxydoc test --proxy socks5://127.0.0.1:1082
 ```
 
-### 3. 扫描本机代理端口
+## 📦 安装方式
+
 ```bash
-proxydoc scan
+curl -fsSL https://raw.githubusercontent.com/TrustDec/proxydoc/main/install.sh | bash
+# 或通过 Cargo
+cargo install proxydoc
 ```
-
-### 4. 终端会话极速集成
-将以下内容加入 `~/.zshrc` 或 `~/.bashrc`：
-```bash
-eval "$(proxydoc init)"
-```
-
-之后即可使用超短别名：
-```bash
-pon          # 开启当前终端代理（自动识别本机可用端口）
-pon 7890     # 指定端口开启
-pon --git    # 同时配置 git 全局代理
-poff         # 关闭当前终端代理
-poff --git   # 同时清空 git 代理
-```
-
----
 
 ## 📄 开源协议
 
