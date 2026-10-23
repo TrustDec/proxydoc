@@ -301,6 +301,165 @@ pub fn get_docker_proxy() -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GradleProxyConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+pub fn parse_gradle_properties_proxy(content: &str) -> Option<GradleProxyConfig> {
+    let mut host = None;
+    let mut port = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with('!') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if key == "systemProp.http.proxyHost" || key == "systemProp.https.proxyHost" {
+                if !val.is_empty() {
+                    host = Some(val.to_string());
+                }
+            } else if key == "systemProp.http.proxyPort" || key == "systemProp.https.proxyPort" {
+                if let Ok(p) = val.parse::<u16>() {
+                    port = Some(p);
+                }
+            }
+        }
+    }
+    match (host, port) {
+        (Some(h), Some(p)) => Some(GradleProxyConfig { host: h, port: p }),
+        _ => None,
+    }
+}
+
+pub fn get_gradle_proxy() -> Option<GradleProxyConfig> {
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".gradle").join("gradle.properties");
+        if let Ok(content) = std::fs::read_to_string(path) {
+            return parse_gradle_properties_proxy(&content);
+        }
+    }
+    None
+}
+
+pub fn parse_wgetrc_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key.eq_ignore_ascii_case("http_proxy") || key.eq_ignore_ascii_case("https_proxy")) && !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn get_wgetrc_proxy() -> Option<String> {
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".wgetrc");
+        if let Ok(content) = std::fs::read_to_string(path) {
+            return parse_wgetrc_proxy(&content);
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SshProxyCommand {
+    pub host_pattern: String,
+    pub command: String,
+    pub target: Option<String>,
+}
+
+pub fn parse_ssh_config_proxy(content: &str) -> Vec<SshProxyCommand> {
+    let mut results = Vec::new();
+    let mut current_host = "*".to_string();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = trim.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        if parts[0].eq_ignore_ascii_case("Host") && parts.len() > 1 {
+            current_host = parts[1..].join(" ");
+        } else if parts[0].eq_ignore_ascii_case("ProxyCommand") {
+            let command = trim["ProxyCommand".len()..].trim().to_string();
+            let mut target = None;
+            for (i, &token) in parts.iter().enumerate() {
+                if (token == "-x" || token == "-S" || token == "-H") && i + 1 < parts.len() {
+                    target = Some(parts[i + 1].to_string());
+                    break;
+                }
+                if token.contains(':') && !token.starts_with('%') {
+                    if let Some((h, p)) = token.split_once(':') {
+                        if p.parse::<u16>().is_ok() {
+                            target = Some(format!("{}:{}", h, p));
+                            break;
+                        }
+                    }
+                }
+            }
+            results.push(SshProxyCommand {
+                host_pattern: current_host.clone(),
+                command,
+                target,
+            });
+        }
+    }
+
+    results
+}
+
+pub fn get_ssh_config_proxies() -> Vec<SshProxyCommand> {
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".ssh").join("config");
+        if let Ok(content) = std::fs::read_to_string(path) {
+            return parse_ssh_config_proxy(&content);
+        }
+    }
+    Vec::new()
+}
+
+pub fn detect_wsl2() -> Option<String> {
+    if cfg!(target_os = "linux") {
+        let is_wsl = std::env::var("WSL_DISTRO_NAME").is_ok()
+            || std::env::var("WSL_INTEROP").is_ok()
+            || std::fs::read_to_string("/proc/version")
+                .map(|v| v.to_ascii_lowercase().contains("microsoft"))
+                .unwrap_or(false);
+
+        if is_wsl {
+            if let Ok(resolv) = std::fs::read_to_string("/etc/resolv.conf") {
+                for line in resolv.lines() {
+                    let trim = line.trim();
+                    if let Some(rest) = trim.strip_prefix("nameserver") {
+                        let ip = rest.trim();
+                        if !ip.is_empty() && ip != "127.0.0.1" {
+                            return Some(ip.to_string());
+                        }
+                    }
+                }
+            }
+            return Some("Windows Host Gateway".to_string());
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -430,6 +589,30 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         }
     }
 
+    // WSL2 Environment Check
+    if let Some(host_ip) = detect_wsl2() {
+        let term_proxy = std::env::var("http_proxy").or_else(|_| std::env::var("all_proxy")).unwrap_or_default();
+        if term_proxy.contains("127.0.0.1") || term_proxy.contains("localhost") {
+            root_issues.push(format!(
+                "WSL2 detected! `127.0.0.1` routes inside Linux VM. Use Windows host IP `{}` or mirrored networking mode.",
+                host_ip
+            ));
+            items.push(DiagItem::new(
+                "WSL2 Host",
+                "WSL2 Windows Gateway",
+                host_ip,
+                "▲ 127.0.0.1 routes inside VM (use Host IP)".yellow().bold().to_string(),
+            ));
+        } else {
+            items.push(DiagItem::new(
+                "WSL2 Host",
+                "WSL2 Windows Gateway",
+                host_ip,
+                "● WSL2 Environment Active".dimmed().to_string(),
+            ));
+        }
+    }
+
     // 3. Git Config
     let git_http = get_git_config("http.proxy");
     let git_https = get_git_config("https.proxy");
@@ -464,6 +647,46 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 val,
                 if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT!".red().bold().to_string() },
             ));
+        }
+    }
+
+    // 4. SSH Config ProxyCommand (~/.ssh/config)
+    let ssh_proxies = get_ssh_config_proxies();
+    if ssh_proxies.is_empty() {
+        items.push(DiagItem::new(
+            "SSH Config",
+            "~/.ssh/config ProxyCommand",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Direct SSH connection)".dimmed().to_string(),
+        ));
+    } else {
+        for cmd in ssh_proxies {
+            if let Some(ref target) = cmd.target {
+                let ok = verify_proxy_url(target).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "~/.ssh/config for Host `{}` has dead ProxyCommand target `{}` (Git SSH clones will hang!)",
+                        cmd.host_pattern, target
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "SSH Config",
+                    format!("Host {} (ProxyCommand)", cmd.host_pattern),
+                    format!("{} [{}]", cmd.command, target),
+                    if ok {
+                        "● Reachable Port".green().to_string()
+                    } else {
+                        "▲ DEAD PORT! (Git SSH will hang)".red().bold().to_string()
+                    },
+                ));
+            } else {
+                items.push(DiagItem::new(
+                    "SSH Config",
+                    format!("Host {} (ProxyCommand)", cmd.host_pattern),
+                    cmd.command,
+                    "● Configured".dimmed().to_string(),
+                ));
+            }
         }
     }
 
@@ -567,7 +790,28 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 8. Docker Client Config (~/.docker/config.json)
+    // 8. Wget Config (~/.wgetrc)
+    if let Some(val) = get_wgetrc_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!("~/.wgetrc points to dead proxy `{}` (wget commands will fail)", val));
+        }
+        items.push(DiagItem::new(
+            "Wget",
+            "~/.wgetrc proxy",
+            val,
+            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (wget will fail)".red().bold().to_string() },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Wget",
+            "~/.wgetrc proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 9. Docker Client Config (~/.docker/config.json)
     if let Some(val) = get_docker_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
@@ -593,6 +837,92 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             "(not set)".dimmed().to_string(),
             "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
         ));
+    }
+
+    // 10. Gradle Config (~/.gradle/gradle.properties)
+    if let Some(cfg) = get_gradle_proxy() {
+        let ok = scanner::check_host_port(&cfg.host, cfg.port).await;
+        if !ok {
+            root_issues.push(format!(
+                "Gradle config (~/.gradle/gradle.properties) points to dead proxy `{}:{}` (Gradle/Android builds will fail)",
+                cfg.host, cfg.port
+            ));
+        }
+        items.push(DiagItem::new(
+            "Gradle",
+            "~/.gradle/gradle.properties",
+            format!("{}:{}", cfg.host, cfg.port),
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (Gradle builds fail)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Gradle",
+            "~/.gradle/gradle.properties",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 11. AI Developer Endpoints (Base URLs)
+    let ai_vars = [
+        "OPENAI_BASE_URL",
+        "ANTHROPIC_BASE_URL",
+        "DEEPSEEK_BASE_URL",
+        "OLLAMA_HOST",
+    ];
+    let mut ai_found = false;
+    for var in ai_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                ai_found = true;
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "AI gateway `{}` is set to `{}` but target is unreachable! (AI CLI agents will fail)",
+                        var, trim
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "AI Gateway",
+                    var,
+                    trim.to_string(),
+                    if ok {
+                        "● Reachable EndPoint".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE! (AI agents fail)".red().bold().to_string()
+                    },
+                ));
+            }
+        }
+    }
+    if !ai_found {
+        items.push(DiagItem::new(
+            "AI Gateway",
+            "AI Base URLs (OpenAI/Anthropic/DeepSeek/Ollama)",
+            "(default public endpoints)".dimmed().to_string(),
+            "○ Direct Official Endpoints".dimmed().to_string(),
+        ));
+    }
+
+    // 12. Homebrew Environment & Mirrors
+    let brew_vars = ["HOMEBREW_BOTTLE_DOMAIN", "HOMEBREW_API_DOMAIN", "HOMEBREW_BREW_GIT_REMOTE"];
+    for var in brew_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                items.push(DiagItem::new(
+                    "Homebrew",
+                    var,
+                    trim.to_string(),
+                    "● Configured Mirror".cyan().to_string(),
+                ));
+            }
+        }
     }
 
     // 9. DNS Poisoning & Resolution Check
@@ -708,10 +1038,13 @@ fn get_git_config(key: &str) -> Option<String> {
 
 pub async fn verify_proxy_url(val: &str) -> bool {
     if let Ok(url) = url::Url::parse(val) {
-        if let Some(port) = url.port() {
-            let host = url.host_str().unwrap_or("127.0.0.1");
-            return scanner::check_host_port(host, port).await;
-        }
+        let port = url.port().unwrap_or(match url.scheme() {
+            "https" => 443,
+            "http" => 80,
+            _ => 80,
+        });
+        let host = url.host_str().unwrap_or("127.0.0.1");
+        return scanner::check_host_port(host, port).await;
     }
     if let Some(idx) = val.rfind(':') {
         let host_part = &val[..idx];
@@ -865,5 +1198,51 @@ trusted-host = pypi.org
         assert!(check_socks5_dns_leak("SOCKS5://127.0.0.1:1080"));
         assert!(!check_socks5_dns_leak("socks5h://127.0.0.1:1080"));
         assert!(!check_socks5_dns_leak("http://127.0.0.1:7890"));
+    }
+
+    #[test]
+    fn test_parse_gradle_properties_proxy() {
+        let raw = r#"
+org.gradle.jvmargs=-Xmx2048m
+systemProp.http.proxyHost=127.0.0.1
+systemProp.http.proxyPort=7890
+systemProp.https.proxyHost=127.0.0.1
+systemProp.https.proxyPort=7890
+"#;
+        let cfg = parse_gradle_properties_proxy(raw).unwrap();
+        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.port, 7890);
+
+        let empty = "org.gradle.jvmargs=-Xmx2048m\n";
+        assert_eq!(parse_gradle_properties_proxy(empty), None);
+    }
+
+    #[test]
+    fn test_parse_wgetrc_proxy() {
+        let raw = r#"
+# Wget configuration
+http_proxy = http://127.0.0.1:7890/
+use_proxy = on
+"#;
+        assert_eq!(parse_wgetrc_proxy(raw), Some("http://127.0.0.1:7890/".to_string()));
+
+        let empty = "verbose = off\n";
+        assert_eq!(parse_wgetrc_proxy(empty), None);
+    }
+
+    #[test]
+    fn test_parse_ssh_config_proxy() {
+        let raw = r#"
+Host github.com
+    User git
+    ProxyCommand nc -X 5 -x 127.0.0.1:7890 %h %p
+
+Host *
+    ServerAliveInterval 60
+"#;
+        let list = parse_ssh_config_proxy(raw);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].host_pattern, "github.com");
+        assert_eq!(list[0].target, Some("127.0.0.1:7890".to_string()));
     }
 }

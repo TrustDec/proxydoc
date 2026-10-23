@@ -66,6 +66,8 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Anthropic API", "https://api.anthropic.com/v1/messages"),
     ("DeepSeek API", "https://api.deepseek.com/models"),
     ("HuggingFace", "https://huggingface.co/api/status"),
+    ("crates.io", "https://crates.io/api/v1/summary"),
+    ("npm Registry", "https://registry.npmjs.org"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -256,6 +258,7 @@ pub async fn run(
     }
 
     let mut client_builder = reqwest::Client::builder()
+        .user_agent("proxydoc/0.5.0 (https://github.com/TrustDec/proxydoc)")
         .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false);
 
@@ -352,12 +355,14 @@ async fn run_compare(
     }
 
     let direct_client = reqwest::Client::builder()
+        .user_agent("proxydoc/0.5.0 (https://github.com/TrustDec/proxydoc)")
         .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false)
         .no_proxy()
         .build()?;
 
     let mut proxy_client_builder = reqwest::Client::builder()
+        .user_agent("proxydoc/0.5.0 (https://github.com/TrustDec/proxydoc)")
         .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false);
 
@@ -502,6 +507,8 @@ mod tests {
         let standard = build_target_list(None);
         assert!(standard.iter().any(|(name, _)| *name == "DeepSeek API"));
         assert!(standard.iter().any(|(name, _)| *name == "OpenAI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "crates.io"));
+        assert!(standard.iter().any(|(name, _)| *name == "npm Registry"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

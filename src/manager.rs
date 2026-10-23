@@ -172,12 +172,145 @@ pub fn unset_docker_proxy() -> Result<bool> {
     Ok(removed)
 }
 
+pub fn extract_host_port(url_str: &str) -> (String, u16) {
+    if let Ok(url) = url::Url::parse(url_str) {
+        let host = url.host_str().unwrap_or("127.0.0.1").to_string();
+        let port = url.port().unwrap_or(7890);
+        return (host, port);
+    }
+    if let Some((h, p)) = url_str.split_once(':') {
+        let host = if h.is_empty() || h == "localhost" {
+            "127.0.0.1".to_string()
+        } else {
+            h.trim_start_matches("http://").trim_start_matches("https://").to_string()
+        };
+        let port = p.parse().unwrap_or(7890);
+        return (host, port);
+    }
+    ("127.0.0.1".to_string(), 7890)
+}
+
+pub fn apply_gradle_proxy_properties(content: &str, host: &str, port: u16) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut updated_keys = std::collections::HashSet::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with('!') {
+            lines.push(line.to_string());
+            continue;
+        }
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim();
+            match key {
+                "systemProp.http.proxyHost" => {
+                    lines.push(format!("systemProp.http.proxyHost={}", host));
+                    updated_keys.insert("http.proxyHost");
+                }
+                "systemProp.http.proxyPort" => {
+                    lines.push(format!("systemProp.http.proxyPort={}", port));
+                    updated_keys.insert("http.proxyPort");
+                }
+                "systemProp.https.proxyHost" => {
+                    lines.push(format!("systemProp.https.proxyHost={}", host));
+                    updated_keys.insert("https.proxyHost");
+                }
+                "systemProp.https.proxyPort" => {
+                    lines.push(format!("systemProp.https.proxyPort={}", port));
+                    updated_keys.insert("https.proxyPort");
+                }
+                "systemProp.http.nonProxyHosts" => {
+                    lines.push("systemProp.http.nonProxyHosts=localhost|127.0.0.1|*.local".to_string());
+                    updated_keys.insert("http.nonProxyHosts");
+                }
+                _ => lines.push(line.to_string()),
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !updated_keys.contains("http.proxyHost") {
+        lines.push(format!("systemProp.http.proxyHost={}", host));
+    }
+    if !updated_keys.contains("http.proxyPort") {
+        lines.push(format!("systemProp.http.proxyPort={}", port));
+    }
+    if !updated_keys.contains("https.proxyHost") {
+        lines.push(format!("systemProp.https.proxyHost={}", host));
+    }
+    if !updated_keys.contains("https.proxyPort") {
+        lines.push(format!("systemProp.https.proxyPort={}", port));
+    }
+    if !updated_keys.contains("http.nonProxyHosts") {
+        lines.push("systemProp.http.nonProxyHosts=localhost|127.0.0.1|*.local".to_string());
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_gradle_proxy_properties(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("systemProp.http.proxyHost")
+            || trim.starts_with("systemProp.http.proxyPort")
+            || trim.starts_with("systemProp.https.proxyHost")
+            || trim.starts_with("systemProp.https.proxyPort")
+            || trim.starts_with("systemProp.http.nonProxyHosts")
+        {
+            removed = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_gradle_proxy(proxy_url: &str) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let gradle_dir = home.join(".gradle");
+    std::fs::create_dir_all(&gradle_dir)?;
+    let prop_path = gradle_dir.join("gradle.properties");
+    let content = if prop_path.exists() {
+        std::fs::read_to_string(&prop_path)?
+    } else {
+        String::new()
+    };
+
+    let (host, port) = extract_host_port(proxy_url);
+    let new_content = apply_gradle_proxy_properties(&content, &host, port);
+    std::fs::write(&prop_path, new_content)?;
+    Ok(())
+}
+
+pub fn unset_gradle_proxy() -> Result<bool> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Ok(false),
+    };
+    let prop_path = home.join(".gradle").join("gradle.properties");
+    if !prop_path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&prop_path)?;
+    let (new_content, removed) = remove_gradle_proxy_properties(&content);
+    if removed {
+        std::fs::write(&prop_path, new_content)?;
+    }
+    Ok(removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
     npm: bool,
     pip: bool,
     docker: bool,
+    gradle: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -185,6 +318,7 @@ pub async fn turn_on(
     let set_npm = npm || all;
     let set_pip = pip || all;
     let set_docker = docker || all;
+    let set_gradle = gradle || all;
 
     // Resolve target proxy address
     let proxy_url = if target == "auto" {
@@ -242,6 +376,13 @@ pub async fn turn_on(
         }
     }
 
+    if set_gradle {
+        match set_gradle_proxy(&proxy_url) {
+            Ok(_) => eprintln!("{}", format!("✔ Gradle global proxy (~/.gradle/gradle.properties) set to {}", proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update Gradle config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
     eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
 
@@ -253,6 +394,7 @@ pub fn turn_off(
     npm: bool,
     pip: bool,
     docker: bool,
+    gradle: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -260,6 +402,7 @@ pub fn turn_off(
     let unset_npm = npm || all;
     let unset_pip = pip || all;
     let unset_docker = docker || all;
+    let unset_gradle = gradle || all;
 
     let target_shell = detect_shell(shell);
     for line in generate_shell_unset(target_shell) {
@@ -288,6 +431,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Docker client proxy unset from ~/.docker/config.json".green()),
             Ok(false) => eprintln!("{}", "○ Docker client proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update Docker config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_gradle {
+        match unset_gradle_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Gradle global proxy unset from ~/.gradle/gradle.properties".green()),
+            Ok(false) => eprintln!("{}", "○ Gradle global proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update Gradle config: {}", "▲".yellow(), e),
         }
     }
 
@@ -423,5 +574,29 @@ mod tests {
         assert!(removed);
         assert!(root.pointer("/proxies/default").is_none());
         assert!(root.get("auths").is_some());
+    }
+
+    #[test]
+    fn test_extract_host_port() {
+        assert_eq!(extract_host_port("http://127.0.0.1:7890"), ("127.0.0.1".to_string(), 7890));
+        assert_eq!(extract_host_port("127.0.0.1:1082"), ("127.0.0.1".to_string(), 1082));
+        assert_eq!(extract_host_port("7897"), ("127.0.0.1".to_string(), 7890));
+    }
+
+    #[test]
+    fn test_apply_and_remove_gradle_proxy_properties() {
+        let initial = "org.gradle.jvmargs=-Xmx2048m\n";
+        let with_proxy = apply_gradle_proxy_properties(initial, "127.0.0.1", 7890);
+        assert!(with_proxy.contains("systemProp.http.proxyHost=127.0.0.1"));
+        assert!(with_proxy.contains("systemProp.http.proxyPort=7890"));
+        assert!(with_proxy.contains("systemProp.https.proxyHost=127.0.0.1"));
+        assert!(with_proxy.contains("systemProp.https.proxyPort=7890"));
+        assert!(with_proxy.contains("org.gradle.jvmargs=-Xmx2048m"));
+
+        let (cleaned, removed) = remove_gradle_proxy_properties(&with_proxy);
+        assert!(removed);
+        assert!(!cleaned.contains("systemProp.http.proxyHost"));
+        assert!(!cleaned.contains("systemProp.https.proxyPort"));
+        assert!(cleaned.contains("org.gradle.jvmargs=-Xmx2048m"));
     }
 }

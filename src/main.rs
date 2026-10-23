@@ -77,7 +77,10 @@ enum Commands {
         /// Also configure Docker client proxy (~/.docker/config.json)
         #[arg(long)]
         docker: bool,
-        /// Also configure git, npm, pip, and docker proxy
+        /// Also configure Gradle global proxy (~/.gradle/gradle.properties)
+        #[arg(long)]
+        gradle: bool,
+        /// Also configure git, npm, pip, docker, and gradle proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -98,7 +101,10 @@ enum Commands {
         /// Also unset Docker client proxy (~/.docker/config.json)
         #[arg(long)]
         docker: bool,
-        /// Also unset git, npm, pip, and docker proxy
+        /// Also unset Gradle global proxy (~/.gradle/gradle.properties)
+        #[arg(long)]
+        gradle: bool,
+        /// Also unset git, npm, pip, docker, and gradle proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -133,11 +139,11 @@ async fn main() -> Result<()> {
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, npm, pip, docker, all, shell }) => {
-            manager::turn_on(&target, git, npm, pip, docker, all, shell.as_deref()).await?;
+        Some(Commands::On { target, git, npm, pip, docker, gradle, all, shell }) => {
+            manager::turn_on(&target, git, npm, pip, docker, gradle, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, npm, pip, docker, all, shell }) => {
-            manager::turn_off(git, npm, pip, docker, all, shell.as_deref())?;
+        Some(Commands::Off { git, npm, pip, docker, gradle, all, shell }) => {
+            manager::turn_off(git, npm, pip, docker, gradle, all, shell.as_deref())?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());
@@ -281,6 +287,29 @@ mod tests {
         match cli.command {
             Some(Commands::Off { all, .. }) => {
                 assert!(all);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_gradle() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "7890", "--gradle"]).unwrap();
+        match cli.command {
+            Some(Commands::On { target, gradle, .. }) => {
+                assert_eq!(target, "7890");
+                assert!(gradle);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_gradle() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--gradle"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { gradle, .. }) => {
+                assert!(gradle);
             }
             _ => panic!("Expected Off command"),
         }
