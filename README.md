@@ -31,14 +31,20 @@ Most developers suffer from network problems not because of complex networking, 
 - 🩺 **Deep Diagnostics (`proxydoc doctor`)**:
   - Compares macOS GUI System Proxy (`scutil --proxy`) vs Terminal Shell environment.
   - Verifies whether configured proxy ports are actually ALIVE or DEAD.
+  - Inspects Git global proxy, NPM proxy, and Cargo HTTP proxy.
   - Detects DNS poisoning on `github.com`, `raw.githubusercontent.com`, `api.openai.com`, and `api.anthropic.com`.
+  - Supports `--json` for machine-readable CI/CD and IDE diagnostics.
 - 🩹 **1-Click Auto-Repair (`proxydoc fix`)**:
-  - Clears dead Git global proxies.
+  - Clears dead Git and NPM global proxies.
+  - Detects and warns about broken Cargo proxies.
   - Generates sync injection from system proxy to terminal.
   - Flushes local DNS cache.
-- ⚡ **AI & Dev Latency Checker (`proxydoc test`)**: Concurrently tests real latency to OpenAI, Anthropic, GitHub, Google, and HuggingFace.
+- ⚡ **AI & Dev Latency Checker (`proxydoc test`)**:
+  - Fully concurrent testing to OpenAI, Anthropic, GitHub, Google, Cloudflare, and HuggingFace.
+  - **Outbound Egress IP & Location Inspector**: instantly verifies your actual exit IP, country, and Cloudflare data center.
+  - Supports `--json` for automation.
 - 🔍 **Active Client Scanner (`proxydoc scan`)**: Detects Clash, Clash Verge, Shadowrocket, Sing-box, V2Ray, Surge, and CPA.
-- 🟢 **Instant Shell Switcher (`proxydoc on` / `proxydoc off`)**: Toggle proxies in current shell session cleanly.
+- 🟢 **Instant Shell Switcher (`proxydoc on` / `proxydoc off`)**: Toggle proxies in current shell session cleanly with optional `--git`, `--npm`, or `--all`.
 
 ---
 

@@ -31,14 +31,20 @@
 - 🩺 **深度环境与根因体检 (`proxydoc doctor`)**：
   - 自动对比 macOS 系统代理（`scutil --proxy`）与当前终端 Shell 状态，揪出“浏览器能上、终端上不了”的脱节问题；
   - 深度校验已配置端口是否真实存活，杜绝幽灵死代理；
-  - 检测 `github.com`、`raw.githubusercontent.com`、`api.openai.com`、`api.anthropic.com` 的本地 DNS 解析完整性。
+  - 全面体检 Git 全局代理、NPM 代理（`proxy`/`https-proxy`）以及 Cargo 配置（`[http] proxy`）；
+  - 检测 `github.com`、`raw.githubusercontent.com`、`api.openai.com`、`api.anthropic.com` 的本地 DNS 解析完整性；
+  - 支持 `--json` 格式输出，方便集成 CI/CD、脚本与 IDE。
 - 🩹 **一键自动修复 (`proxydoc fix`)**：
-  - 自动清理 Git 残留的失效死代理；
+  - 自动清理 Git 和 NPM 残留的失效死代理；
+  - 探测并预警 Cargo 配置中的失效代理；
   - 将系统有效代理一键生成同步注入到终端；
   - 自动刷新本地 DNS 解析缓存。
-- ⚡ **AI 接口与外网延迟测速 (`proxydoc test`)**：多线程秒级测试对 OpenAI、Anthropic、GitHub、Google 等服务的真实延迟。
-- 🔍 **本地代理客户端扫描 (`proxydoc scan`)**：智能探测 Shadowrocket、Clash、Sing-box、Surge 等端口。
-- 🟢 **极简切换 (`proxydoc on` / `proxydoc off`)**：一秒开闭终端代理。
+- ⚡ **AI 接口并发测速与真实出口探测 (`proxydoc test`)**：
+  - 全异步并发秒级测试对 OpenAI、Anthropic、GitHub、Google、Cloudflare、HuggingFace 的真实延迟；
+  - **出口 IP 与位置探测**：自动提取流量真实公网出口 IP、归属国家（如 US/SG/JP）与 Cloudflare 边缘节点，一眼看清节点是否生效；
+  - 支持 `--json` 格式导出。
+- 🔍 **本地代理客户端扫描 (`proxydoc scan`)**：智能探测 Shadowrocket、Clash、Sing-box、Surge、CPA 等端口（支持 `--json`）。
+- 🟢 **极简切换 (`proxydoc on` / `proxydoc off`)**：一秒开闭终端代理，支持 `--git`、`--npm` 或 `-a, --all` 一键联动包管理器。
 
 ---
 

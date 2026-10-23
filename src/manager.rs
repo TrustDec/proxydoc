@@ -5,7 +5,10 @@ use std::process::Command;
 use crate::doctor::get_macos_system_proxy;
 use crate::scanner;
 
-pub async fn turn_on(target: &str, git: bool, npm: bool) -> Result<()> {
+pub async fn turn_on(target: &str, git: bool, npm: bool, all: bool) -> Result<()> {
+    let set_git = git || all;
+    let set_npm = npm || all;
+
     // Resolve target proxy address
     let proxy_url = if target == "auto" {
         // 1. Try system proxy from scutil
@@ -40,13 +43,13 @@ pub async fn turn_on(target: &str, git: bool, npm: bool) -> Result<()> {
     println!("export HTTPS_PROXY=\"{}\"", proxy_url);
     println!("export ALL_PROXY=\"{}\"", proxy_url);
 
-    if git {
+    if set_git {
         let _ = Command::new("git").args(["config", "--global", "http.proxy", &proxy_url]).status();
         let _ = Command::new("git").args(["config", "--global", "https.proxy", &proxy_url]).status();
         eprintln!("{}", format!("✔ Git global proxy set to {}", proxy_url).green());
     }
 
-    if npm {
+    if set_npm {
         let _ = Command::new("npm").args(["config", "set", "proxy", &proxy_url]).status();
         let _ = Command::new("npm").args(["config", "set", "https-proxy", &proxy_url]).status();
         eprintln!("{}", format!("✔ NPM proxy set to {}", proxy_url).green());
@@ -58,7 +61,10 @@ pub async fn turn_on(target: &str, git: bool, npm: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn turn_off(git: bool, npm: bool) -> Result<()> {
+pub fn turn_off(git: bool, npm: bool, all: bool) -> Result<()> {
+    let unset_git = git || all;
+    let unset_npm = npm || all;
+
     println!("unset http_proxy");
     println!("unset https_proxy");
     println!("unset all_proxy");
@@ -66,13 +72,13 @@ pub fn turn_off(git: bool, npm: bool) -> Result<()> {
     println!("unset HTTPS_PROXY");
     println!("unset ALL_PROXY");
 
-    if git {
+    if unset_git {
         let _ = Command::new("git").args(["config", "--global", "--unset", "http.proxy"]).status();
         let _ = Command::new("git").args(["config", "--global", "--unset", "https.proxy"]).status();
         eprintln!("{}", "✔ Git global proxy unset".green());
     }
 
-    if npm {
+    if unset_npm {
         let _ = Command::new("npm").args(["config", "delete", "proxy"]).status();
         let _ = Command::new("npm").args(["config", "delete", "https-proxy"]).status();
         eprintln!("{}", "✔ NPM proxy unset".green());
