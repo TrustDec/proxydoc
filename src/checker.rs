@@ -64,6 +64,7 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Cloudflare", "https://1.1.1.1/cdn-cgi/trace"),
     ("OpenAI API", "https://api.openai.com/v1/models"),
     ("Anthropic API", "https://api.anthropic.com/v1/messages"),
+    ("DeepSeek API", "https://api.deepseek.com/models"),
     ("HuggingFace", "https://huggingface.co/api/status"),
 ];
 
@@ -93,6 +94,14 @@ pub fn parse_cf_trace(body: &str) -> EgressInfo {
     }
 }
 
+pub fn build_target_list<'a>(custom_target: Option<&'a str>) -> Vec<(&'a str, &'a str)> {
+    let mut targets: Vec<(&'a str, &'a str)> = TEST_TARGETS.to_vec();
+    if let Some(t) = custom_target {
+        targets.push(("Custom Target", t));
+    }
+    targets
+}
+
 #[derive(Debug, Clone)]
 pub struct RawTargetResult {
     pub name: String,
@@ -104,27 +113,33 @@ pub struct RawTargetResult {
     pub trace_body: Option<String>,
 }
 
-pub async fn test_endpoints(client: &reqwest::Client) -> (Vec<RawTargetResult>, Option<EgressInfo>) {
+pub async fn test_endpoints(
+    client: &reqwest::Client,
+    targets: &[(&str, &str)],
+    timeout_secs: u64,
+) -> (Vec<RawTargetResult>, Option<EgressInfo>) {
     let mut join_set = tokio::task::JoinSet::new();
 
-    for (idx, &(name, url)) in TEST_TARGETS.iter().enumerate() {
+    for (idx, &(name, url)) in targets.iter().enumerate() {
         let client_clone = client.clone();
+        let name_owned = name.to_string();
+        let url_owned = url.to_string();
         join_set.spawn(async move {
             let start = Instant::now();
-            let res = client_clone.get(url).send().await;
+            let res = client_clone.get(&url_owned).send().await;
             let elapsed = start.elapsed();
 
             let mut trace_body: Option<String> = None;
             let (status, latency_ms, latency_str, success) = match res {
                 Ok(resp) => {
                     let code = resp.status().as_u16();
-                    if url.contains("cdn-cgi/trace") {
+                    if url_owned.contains("cdn-cgi/trace") {
                         if let Ok(text) = resp.text().await {
                             trace_body = Some(text);
                         }
                     }
 
-                    // 401/403/405 for API endpoints like OpenAI/Anthropic without key means connection succeeded!
+                    // 401/403/405 for API endpoints like OpenAI/Anthropic/DeepSeek without key means connection succeeded!
                     let is_ok = code < 400 || code == 401 || code == 403 || code == 405;
                     let code_str = if is_ok {
                         format!("● OK ({})", code).green().bold().to_string()
@@ -136,7 +151,7 @@ pub async fn test_endpoints(client: &reqwest::Client) -> (Vec<RawTargetResult>, 
                 }
                 Err(e) => {
                     let err_desc = if e.is_timeout() {
-                        "Timeout (5s)".to_string()
+                        format!("Timeout ({}s)", timeout_secs)
                     } else if e.is_connect() {
                         "Connect Failed".to_string()
                     } else {
@@ -149,8 +164,8 @@ pub async fn test_endpoints(client: &reqwest::Client) -> (Vec<RawTargetResult>, 
             (
                 idx,
                 RawTargetResult {
-                    name: name.to_string(),
-                    url: url.to_string(),
+                    name: name_owned,
+                    url: url_owned,
                     status,
                     latency_ms,
                     latency_str,
@@ -161,7 +176,7 @@ pub async fn test_endpoints(client: &reqwest::Client) -> (Vec<RawTargetResult>, 
         });
     }
 
-    let mut ordered: Vec<Option<RawTargetResult>> = vec![None; TEST_TARGETS.len()];
+    let mut ordered: Vec<Option<RawTargetResult>> = vec![None; targets.len()];
     while let Some(res) = join_set.join_next().await {
         if let Ok((idx, raw)) = res {
             ordered[idx] = Some(raw);
@@ -203,9 +218,16 @@ pub fn compute_verdict(d_ok: bool, d_ms: Option<u128>, p_ok: bool, p_ms: Option<
     }
 }
 
-pub async fn run(custom_proxy: Option<String>, direct: bool, compare: bool, json_output: bool) -> Result<()> {
+pub async fn run(
+    custom_proxy: Option<String>,
+    direct: bool,
+    compare: bool,
+    json_output: bool,
+    custom_target: Option<String>,
+    timeout_secs: u64,
+) -> Result<()> {
     if compare {
-        return run_compare(custom_proxy, json_output).await;
+        return run_compare(custom_proxy, json_output, custom_target, timeout_secs).await;
     }
 
     let active_proxy_str = if direct {
@@ -234,7 +256,7 @@ pub async fn run(custom_proxy: Option<String>, direct: bool, compare: bool, json
     }
 
     let mut client_builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false);
 
     if direct {
@@ -261,7 +283,8 @@ pub async fn run(custom_proxy: Option<String>, direct: bool, compare: bool, json
         None
     };
 
-    let (raw_results, egress) = test_endpoints(&client).await;
+    let targets = build_target_list(custom_target.as_deref());
+    let (raw_results, egress) = test_endpoints(&client, &targets, timeout_secs).await;
 
     if let Some(bar) = pb {
         bar.finish_and_clear();
@@ -306,7 +329,12 @@ pub async fn run(custom_proxy: Option<String>, direct: bool, compare: bool, json
     Ok(())
 }
 
-async fn run_compare(custom_proxy: Option<String>, json_output: bool) -> Result<()> {
+async fn run_compare(
+    custom_proxy: Option<String>,
+    json_output: bool,
+    custom_target: Option<String>,
+    timeout_secs: u64,
+) -> Result<()> {
     let proxy_target = match custom_proxy {
         Some(p) => p,
         None => match std::env::var("https_proxy").or_else(|_| std::env::var("HTTPS_PROXY")) {
@@ -324,13 +352,13 @@ async fn run_compare(custom_proxy: Option<String>, json_output: bool) -> Result<
     }
 
     let direct_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false)
         .no_proxy()
         .build()?;
 
     let mut proxy_client_builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false);
 
     if let Ok(proxy) = reqwest::Proxy::all(&proxy_target) {
@@ -352,9 +380,13 @@ async fn run_compare(custom_proxy: Option<String>, json_output: bool) -> Result<
         None
     };
 
+    let targets = build_target_list(custom_target.as_deref());
     // Run both test sets concurrently
     let ((direct_results, direct_egress), (proxy_results, proxy_egress)) =
-        tokio::join!(test_endpoints(&direct_client), test_endpoints(&proxy_client));
+        tokio::join!(
+            test_endpoints(&direct_client, &targets, timeout_secs),
+            test_endpoints(&proxy_client, &targets, timeout_secs)
+        );
 
     if let Some(bar) = pb {
         bar.finish_and_clear();
@@ -463,5 +495,16 @@ mod tests {
 
         let v2 = compute_verdict(true, Some(50), true, Some(150));
         assert!(v2.contains("Direct 3.0x faster"));
+    }
+
+    #[test]
+    fn test_build_target_list() {
+        let standard = build_target_list(None);
+        assert!(standard.iter().any(|(name, _)| *name == "DeepSeek API"));
+        assert!(standard.iter().any(|(name, _)| *name == "OpenAI API"));
+        assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
+
+        let with_custom = build_target_list(Some("https://api.example.com"));
+        assert!(with_custom.iter().any(|(name, url)| *name == "Custom Target" && *url == "https://api.example.com"));
     }
 }

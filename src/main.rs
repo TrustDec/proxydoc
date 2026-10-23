@@ -22,7 +22,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// 🩺 Deep diagnostics (System vs Terminal sync, DNS poisoning, Git/NPM/Cargo/Pip/cURL dead ports)
+    /// 🩺 Deep diagnostics (System vs Terminal sync, DNS poisoning, Git/NPM/Cargo/Pip/cURL/Docker dead ports)
     Doctor {
         /// Show verbose diagnostic details
         #[arg(short, long)]
@@ -33,7 +33,7 @@ enum Commands {
     },
     /// 🩹 One-click automatic repair for detected network and proxy issues
     Fix,
-    /// ⚡ Concurrently test latency to GitHub, OpenAI, Anthropic, Google, HuggingFace & inspect Egress IP
+    /// ⚡ Concurrently test latency to GitHub, OpenAI, Anthropic, DeepSeek, Google & inspect Egress IP
     Test {
         /// Custom proxy URL to test (e.g. http://127.0.0.1:7890 or socks5://127.0.0.1:1082)
         #[arg(short, long)]
@@ -47,6 +47,12 @@ enum Commands {
         /// Output test results and egress info in JSON format
         #[arg(long)]
         json: bool,
+        /// Additional custom endpoint URL to benchmark (e.g. https://api.deepseek.com or internal gateway)
+        #[arg(short, long)]
+        target: Option<String>,
+        /// Timeout in seconds per endpoint request (default: 5)
+        #[arg(long, default_value_t = 5)]
+        timeout: u64,
     },
     /// 🔍 Scan active local proxy daemon ports (Clash, Shadowrocket, Sing-box, V2Ray, CPA)
     Scan {
@@ -68,9 +74,15 @@ enum Commands {
         /// Also configure pip global proxy
         #[arg(long)]
         pip: bool,
-        /// Also configure git, npm, and pip proxy
+        /// Also configure Docker client proxy (~/.docker/config.json)
+        #[arg(long)]
+        docker: bool,
+        /// Also configure git, npm, pip, and docker proxy
         #[arg(short, long)]
         all: bool,
+        /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
+        #[arg(short, long)]
+        shell: Option<String>,
     },
     /// 🔴 Output shell unset commands to turn OFF proxy for current session
     Off {
@@ -83,12 +95,22 @@ enum Commands {
         /// Also unset pip global proxy
         #[arg(long)]
         pip: bool,
-        /// Also unset git, npm, and pip proxy
+        /// Also unset Docker client proxy (~/.docker/config.json)
+        #[arg(long)]
+        docker: bool,
+        /// Also unset git, npm, pip, and docker proxy
         #[arg(short, long)]
         all: bool,
+        /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
+        #[arg(short, long)]
+        shell: Option<String>,
     },
     /// 🐚 Print shell integration helper script for eval: `eval "$(proxydoc init)"`
-    Init,
+    Init {
+        /// Target shell syntax: bash, zsh, fish, pwsh (auto-detected if omitted)
+        #[arg(short, long)]
+        shell: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -105,20 +127,20 @@ async fn main() -> Result<()> {
         Some(Commands::Fix) => {
             fixer::run().await?;
         }
-        Some(Commands::Test { proxy, direct, compare, json }) => {
-            checker::run(proxy, direct, compare, json).await?;
+        Some(Commands::Test { proxy, direct, compare, json, target, timeout }) => {
+            checker::run(proxy, direct, compare, json, target, timeout).await?;
         }
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, npm, pip, all }) => {
-            manager::turn_on(&target, git, npm, pip, all).await?;
+        Some(Commands::On { target, git, npm, pip, docker, all, shell }) => {
+            manager::turn_on(&target, git, npm, pip, docker, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, npm, pip, all }) => {
-            manager::turn_off(git, npm, pip, all)?;
+        Some(Commands::Off { git, npm, pip, docker, all, shell }) => {
+            manager::turn_off(git, npm, pip, docker, all, shell.as_deref())?;
         }
-        Some(Commands::Init) => {
-            manager::print_init_script();
+        Some(Commands::Init { shell }) => {
+            manager::print_init_script(shell.as_deref());
         }
     }
 
@@ -145,7 +167,7 @@ mod tests {
     fn test_cli_parse_test_options() {
         let cli = Cli::try_parse_from(["proxydoc", "test", "--proxy", "http://127.0.0.1:7890", "--json"]).unwrap();
         match cli.command {
-            Some(Commands::Test { proxy, direct, compare, json }) => {
+            Some(Commands::Test { proxy, direct, compare, json, .. }) => {
                 assert_eq!(proxy, Some("http://127.0.0.1:7890".to_string()));
                 assert!(!direct);
                 assert!(!compare);
@@ -200,6 +222,56 @@ mod tests {
                 assert!(pip);
             }
             _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_test_target_and_timeout() {
+        let cli = Cli::try_parse_from([
+            "proxydoc", "test", "-t", "https://api.deepseek.com/models", "--timeout", "10",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Test { target, timeout, .. }) => {
+                assert_eq!(target, Some("https://api.deepseek.com/models".to_string()));
+                assert_eq!(timeout, 10);
+            }
+            _ => panic!("Expected Test command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_docker_and_shell() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "7897", "--docker", "--shell", "fish"]).unwrap();
+        match cli.command {
+            Some(Commands::On { target, docker, shell, .. }) => {
+                assert_eq!(target, "7897");
+                assert!(docker);
+                assert_eq!(shell, Some("fish".to_string()));
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_docker() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--docker"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { docker, .. }) => {
+                assert!(docker);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_init_shell() {
+        let cli = Cli::try_parse_from(["proxydoc", "init", "--shell", "pwsh"]).unwrap();
+        match cli.command {
+            Some(Commands::Init { shell }) => {
+                assert_eq!(shell, Some("pwsh".to_string()));
+            }
+            _ => panic!("Expected Init command"),
         }
     }
 

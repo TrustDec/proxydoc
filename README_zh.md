@@ -31,23 +31,28 @@
 - 🩺 **深度环境与根因体检 (`proxydoc doctor`)**：
   - 自动对比 macOS 系统代理（`scutil --proxy`）与当前终端 Shell 状态，揪出“浏览器能上、终端上不了”的脱节问题；
   - 深度校验已配置端口是否真实存活，杜绝幽灵死代理；
-  - 全面体检 Git、NPM、Cargo（`[http] proxy`）、Pip（`global.proxy`）及 cURL（`~/.curlrc`）代理配置；
+  - 全面体检 Git、NPM、Cargo（`[http] proxy`）、Pip（`global.proxy`）、cURL（`~/.curlrc`）及 **Docker**（`~/.docker/config.json`）代理配置；
+  - 检测 **SOCKS5 vs SOCKS5h DNS 泄漏风险**（`socks5h://` 走远端代理隧道解析 DNS，避免本地 DNS 污染与解析失败）；
   - 自动校验 `NO_PROXY` 本地回环绕行白名单，杜绝开启代理后本地开发服务（Vite、Next.js、Docker）卡死；
-  - 检测 `github.com`、`raw.githubusercontent.com`、`api.openai.com`、`api.anthropic.com` 的本地 DNS 解析完整性；
+  - 检测 `github.com`、`raw.githubusercontent.com`、`api.openai.com`、`api.anthropic.com`、`api.deepseek.com` 的本地 DNS 解析完整性；
   - 支持 `--json` 格式输出，方便集成 CI/CD、脚本与 IDE。
 - 🩹 **一键自动修复 (`proxydoc fix`)**：
-  - 自动清理 Git、NPM 和 Pip 残留的失效死代理；
+  - 自动清理 Git、NPM、Pip 和 Docker（`~/.docker/config.json`）残留的失效死代理；
   - 探测并预警 Cargo 和 cURL 配置中的失效代理；
   - 将系统有效代理一键生成同步注入到终端，并自动配置标准 `NO_PROXY` 绕行；
   - 自动刷新本地 DNS 解析缓存。
 - ⚡ **AI 接口并发测速与双向对照 (`proxydoc test`)**：
-  - 全异步并发秒级测试对 OpenAI、Anthropic、GitHub、Google、Cloudflare、HuggingFace 的真实延迟；
+  - 全异步并发秒级测试对 DeepSeek、OpenAI、Anthropic、GitHub、Google、Cloudflare、HuggingFace 的真实延迟；
   - **直连与代理双向对照 (`proxydoc test --compare` / `-c`)**：同屏并发对比 Direct 与 Proxy 的延迟差与联通状态，直观看出代理加速倍率；
+  - **自定义接口测速 (`proxydoc test -t <URL>`)**：一键测试自定义 API、自建网关或私有服务在代理环境下的连通与延迟；
+  - **自定义超时时间 (`--timeout <SECS>`)**：弱网或卫星网络下灵活配置超时阈值；
   - **强制直连测试 (`proxydoc test --direct` / `-d`)**：忽略当前环境代理，测试裸连状态；
   - **出口 IP 与位置探测**：自动提取流量真实公网出口 IP、归属国家（如 US/SG/JP）与 Cloudflare 边缘节点，一眼看清节点是否生效；
   - 支持 `--json` 格式导出。
 - 🔍 **本地代理客户端扫描 (`proxydoc scan`)**：智能探测 Shadowrocket、Clash、Sing-box、Surge、CPA 等端口（支持 `--json`）。
-- 🟢 **极简切换 (`proxydoc on` / `proxydoc off`)**：一秒开闭终端代理，支持 `--git`、`--npm`、`--pip` 或 `-a, --all` 一键联动包管理器并注入 `no_proxy`。
+- 🟢 **多 Shell 极简切换 (`proxydoc on` / `proxydoc off`)**：
+  - 支持 **Bash/Zsh**、**Fish** 与 **PowerShell** 专属语法导出（`--shell fish`、`--shell pwsh`）；
+  - 支持 `--git`、`--npm`、`--pip`、`--docker` 或 `-a, --all` 一键联动包管理器与容器并注入 `no_proxy`。
 
 ---
 
@@ -57,14 +62,26 @@
 # 1. 深度诊断
 proxydoc doctor
 
-# 2. 一键自动修复
+# 2. 一键自动修复死代理并同步系统配置
 proxydoc fix
 
-# 3. 实测 AI 与外网接口连通性
+# 3. 实测 AI 与外网接口连通性（DeepSeek、OpenAI、Anthropic 等）
 proxydoc test
 
 # 4. 直连与代理双向对照测速
 proxydoc test --compare
+
+# 5. 指定自定义接口测速与超时
+proxydoc test -t https://api.deepseek.com/models --timeout 8
+
+# 6. 一键联动终端与包管理器（Git, NPM, Pip, Docker）
+eval $(proxydoc on -a)
+
+# 7. 一键关闭终端与所有包管理器代理
+eval $(proxydoc off -a)
+
+# 8. Fish Shell 用户
+eval (proxydoc on --shell fish)
 ```
 
 ## 📦 安装方式

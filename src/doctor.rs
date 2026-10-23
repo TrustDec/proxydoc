@@ -268,6 +268,39 @@ pub fn get_pip_proxy() -> Option<String> {
     None
 }
 
+pub fn check_socks5_dns_leak(val: &str) -> bool {
+    let lower = val.to_ascii_lowercase();
+    lower.starts_with("socks5://") && !lower.starts_with("socks5h://")
+}
+
+pub fn parse_docker_config_proxy(content: &str) -> Option<String> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(http) = v.pointer("/proxies/default/httpProxy").and_then(|s| s.as_str()) {
+            let trim = http.trim();
+            if !trim.is_empty() {
+                return Some(trim.to_string());
+            }
+        }
+        if let Some(https) = v.pointer("/proxies/default/httpsProxy").and_then(|s| s.as_str()) {
+            let trim = https.trim();
+            if !trim.is_empty() {
+                return Some(trim.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn get_docker_proxy() -> Option<String> {
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".docker").join("config.json");
+        if let Ok(content) = std::fs::read_to_string(path) {
+            return parse_docker_config_proxy(&content);
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -324,18 +357,30 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         if let Ok(val) = std::env::var(var) {
             shell_proxy_set = true;
             let healthy = verify_proxy_url(&val).await;
+            let dns_leak = check_socks5_dns_leak(&val);
+
             if !healthy {
                 root_issues.push(format!("Terminal env `{}` points to an unreachable port `{}`", var, val));
+            } else if dns_leak {
+                root_issues.push(format!(
+                    "Terminal env `{}` uses socks5:// instead of socks5h://! DNS queries will resolve locally and may leak or be poisoned.",
+                    var
+                ));
             }
+
+            let status = if !healthy {
+                "▲ DEAD PROXY PORT (Causes curl error 7)".red().bold().to_string()
+            } else if dns_leak {
+                "▲ Reachable, but socks5:// leaks local DNS (use socks5h://)".yellow().to_string()
+            } else {
+                "● Reachable Port".green().to_string()
+            };
+
             items.push(DiagItem::new(
                 "Shell Env",
                 var,
                 val.clone(),
-                if healthy {
-                    "● Reachable Port".green().to_string()
-                } else {
-                    "▲ DEAD PROXY PORT (Causes curl error 7)".red().bold().to_string()
-                },
+                status,
             ));
         }
     }
@@ -522,12 +567,41 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 8. DNS Poisoning & Resolution Check
+    // 8. Docker Client Config (~/.docker/config.json)
+    if let Some(val) = get_docker_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!(
+                "Docker config (~/.docker/config.json) points to dead proxy `{}` (docker build & pull will fail)",
+                val
+            ));
+        }
+        items.push(DiagItem::new(
+            "Docker",
+            "~/.docker/config.json",
+            val,
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (docker build/pull will fail)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Docker",
+            "~/.docker/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 9. DNS Poisoning & Resolution Check
     let dns_targets = [
         ("github.com", 443),
         ("raw.githubusercontent.com", 443),
         ("api.openai.com", 443),
         ("api.anthropic.com", 443),
+        ("api.deepseek.com", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -567,7 +641,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         }
     }
 
-    // 9. Active Daemons
+    // 10. Active Daemons
     let active_client = scanner::find_first_active_proxy().await;
     match active_client {
         Some(p) => {
@@ -758,5 +832,38 @@ trusted-host = pypi.org
     async fn test_verify_proxy_url_invalid() {
         assert!(!verify_proxy_url("").await);
         assert!(!verify_proxy_url("not_a_proxy").await);
+    }
+
+    #[test]
+    fn test_parse_docker_config_proxy() {
+        let json_with_proxy = r#"{
+            "auths": {
+                "https://index.docker.io/v1/": {}
+            },
+            "proxies": {
+                "default": {
+                    "httpProxy": "http://127.0.0.1:7890",
+                    "httpsProxy": "http://127.0.0.1:7890",
+                    "noProxy": "localhost,127.0.0.1"
+                }
+            }
+        }"#;
+        assert_eq!(parse_docker_config_proxy(json_with_proxy), Some("http://127.0.0.1:7890".to_string()));
+
+        let json_without_proxy = r#"{
+            "auths": {}
+        }"#;
+        assert_eq!(parse_docker_config_proxy(json_without_proxy), None);
+
+        let invalid_json = "not json";
+        assert_eq!(parse_docker_config_proxy(invalid_json), None);
+    }
+
+    #[test]
+    fn test_check_socks5_dns_leak() {
+        assert!(check_socks5_dns_leak("socks5://127.0.0.1:1080"));
+        assert!(check_socks5_dns_leak("SOCKS5://127.0.0.1:1080"));
+        assert!(!check_socks5_dns_leak("socks5h://127.0.0.1:1080"));
+        assert!(!check_socks5_dns_leak("http://127.0.0.1:7890"));
     }
 }
