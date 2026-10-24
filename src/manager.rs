@@ -1573,6 +1573,192 @@ pub fn unset_wgetrc_proxy() -> Result<bool> {
     Ok(changed)
 }
 
+pub fn apply_gemrc_lines(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && (trim.starts_with("http_proxy:") || trim.starts_with(":http_proxy:")) {
+            if !replaced {
+                lines.push(format!("http_proxy: {}", proxy_url));
+                replaced = true;
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !replaced {
+        lines.push(format!("http_proxy: {}", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_gemrc_lines(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && (trim.starts_with("http_proxy:") || trim.starts_with(":http_proxy:")) {
+            changed = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    let res = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+    (res, changed)
+}
+
+pub fn set_gem_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let path = home.join(".gemrc");
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_gemrc_lines(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_gem_proxy() -> Result<bool> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let path = home.join(".gemrc");
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, changed) = remove_gemrc_lines(&content);
+    if changed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(changed)
+}
+
+pub fn apply_svn_servers_content(content: &str, host: &str, port: u16) -> String {
+    let mut lines = Vec::new();
+    let mut in_global = false;
+    let mut global_found = false;
+    let mut host_set = false;
+    let mut port_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = &trim[1..trim.len() - 1].trim();
+            if in_global {
+                if !host_set {
+                    lines.push(format!("http-proxy-host = {}", host));
+                    host_set = true;
+                }
+                if !port_set {
+                    lines.push(format!("http-proxy-port = {}", port));
+                    port_set = true;
+                }
+            }
+            in_global = section.eq_ignore_ascii_case("global");
+            if in_global {
+                global_found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_global {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http-proxy-host" {
+                    lines.push(format!("http-proxy-host = {}", host));
+                    host_set = true;
+                    continue;
+                } else if key == "http-proxy-port" {
+                    lines.push(format!("http-proxy-port = {}", port));
+                    port_set = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if in_global {
+        if !host_set {
+            lines.push(format!("http-proxy-host = {}", host));
+        }
+        if !port_set {
+            lines.push(format!("http-proxy-port = {}", port));
+        }
+    } else if !global_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[global]".to_string());
+        lines.push(format!("http-proxy-host = {}", host));
+        lines.push(format!("http-proxy-port = {}", port));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_svn_servers_content(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_global = false;
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = &trim[1..trim.len() - 1].trim();
+            in_global = section.eq_ignore_ascii_case("global");
+            lines.push(line.to_string());
+            continue;
+        }
+        if in_global && !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http-proxy-host" || key == "http-proxy-port" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+    let res = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+    (res, changed)
+}
+
+pub fn set_svn_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let (host, port) = extract_host_port(proxy_url);
+    let path = crate::doctor::get_svn_servers_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_svn_servers_content(&content, &host, port);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_svn_proxy() -> Result<bool> {
+    let path = crate::doctor::get_svn_servers_path();
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, changed) = remove_svn_servers_content(&content);
+    if changed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(changed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -1592,6 +1778,8 @@ pub async fn turn_on(
     nuget: bool,
     curl: bool,
     wget: bool,
+    gem: bool,
+    svn: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1610,6 +1798,8 @@ pub async fn turn_on(
     let set_gh = gh || all;
     let set_jetbrains = jetbrains || all;
     let set_nuget = nuget || all;
+    let set_gem = gem || all;
+    let set_svn = svn || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -1763,6 +1953,20 @@ pub async fn turn_on(
         }
     }
 
+    if set_gem {
+        match set_gem_proxy(&proxy_url) {
+            Ok(p) => eprintln!("{}", format!("✔ Gem (Ruby) proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update ~/.gemrc: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_svn {
+        match set_svn_proxy(&proxy_url) {
+            Ok(p) => eprintln!("{}", format!("✔ Subversion proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update Subversion config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
     eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
 
@@ -1787,6 +1991,8 @@ pub fn turn_off(
     nuget: bool,
     curl: bool,
     wget: bool,
+    gem: bool,
+    svn: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1805,6 +2011,8 @@ pub fn turn_off(
     let unset_gh = gh || all;
     let unset_jetbrains = jetbrains || all;
     let unset_nuget = nuget || all;
+    let unset_gem = gem || all;
+    let unset_svn = svn || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -1939,6 +2147,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Wget proxy removed from ~/.wgetrc".green()),
             Ok(false) => eprintln!("{}", "○ Wget proxy was not set in ~/.wgetrc".dimmed()),
             Err(e) => eprintln!("{} Failed to unset ~/.wgetrc proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_gem {
+        match unset_gem_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Gem (Ruby) proxy removed from ~/.gemrc".green()),
+            Ok(false) => eprintln!("{}", "○ Gem (Ruby) proxy was not set in ~/.gemrc".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset ~/.gemrc proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_svn {
+        match unset_svn_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Subversion proxy removed from servers config".green()),
+            Ok(false) => eprintln!("{}", "○ Subversion proxy was not set in servers config".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Subversion proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -2380,5 +2604,32 @@ mod tests {
         assert!(!cleaned.contains("http_proxy"));
         assert!(!cleaned.contains("https_proxy"));
         assert!(!cleaned.contains("use_proxy"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_gemrc_proxy() {
+        let initial = "---\n:backtrace: false\nhttp_proxy: http://127.0.0.1:1080\n";
+        let configured = apply_gemrc_lines(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("http_proxy: http://127.0.0.1:7890"));
+        assert!(!configured.contains("1080"));
+
+        let (cleaned, changed) = remove_gemrc_lines(&configured);
+        assert!(changed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(cleaned.contains(":backtrace: false"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_svn_servers_proxy() {
+        let initial = "[groups]\ng1 = *.internal\n\n[global]\nhttp-proxy-host = 127.0.0.1\nhttp-proxy-port = 1080\n";
+        let configured = apply_svn_servers_content(initial, "127.0.0.1", 7890);
+        assert!(configured.contains("http-proxy-port = 7890"));
+        assert!(!configured.contains("1080"));
+
+        let (cleaned, changed) = remove_svn_servers_content(&configured);
+        assert!(changed);
+        assert!(!cleaned.contains("http-proxy-host"));
+        assert!(!cleaned.contains("http-proxy-port"));
+        assert!(cleaned.contains("[groups]"));
     }
 }

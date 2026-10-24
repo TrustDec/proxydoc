@@ -1674,6 +1674,104 @@ pub fn get_nuget_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn parse_gemrc_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        let stripped = if let Some(rest) = trim.strip_prefix(":http_proxy:") {
+            Some(rest)
+        } else if let Some(rest) = trim.strip_prefix("http_proxy:") {
+            Some(rest)
+        } else {
+            None
+        };
+        if let Some(rest) = stripped {
+            let val = rest.trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() && val != ":system" && val != "null" && val != "~" {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn get_gemrc_path() -> PathBuf {
+    if let Some(home) = dirs::home_dir() {
+        home.join(".gemrc")
+    } else {
+        PathBuf::from(".gemrc")
+    }
+}
+
+pub fn get_gem_proxy() -> Option<String> {
+    let path = get_gemrc_path();
+    if let Ok(content) = std::fs::read_to_string(path) {
+        return parse_gemrc_proxy(&content);
+    }
+    None
+}
+
+pub fn parse_svn_servers_proxy(content: &str) -> Option<String> {
+    let mut in_global = false;
+    let mut host: Option<String> = None;
+    let mut port: Option<u16> = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = &trim[1..trim.len() - 1].trim();
+            in_global = section.eq_ignore_ascii_case("global");
+            continue;
+        }
+        if in_global {
+            if let Some((k, v)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if key == "http-proxy-host" && !val.is_empty() {
+                    host = Some(val.to_string());
+                } else if key == "http-proxy-port" && !val.is_empty() {
+                    port = val.parse().ok();
+                }
+            }
+        }
+    }
+
+    if let Some(h) = host {
+        if !h.is_empty() {
+            let p = port.unwrap_or(80);
+            return Some(format!("http://{}:{}", h, p));
+        }
+    }
+    None
+}
+
+pub fn get_svn_servers_path() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(appdata) = dirs::config_dir() {
+        let p = appdata.join("Subversion").join("servers");
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".subversion").join("servers");
+    }
+    PathBuf::from(".subversion/servers")
+}
+
+pub fn get_svn_proxy() -> Option<String> {
+    let path = get_svn_servers_path();
+    if let Ok(content) = std::fs::read_to_string(path) {
+        return parse_svn_servers_proxy(&content);
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -2270,6 +2368,30 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         }
     }
 
+    // Astral uv Proxy (UV_HTTP_PROXY)
+    if let Ok(val) = std::env::var("UV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "Astral uv proxy `UV_HTTP_PROXY` points to dead port `{}`! (uv sync / run / pip will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "Astral uv",
+                "UV_HTTP_PROXY",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Proxy".green().to_string()
+                } else {
+                    "▲ DEAD PROXY PORT! (uv sync & pip fail)".red().bold().to_string()
+                },
+            ));
+        }
+    }
+
     // 7. cURL Config (~/.curlrc)
     if let Some(val) = get_curlrc_proxy() {
         let ok = verify_proxy_url(&val).await;
@@ -2425,6 +2547,56 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Gem (Ruby / CocoaPods) Config (~/.gemrc)
+    if let Some(val) = get_gem_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!("Ruby/Gem config (~/.gemrc) points to dead proxy `{}` (gem install, bundle install & pod install will fail)", val));
+        }
+        items.push(DiagItem::new(
+            "Gem (Ruby)",
+            "~/.gemrc http_proxy",
+            val,
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (gem & pod fail)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Gem (Ruby)",
+            "~/.gemrc http_proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // Subversion (SVN) Config (~/.subversion/servers)
+    if let Some(val) = get_svn_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!("Subversion config (~/.subversion/servers) points to dead proxy `{}` (svn checkout/update will fail)", val));
+        }
+        items.push(DiagItem::new(
+            "Subversion",
+            "~/.subversion/servers",
+            val,
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (svn operations fail)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Subversion",
+            "~/.subversion/servers",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
     // 12. Go Proxy (GOPROXY)
     if let Some(gp) = get_goproxy() {
         let mirrors = parse_goproxy(&gp);
@@ -2518,6 +2690,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "COHERE_BASE_URL",
         "XAI_BASE_URL",
         "SILICONFLOW_BASE_URL",
+        "TOGETHER_BASE_URL",
+        "MOONSHOT_BASE_URL",
+        "DASHSCOPE_BASE_URL",
+        "DEEPINFRA_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -2550,7 +2726,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -2842,6 +3018,9 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("registry.yarnpkg.com", 443),
         ("api.perplexity.ai", 443),
         ("api.mistral.ai", 443),
+        ("api.together.xyz", 443),
+        ("api.moonshot.cn", 443),
+        ("dashscope.aliyuncs.com", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -3590,5 +3769,47 @@ editor:
   </packageSources>
 </configuration>"#;
         assert!(parse_nuget_config_proxy(input).is_none());
+    }
+
+    #[test]
+    fn test_parse_gemrc_proxy() {
+        let yml1 = "---\n:backtrace: false\nhttp_proxy: http://127.0.0.1:7890\n";
+        assert_eq!(parse_gemrc_proxy(yml1), Some("http://127.0.0.1:7890".to_string()));
+
+        let yml2 = "---\n:http_proxy: \"http://127.0.0.1:1080\"\n";
+        assert_eq!(parse_gemrc_proxy(yml2), Some("http://127.0.0.1:1080".to_string()));
+
+        let yml3 = "# comment\nhttp_proxy: :system\n";
+        assert_eq!(parse_gemrc_proxy(yml3), None);
+
+        let yml4 = "---\n:sources:\n- https://rubygems.org/\n";
+        assert_eq!(parse_gemrc_proxy(yml4), None);
+    }
+
+    #[test]
+    fn test_parse_svn_servers_proxy() {
+        let ini1 = r#"
+[groups]
+group1 = *.example.com
+
+[global]
+# http-proxy-exceptions = *.internal.net
+http-proxy-host = 127.0.0.1
+http-proxy-port = 7890
+"#;
+        assert_eq!(parse_svn_servers_proxy(ini1), Some("http://127.0.0.1:7890".to_string()));
+
+        let ini2 = r#"
+[global]
+http-proxy-host = 10.0.0.1
+"#;
+        assert_eq!(parse_svn_servers_proxy(ini2), Some("http://10.0.0.1:80".to_string()));
+
+        let ini3 = r#"
+# all commented
+# [global]
+# http-proxy-host = 127.0.0.1
+"#;
+        assert_eq!(parse_svn_servers_proxy(ini3), None);
     }
 }

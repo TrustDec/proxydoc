@@ -68,6 +68,10 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("DeepSeek API", "https://api.deepseek.com/models"),
     ("xAI (Grok) API", "https://api.x.ai/v1/models"),
     ("SiliconFlow API", "https://api.siliconflow.cn/v1/models"),
+    ("Together AI API", "https://api.together.xyz/v1/models"),
+    ("Moonshot (Kimi) API", "https://api.moonshot.cn/v1/models"),
+    ("Aliyun DashScope (Qwen)", "https://dashscope.aliyuncs.com/compatible-mode/v1/models"),
+    ("DeepInfra API", "https://api.deepinfra.com/v1/openai/models"),
     ("HuggingFace", "https://huggingface.co/api/status"),
     ("crates.io", "https://crates.io/api/v1/summary"),
     ("npm Registry", "https://registry.npmjs.org"),
@@ -154,8 +158,8 @@ pub async fn test_endpoints(
                         }
                     }
 
-                    // 401/403/405 for API endpoints like OpenAI/Anthropic/DeepSeek without key means connection succeeded!
-                    let is_ok = code < 400 || code == 401 || code == 403 || code == 405;
+                    // 401/403/404/405 for API endpoints like OpenAI/Anthropic/DeepSeek without key means connection succeeded!
+                    let is_ok = code < 400 || code == 401 || code == 403 || code == 404 || code == 405;
                     let code_str = if is_ok {
                         format!("● OK ({})", code).green().bold().to_string()
                     } else {
@@ -526,6 +530,10 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "DeepSeek API"));
         assert!(standard.iter().any(|(name, _)| *name == "xAI (Grok) API"));
         assert!(standard.iter().any(|(name, _)| *name == "SiliconFlow API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Together AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Moonshot (Kimi) API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Aliyun DashScope (Qwen)"));
+        assert!(standard.iter().any(|(name, _)| *name == "DeepInfra API"));
         assert!(standard.iter().any(|(name, _)| *name == "OpenAI API"));
         assert!(standard.iter().any(|(name, _)| *name == "crates.io"));
         assert!(standard.iter().any(|(name, _)| *name == "npm Registry"));

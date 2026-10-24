@@ -4,15 +4,15 @@ use std::process::Command;
 
 use crate::doctor::{
     clean_jsonc, get_bun_proxy, get_cargo_proxy, get_conda_proxy, get_curlrc_proxy,
-    get_docker_proxy, get_gh_proxy, get_gradle_proxy, get_ide_proxies,
-    get_jetbrains_proxies, get_maven_proxy, get_npm_config, get_nuget_proxy, get_pip_proxy,
-    get_pnpm_proxy, get_ssh_config_proxies, get_system_proxy, get_wgetrc_proxy, get_yarn_proxy,
-    verify_proxy_url,
+    get_docker_proxy, get_gem_proxy, get_gemrc_path, get_gh_proxy, get_gradle_proxy,
+    get_ide_proxies, get_jetbrains_proxies, get_maven_proxy, get_npm_config, get_nuget_proxy,
+    get_pip_proxy, get_pnpm_proxy, get_ssh_config_proxies, get_svn_proxy, get_svn_servers_path,
+    get_system_proxy, get_wgetrc_proxy, get_yarn_proxy, verify_proxy_url,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bun_proxy, unset_conda_proxy,
-    unset_docker_proxy, unset_gh_proxy, unset_gradle_proxy, unset_maven_proxy, unset_nuget_proxy,
-    unset_pnpm_proxy, unset_yarn_proxy,
+    unset_docker_proxy, unset_gem_proxy, unset_gh_proxy, unset_gradle_proxy, unset_maven_proxy,
+    unset_nuget_proxy, unset_pnpm_proxy, unset_svn_proxy, unset_yarn_proxy,
 };
 use crate::scanner;
 
@@ -46,7 +46,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(val) = git_http {
         if !verify_proxy_url(&val).await {
-            println!("  [1/18] Found dead Git http.proxy (`{}`), cleaning...", val.yellow());
+            println!("  [1/20] Found dead Git http.proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("git").args(["config", "--global", "--unset", "http.proxy"]).status();
             git_cleaned = true;
             fixed_count += 1;
@@ -54,7 +54,7 @@ pub async fn run() -> Result<()> {
     }
     if let Some(val) = git_https {
         if !verify_proxy_url(&val).await {
-            println!("  [1/18] Found dead Git https.proxy (`{}`), cleaning...", val.yellow());
+            println!("  [1/20] Found dead Git https.proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("git").args(["config", "--global", "--unset", "https.proxy"]).status();
             git_cleaned = true;
             fixed_count += 1;
@@ -63,7 +63,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(val) = get_git_config("http.sslCAInfo") {
         if !std::path::Path::new(&val).exists() {
-            println!("  [1/18] Found broken Git http.sslCAInfo pointing to missing file (`{}`), cleaning...", val.yellow());
+            println!("  [1/20] Found broken Git http.sslCAInfo pointing to missing file (`{}`), cleaning...", val.yellow());
             let _ = Command::new("git").args(["config", "--global", "--unset", "http.sslCAInfo"]).status();
             git_cleaned = true;
             fixed_count += 1;
@@ -73,7 +73,7 @@ pub async fn run() -> Result<()> {
     if git_cleaned {
         println!("  {} Cleared broken Git global proxy.", "✔".green());
     } else {
-        println!("  [1/18] Git global proxy: {}", "Clean or healthy".dimmed());
+        println!("  [1/20] Git global proxy: {}", "Clean or healthy".dimmed());
     }
 
     // 2. Clean dead NPM proxy
@@ -83,7 +83,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(val) = npm_http {
         if !verify_proxy_url(&val).await {
-            println!("  [2/18] Found dead NPM proxy (`{}`), cleaning...", val.yellow());
+            println!("  [2/20] Found dead NPM proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("npm").args(["config", "delete", "proxy"]).status();
             npm_cleaned = true;
             fixed_count += 1;
@@ -91,7 +91,7 @@ pub async fn run() -> Result<()> {
     }
     if let Some(val) = npm_https {
         if !verify_proxy_url(&val).await {
-            println!("  [2/18] Found dead NPM https-proxy (`{}`), cleaning...", val.yellow());
+            println!("  [2/20] Found dead NPM https-proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("npm").args(["config", "delete", "https-proxy"]).status();
             npm_cleaned = true;
             fixed_count += 1;
@@ -101,14 +101,14 @@ pub async fn run() -> Result<()> {
     if npm_cleaned {
         println!("  {} Cleared broken NPM proxy.", "✔".green());
     } else {
-        println!("  [2/18] NPM proxy: {}", "Clean or healthy".dimmed());
+        println!("  [2/20] NPM proxy: {}", "Clean or healthy".dimmed());
     }
 
     // 3. Clean dead Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)
     if let Some(cfg) = get_yarn_proxy() {
         if !verify_proxy_url(&cfg.proxy).await {
             println!(
-                "  [3/18] Found dead Yarn proxy (`{}` in {}), cleaning...",
+                "  [3/20] Found dead Yarn proxy (`{}` in {}), cleaning...",
                 cfg.proxy.yellow(),
                 cfg.source
             );
@@ -117,54 +117,54 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [3/18] Yarn proxy: {}", "Reachable".green());
+            println!("  [3/20] Yarn proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [3/18] Yarn proxy: {}", "Clean or not set".dimmed());
+        println!("  [3/20] Yarn proxy: {}", "Clean or not set".dimmed());
     }
 
     // 4. Clean dead pnpm proxy (~/.pnpmrc)
     if let Some(val) = get_pnpm_proxy() {
         if !verify_proxy_url(&val).await {
-            println!("  [4/18] Found dead pnpm proxy (`{}` in ~/.pnpmrc), cleaning...", val.yellow());
+            println!("  [4/20] Found dead pnpm proxy (`{}` in ~/.pnpmrc), cleaning...", val.yellow());
             if let Ok(true) = unset_pnpm_proxy() {
                 println!("  {} Cleared broken pnpm proxy.", "✔".green());
                 fixed_count += 1;
             }
         } else {
-            println!("  [4/18] pnpm proxy: {}", "Reachable".green());
+            println!("  [4/20] pnpm proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [4/18] pnpm proxy: {}", "Clean or not set".dimmed());
+        println!("  [4/20] pnpm proxy: {}", "Clean or not set".dimmed());
     }
 
     // 5. Clean dead Bun proxy (~/.bunfig.toml)
     if let Some(val) = get_bun_proxy() {
         if !verify_proxy_url(&val).await {
-            println!("  [5/18] Found dead Bun proxy (`{}` in ~/.bunfig.toml), cleaning...", val.yellow());
+            println!("  [5/20] Found dead Bun proxy (`{}` in ~/.bunfig.toml), cleaning...", val.yellow());
             if let Ok(true) = unset_bun_proxy() {
                 println!("  {} Cleared broken Bun proxy.", "✔".green());
                 fixed_count += 1;
             }
         } else {
-            println!("  [5/18] Bun proxy: {}", "Reachable".green());
+            println!("  [5/20] Bun proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [5/18] Bun proxy: {}", "Clean or not set".dimmed());
+        println!("  [5/20] Bun proxy: {}", "Clean or not set".dimmed());
     }
 
     // 6. Clean dead Pip proxy
     if let Some(val) = get_pip_proxy() {
         if !verify_proxy_url(&val).await {
-            println!("  [6/18] Found dead Pip global.proxy (`{}`), cleaning...", val.yellow());
+            println!("  [6/20] Found dead Pip global.proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("pip").args(["config", "unset", "global.proxy"]).status();
             println!("  {} Cleared broken Pip global proxy.", "✔".green());
             fixed_count += 1;
         } else {
-            println!("  [6/18] Pip global proxy: {}", "Reachable".green());
+            println!("  [6/20] Pip global proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [6/18] Pip global proxy: {}", "Clean or not set".dimmed());
+        println!("  [6/20] Pip global proxy: {}", "Clean or not set".dimmed());
     }
 
     // 7. Clean dead Conda proxy (~/.condarc)
@@ -182,38 +182,38 @@ pub async fn run() -> Result<()> {
         }
 
         if dead {
-            println!("  [7/18] Found dead Conda proxy in ~/.condarc, cleaning...");
+            println!("  [7/20] Found dead Conda proxy in ~/.condarc, cleaning...");
             if let Ok(true) = unset_conda_proxy() {
                 println!("  {} Cleared broken Conda proxy in ~/.condarc.", "✔".green());
                 fixed_count += 1;
             }
         } else {
-            println!("  [7/18] Conda proxy: {}", "Reachable".green());
+            println!("  [7/20] Conda proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [7/18] Conda proxy: {}", "Clean or not set".dimmed());
+        println!("  [7/20] Conda proxy: {}", "Clean or not set".dimmed());
     }
 
     // 8. Clean dead Docker client proxy (~/.docker/config.json)
     if let Some(val) = get_docker_proxy() {
         if !verify_proxy_url(&val).await {
-            println!("  [8/18] Found dead Docker proxy (`{}`), cleaning ~/.docker/config.json...", val.yellow());
+            println!("  [8/20] Found dead Docker proxy (`{}`), cleaning ~/.docker/config.json...", val.yellow());
             if let Ok(true) = unset_docker_proxy() {
                 println!("  {} Cleared broken Docker client proxy.", "✔".green());
                 fixed_count += 1;
             }
         } else {
-            println!("  [8/18] Docker client proxy: {}", "Reachable".green());
+            println!("  [8/20] Docker client proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [8/18] Docker client proxy: {}", "Clean or not set".dimmed());
+        println!("  [8/20] Docker client proxy: {}", "Clean or not set".dimmed());
     }
 
     // 9. Clean dead Gradle proxy (~/.gradle/gradle.properties)
     if let Some(cfg) = get_gradle_proxy() {
         if !scanner::check_host_port(&cfg.host, cfg.port).await {
             println!(
-                "  [9/18] Found dead Gradle proxy (`{}:{}`), removing from ~/.gradle/gradle.properties...",
+                "  [9/20] Found dead Gradle proxy (`{}:{}`), removing from ~/.gradle/gradle.properties...",
                 cfg.host.yellow(),
                 cfg.port
             );
@@ -222,17 +222,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [9/18] Gradle global proxy: {}", "Reachable".green());
+            println!("  [9/20] Gradle global proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [9/18] Gradle global proxy: {}", "Clean or not set".dimmed());
+        println!("  [9/20] Gradle global proxy: {}", "Clean or not set".dimmed());
     }
 
     // 10. Clean dead Maven proxy (~/.m2/settings.xml)
     if let Some(cfg) = get_maven_proxy() {
         if !scanner::check_host_port(&cfg.host, cfg.port).await {
             println!(
-                "  [10/18] Found dead Maven proxy (`{}:{}`), deactivating in ~/.m2/settings.xml...",
+                "  [10/20] Found dead Maven proxy (`{}:{}`), deactivating in ~/.m2/settings.xml...",
                 cfg.host.yellow(),
                 cfg.port
             );
@@ -241,17 +241,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [10/18] Maven global proxy: {}", "Reachable".green());
+            println!("  [10/20] Maven global proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [10/18] Maven global proxy: {}", "Clean or not set".dimmed());
+        println!("  [10/20] Maven global proxy: {}", "Clean or not set".dimmed());
     }
 
     // 11. Clean dead NuGet (.NET) proxy
     if let Some((val, path)) = get_nuget_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [11/18] Found dead NuGet proxy (`{}` in {}), cleaning...",
+                "  [11/20] Found dead NuGet proxy (`{}` in {}), cleaning...",
                 val.yellow(),
                 path.display()
             );
@@ -260,10 +260,10 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [11/18] NuGet (.NET) global proxy: {}", "Reachable".green());
+            println!("  [11/20] NuGet (.NET) global proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [11/18] NuGet (.NET) global proxy: {}", "Clean or not set".dimmed());
+        println!("  [11/20] NuGet (.NET) global proxy: {}", "Clean or not set".dimmed());
     }
 
     // 12. Clean dead VS Code / Cursor IDE proxies
@@ -273,7 +273,7 @@ pub async fn run() -> Result<()> {
         if let Some(ref val) = info.proxy {
             if !verify_proxy_url(val).await {
                 println!(
-                    "  [12/18] Found dead {} proxy (`{}`), cleaning {}...",
+                    "  [12/20] Found dead {} proxy (`{}`), cleaning {}...",
                     info.ide_name,
                     val.yellow(),
                     info.path.display()
@@ -300,7 +300,7 @@ pub async fn run() -> Result<()> {
     if ide_cleaned {
         println!("  {} Cleared broken IDE proxy settings.", "✔".green());
     } else {
-        println!("  [12/18] VS Code & Cursor IDE settings: {}", "Clean or healthy".dimmed());
+        println!("  [12/20] VS Code & Cursor IDE settings: {}", "Clean or healthy".dimmed());
     }
 
     // 12. Clean dead JetBrains / Android Studio IDE proxies
@@ -325,7 +325,7 @@ pub async fn run() -> Result<()> {
 
         if is_dead {
             println!(
-                "  [13/18] Found dead {} proxy in {}, deactivating...",
+                "  [13/20] Found dead {} proxy in {}, deactivating...",
                 info.ide_name,
                 info.path.display()
             );
@@ -346,22 +346,22 @@ pub async fn run() -> Result<()> {
     if jb_cleaned {
         println!("  {} Deactivated broken JetBrains / Android Studio proxy settings.", "✔".green());
     } else {
-        println!("  [13/18] JetBrains & Android Studio settings: {}", "Clean or healthy".dimmed());
+        println!("  [13/20] JetBrains & Android Studio settings: {}", "Clean or healthy".dimmed());
     }
 
     // 13. Clean dead GitHub CLI (gh) proxy
     if let Some(val) = get_gh_proxy() {
         if !verify_proxy_url(&val).await {
-            println!("  [14/18] Found dead GitHub CLI (gh) proxy (`{}`), cleaning...", val.yellow());
+            println!("  [14/20] Found dead GitHub CLI (gh) proxy (`{}`), cleaning...", val.yellow());
             if let Ok(true) = unset_gh_proxy() {
                 println!("  {} Cleared broken GitHub CLI (gh) proxy.", "✔".green());
                 fixed_count += 1;
             }
         } else {
-            println!("  [14/18] GitHub CLI (gh) proxy: {}", "Reachable".green());
+            println!("  [14/20] GitHub CLI (gh) proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [14/18] GitHub CLI (gh) proxy: {}", "Clean or not set".dimmed());
+        println!("  [14/20] GitHub CLI (gh) proxy: {}", "Clean or not set".dimmed());
     }
 
     // 14. Clean dead cURL (~/.curlrc), Wget (~/.wgetrc) & Cargo proxy
@@ -371,7 +371,7 @@ pub async fn run() -> Result<()> {
         if let Some(val) = get_curlrc_proxy() {
             if !verify_proxy_url(&val).await {
                 if let Ok(content) = std::fs::read_to_string(&curlrc_path) {
-                    println!("  [15/18] Found dead proxy `{}` in ~/.curlrc, commenting out with backup...", val.yellow());
+                    println!("  [15/20] Found dead proxy `{}` in ~/.curlrc, commenting out with backup...", val.yellow());
                     let (new_c, changed) = comment_out_dead_lines(&content, |l| {
                         l.starts_with("proxy") || l.starts_with("-x") || l.starts_with("--proxy")
                     });
@@ -390,7 +390,7 @@ pub async fn run() -> Result<()> {
         if let Some(val) = get_wgetrc_proxy() {
             if !verify_proxy_url(&val).await {
                 if let Ok(content) = std::fs::read_to_string(&wgetrc_path) {
-                    println!("  [15/18] Found dead proxy `{}` in ~/.wgetrc, commenting out with backup...", val.yellow());
+                    println!("  [15/20] Found dead proxy `{}` in ~/.wgetrc, commenting out with backup...", val.yellow());
                     let (new_c, changed) = comment_out_dead_lines(&content, |l| {
                         l.to_ascii_lowercase().starts_with("http_proxy")
                             || l.to_ascii_lowercase().starts_with("https_proxy")
@@ -410,7 +410,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = get_cargo_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [15/18] Found dead Cargo proxy (`{}`), cleaning ~/.cargo/config.toml...",
+                "  [15/20] Found dead Cargo proxy (`{}`), cleaning ~/.cargo/config.toml...",
                 val.yellow()
             );
             if let Ok(true) = crate::manager::unset_cargo_proxy() {
@@ -419,7 +419,7 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             } else {
                 println!(
-                    "  [15/18] {} Cargo config has dead proxy `{}`! Please remove `proxy` in ~/.cargo/config.toml",
+                    "  [15/20] {} Cargo config has dead proxy `{}`! Please remove `proxy` in ~/.cargo/config.toml",
                     "▲".yellow(),
                     val.yellow()
                 );
@@ -429,17 +429,55 @@ pub async fn run() -> Result<()> {
     }
 
     if !static_fixed {
-        println!("  [15/18] cURL, Wget, and Cargo configs: {}", "Clean or healthy".dimmed());
+        println!("  [15/20] cURL, Wget, and Cargo configs: {}", "Clean or healthy".dimmed());
     }
 
-    // 15. Inspect SSH config (~/.ssh/config) ProxyCommands
+    // 16. Clean dead Gem (~/.gemrc) proxy
+    if let Some(val) = get_gem_proxy() {
+        if !verify_proxy_url(&val).await {
+            println!("  [16/20] Found dead Gem proxy (`{}` in ~/.gemrc), cleaning with backup...", val.yellow());
+            let path = get_gemrc_path();
+            if path.exists() {
+                let _ = std::fs::copy(&path, path.with_extension("gemrc.bak"));
+            }
+            if let Ok(true) = unset_gem_proxy() {
+                println!("  {} Cleared broken Gem proxy in ~/.gemrc (backup saved to ~/.gemrc.bak)", "✔".green());
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [16/20] Gem (Ruby) proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [16/20] Gem (Ruby) proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 17. Clean dead Subversion (~/.subversion/servers) proxy
+    if let Some(val) = get_svn_proxy() {
+        if !verify_proxy_url(&val).await {
+            println!("  [17/20] Found dead Subversion proxy (`{}` in servers), cleaning with backup...", val.yellow());
+            let path = get_svn_servers_path();
+            if path.exists() {
+                let _ = std::fs::copy(&path, path.with_extension("servers.bak"));
+            }
+            if let Ok(true) = unset_svn_proxy() {
+                println!("  {} Cleared broken Subversion proxy in servers config (backup saved)", "✔".green());
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [17/20] Subversion (SVN) proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [17/20] Subversion (SVN) proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 18. Inspect SSH config (~/.ssh/config) ProxyCommands
     let ssh_proxies = get_ssh_config_proxies();
     let mut ssh_has_dead = false;
     for cmd in &ssh_proxies {
         if let Some(ref target) = cmd.target {
             if !verify_proxy_url(target).await {
                 println!(
-                    "  [16/18] {} ~/.ssh/config Host `{}` has dead ProxyCommand target `{}`! (Git clone over SSH will hang)",
+                    "  [18/20] {} ~/.ssh/config Host `{}` has dead ProxyCommand target `{}`! (Git clone over SSH will hang)",
                     "▲".red().bold(),
                     cmd.host_pattern.yellow(),
                     target.yellow()
@@ -449,10 +487,10 @@ pub async fn run() -> Result<()> {
         }
     }
     if !ssh_has_dead {
-        println!("  [16/18] SSH ProxyCommand configs: {}", "Clean or healthy".dimmed());
+        println!("  [18/20] SSH ProxyCommand configs: {}", "Clean or healthy".dimmed());
     }
 
-    // 16. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 19. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -471,7 +509,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [17/18] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [19/20] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -483,11 +521,11 @@ pub async fn run() -> Result<()> {
         println!();
         fixed_count += 1;
     } else {
-        println!("  [17/18] No active local proxy client found. Ensure your proxy software is open.");
+        println!("  [19/20] No active local proxy client found. Ensure your proxy software is open.");
     }
 
-    // 17. Flush local DNS cache
-    println!("  [18/18] Flushing local DNS cache to fix resolution stalls...");
+    // 20. Flush local DNS cache
+    println!("  [20/20] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();
