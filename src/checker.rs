@@ -123,6 +123,18 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Lambda Labs API", "https://api.lambdalabs.com/v1/models"),
     ("Upstage (Solar) API", "https://api.upstage.ai/v1/solar/models"),
     ("Ai21 Labs (Jamba) API", "https://api.ai21.com/studio/v1/models"),
+    ("Baichuan AI API", "https://api.baichuan-ai.com/v1/models"),
+    (
+        "SenseNova (SenseTime) API",
+        "https://api.sensenova.cn/v1/llm/models",
+    ),
+    (
+        "Tencent Hunyuan API",
+        "https://api.hunyuan.cloud.tencent.com/v1/models",
+    ),
+    ("Baseten API", "https://api.baseten.co/v1/models"),
+    ("FriendliAI API", "https://api.friendli.ai/v1/models"),
+    ("Lepton AI API", "https://api.lepton.ai/v1/models"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {

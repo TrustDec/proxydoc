@@ -2458,6 +2458,189 @@ pub fn unset_conan_proxy() -> Result<bool> {
     Ok(changed_any)
 }
 
+pub fn remove_sbtopts_proxy(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut out_lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            out_lines.push(line.to_string());
+            continue;
+        }
+
+        let mut remaining_tokens = Vec::new();
+        let mut line_modified = false;
+
+        for token in line.split_whitespace() {
+            if token.starts_with("-Dhttp.proxyHost")
+                || token.starts_with("-Dhttp.proxyPort")
+                || token.starts_with("-Dhttps.proxyHost")
+                || token.starts_with("-Dhttps.proxyPort")
+                || token.starts_with("-DsocksProxyHost")
+                || token.starts_with("-DsocksProxyPort")
+                || token.starts_with("-Dhttp.nonProxyHosts")
+                || token.starts_with("-Dhttps.nonProxyHosts")
+            {
+                line_modified = true;
+                modified = true;
+            } else {
+                remaining_tokens.push(token);
+            }
+        }
+
+        if !remaining_tokens.is_empty() {
+            out_lines.push(remaining_tokens.join(" "));
+        } else if !line_modified && !trim.is_empty() {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    let res = out_lines.join("\n") + if out_lines.is_empty() { "" } else { "\n" };
+    (res, modified)
+}
+
+pub fn apply_sbtopts_proxy(content: &str, proxy_url: &str) -> String {
+    let (cleaned, _) = remove_sbtopts_proxy(content);
+    let mut lines: Vec<String> = cleaned.lines().map(|s| s.to_string()).collect();
+
+    let (host, port) = extract_host_port(proxy_url);
+    let is_socks = proxy_url.to_ascii_lowercase().starts_with("socks");
+
+    if is_socks {
+        lines.push(format!("-DsocksProxyHost={}", host));
+        lines.push(format!("-DsocksProxyPort={}", port));
+    } else {
+        lines.push(format!("-Dhttp.proxyHost={}", host));
+        lines.push(format!("-Dhttp.proxyPort={}", port));
+        lines.push(format!("-Dhttps.proxyHost={}", host));
+        lines.push(format!("-Dhttps.proxyPort={}", port));
+        lines.push("-Dhttp.nonProxyHosts=\"localhost|127.0.0.1\"".to_string());
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn set_sbt_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_sbtopts_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_sbtopts_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_sbt_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_sbtopts_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_sbtopts_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn remove_kubeconfig_proxy(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut out_lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("proxy-url:") {
+            modified = true;
+            continue;
+        }
+        out_lines.push(line.to_string());
+    }
+
+    let res = out_lines.join("\n") + if out_lines.is_empty() { "" } else { "\n" };
+    (res, modified)
+}
+
+pub fn apply_kubeconfig_proxy(content: &str, proxy_url: &str) -> String {
+    let (cleaned, _) = remove_kubeconfig_proxy(content);
+    if cleaned.trim().is_empty() {
+        return format!(
+            "apiVersion: v1\nclusters:\n- cluster:\n    proxy-url: {}\n  name: default\n",
+            proxy_url
+        );
+    }
+
+    let mut out_lines = Vec::new();
+    let mut in_clusters = false;
+    let mut proxy_inserted = false;
+
+    for line in cleaned.lines() {
+        let trim = line.trim();
+
+        if !line.starts_with(' ') && !line.starts_with('\t') && !line.starts_with('-') {
+            if trim.starts_with("clusters:") {
+                in_clusters = true;
+            } else if in_clusters {
+                in_clusters = false;
+            }
+        }
+
+        out_lines.push(line.to_string());
+
+        if in_clusters {
+            if trim == "- cluster:" || trim == "cluster:" {
+                out_lines.push(format!("    proxy-url: {}", proxy_url));
+                proxy_inserted = true;
+            }
+        }
+    }
+
+    if !proxy_inserted {
+        if !out_lines.is_empty() && !out_lines.last().unwrap().trim().is_empty() {
+            out_lines.push(String::new());
+        }
+        out_lines.push("clusters:".to_string());
+        out_lines.push("- cluster:".to_string());
+        out_lines.push(format!("    proxy-url: {}", proxy_url));
+        out_lines.push("  name: default".to_string());
+    }
+
+    out_lines.join("\n") + "\n"
+}
+
+pub fn set_kube_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_kubeconfig_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_kubeconfig_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_kube_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_kubeconfig_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_kubeconfig_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -2485,6 +2668,8 @@ pub async fn turn_on(
     bazel: bool,
     composer: bool,
     conan: bool,
+    sbt: bool,
+    kube: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2511,6 +2696,8 @@ pub async fn turn_on(
     let set_bazel = bazel || all;
     let set_composer = composer || all;
     let set_conan = conan || all;
+    let set_sbt = sbt || all;
+    let set_kube = kube || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -2869,6 +3056,26 @@ pub async fn turn_on(
         }
     }
 
+    if set_sbt {
+        match set_sbt_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Scala (sbt) proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update sbt config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_kube {
+        match set_kube_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Kubernetes (kubectl) proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update kubeconfig: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -2909,6 +3116,8 @@ pub fn turn_off(
     bazel: bool,
     composer: bool,
     conan: bool,
+    sbt: bool,
+    kube: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2935,6 +3144,8 @@ pub fn turn_off(
     let unset_bazel = bazel || all;
     let unset_composer = composer || all;
     let unset_conan = conan || all;
+    let unset_sbt = sbt || all;
+    let unset_kube = kube || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -3184,6 +3395,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Conan C/C++ proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Conan C/C++ proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Conan C/C++ proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_sbt {
+        match unset_sbt_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Scala (sbt) proxy removed from sbtopts".green()),
+            Ok(false) => eprintln!("{}", "○ Scala (sbt) proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Scala (sbt) proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_kube {
+        match unset_kube_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Kubernetes (kubectl) cluster proxy-url removed".green()),
+            Ok(false) => eprintln!("{}", "○ Kubernetes (kubectl) cluster proxy-url was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Kubernetes cluster proxy-url: {}", "▲".yellow(), e),
         }
     }
 
@@ -3817,5 +4044,53 @@ mod tests {
         assert!(!cleaned.contains("http = http://127.0.0.1:8080"));
         assert!(!cleaned.contains("https = http://127.0.0.1:8080"));
         assert!(cleaned.contains("revisions_enabled = 1"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_sbtopts_proxy() {
+        let initial = "-J-Xmx2G\n";
+        let configured = apply_sbtopts_proxy(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("-Dhttp.proxyHost=127.0.0.1"));
+        assert!(configured.contains("-Dhttp.proxyPort=7890"));
+        assert!(configured.contains("-Dhttps.proxyHost=127.0.0.1"));
+        assert!(configured.contains("-Dhttps.proxyPort=7890"));
+        assert!(configured.contains("-J-Xmx2G"));
+
+        // Replace existing
+        let updated = apply_sbtopts_proxy(&configured, "http://127.0.0.1:8080");
+        assert!(updated.contains("-Dhttp.proxyPort=8080"));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_sbtopts_proxy(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("-Dhttp.proxyHost"));
+        assert!(!cleaned.contains("-Dhttp.proxyPort"));
+        assert!(cleaned.contains("-J-Xmx2G"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_kubeconfig_proxy() {
+        let initial = r#"apiVersion: v1
+clusters:
+- cluster:
+    server: https://192.168.1.100:6443
+  name: my-cluster
+contexts: []
+"#;
+        let configured = apply_kubeconfig_proxy(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("proxy-url: http://127.0.0.1:7890"));
+        assert!(configured.contains("server: https://192.168.1.100:6443"));
+
+        // Replace existing
+        let updated = apply_kubeconfig_proxy(&configured, "http://127.0.0.1:8080");
+        assert!(updated.contains("proxy-url: http://127.0.0.1:8080"));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_kubeconfig_proxy(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("proxy-url:"));
+        assert!(cleaned.contains("server: https://192.168.1.100:6443"));
     }
 }

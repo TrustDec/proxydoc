@@ -2462,6 +2462,109 @@ pub fn get_kubeconfig_path() -> Option<PathBuf> {
     None
 }
 
+pub fn get_kubeconfig_write_path() -> PathBuf {
+    if let Ok(val) = std::env::var("KUBECONFIG") {
+        if let Some(first) = val.split(':').next() {
+            let p = PathBuf::from(first.trim());
+            if !first.trim().is_empty() {
+                return p;
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".kube").join("config");
+    }
+    PathBuf::from("config")
+}
+
+pub fn parse_sbtopts_proxy(content: &str) -> Option<String> {
+    let mut host = None;
+    let mut port = None;
+    let mut scheme = "http";
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        for token in trim.split_whitespace() {
+            if let Some(rest) = token.strip_prefix("-Dhttp.proxyHost=") {
+                let h = rest.trim_matches('"').trim_matches('\'').trim();
+                if !h.is_empty() {
+                    host = Some(h.to_string());
+                }
+            } else if let Some(rest) = token.strip_prefix("-Dhttps.proxyHost=") {
+                let h = rest.trim_matches('"').trim_matches('\'').trim();
+                if !h.is_empty() && host.is_none() {
+                    host = Some(h.to_string());
+                }
+            } else if let Some(rest) = token.strip_prefix("-DsocksProxyHost=") {
+                let h = rest.trim_matches('"').trim_matches('\'').trim();
+                if !h.is_empty() {
+                    host = Some(h.to_string());
+                    scheme = "socks5";
+                }
+            } else if let Some(rest) = token.strip_prefix("-Dhttp.proxyPort=") {
+                let p = rest.trim_matches('"').trim_matches('\'').trim();
+                if !p.is_empty() {
+                    port = Some(p.to_string());
+                }
+            } else if let Some(rest) = token.strip_prefix("-Dhttps.proxyPort=") {
+                let p = rest.trim_matches('"').trim_matches('\'').trim();
+                if !p.is_empty() && port.is_none() {
+                    port = Some(p.to_string());
+                }
+            } else if let Some(rest) = token.strip_prefix("-DsocksProxyPort=") {
+                let p = rest.trim_matches('"').trim_matches('\'').trim();
+                if !p.is_empty() {
+                    port = Some(p.to_string());
+                }
+            }
+        }
+    }
+
+    if let Some(h) = host {
+        if let Some(p) = port {
+            return Some(format!("{}://{}:{}", scheme, h, p));
+        } else {
+            return Some(format!("{}://{}", scheme, h));
+        }
+    }
+    None
+}
+
+pub fn get_sbtopts_path() -> Option<PathBuf> {
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".sbt").join("sbtopts");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let local = PathBuf::from(".sbtopts");
+    if local.exists() {
+        return Some(local);
+    }
+    None
+}
+
+pub fn get_sbt_proxy() -> Option<(String, PathBuf)> {
+    if let Some(path) = get_sbtopts_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Some(proxy) = parse_sbtopts_proxy(&content) {
+                return Some((proxy, path));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_sbtopts_write_path() -> PathBuf {
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".sbt").join("sbtopts");
+    }
+    PathBuf::from(".sbtopts")
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -3765,6 +3868,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Scala Build Tool (sbt) Proxy (~/.sbt/sbtopts)
+    if let Some((sproxy, spath)) = get_sbt_proxy() {
+        let ok = verify_proxy_url(&sproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Scala Build Tool (sbt) proxy `{}` in {} is dead! (sbt compile/plugin downloads will fail)",
+                sproxy,
+                spath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Scala (sbt)",
+            "~/.sbt/sbtopts proxy",
+            sproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (sbt build fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Scala (sbt)",
+            "~/.sbt/sbtopts proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // Flutter / Dart Environment & Mirrors
     let flutter_vars = [
         ("PUB_HOSTED_URL", "Dart/Flutter package repository mirror"),
@@ -3904,6 +4039,133 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Rustup / Cargo Toolchain Mirrors
+    let rustup_vars = [
+        ("RUSTUP_DIST_SERVER", "Rust toolchain download server mirror"),
+        ("RUSTUP_UPDATE_ROOT", "Rustup installer & update mirror"),
+    ];
+    let mut rustup_found = false;
+    for (var, desc) in rustup_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                rustup_found = true;
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Rustup mirror variable `{}` points to unreachable mirror `{}`! (rustup toolchain install or update will fail)",
+                        var, trim
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Rustup / Cargo",
+                    format!("{} ({})", var, desc),
+                    trim,
+                    if ok {
+                        "● Reachable Mirror".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE MIRROR! (rustup update fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            }
+        }
+    }
+    if !rustup_found {
+        items.push(DiagItem::new(
+            "Rustup / Cargo",
+            "RUSTUP_DIST_SERVER & RUSTUP_UPDATE_ROOT",
+            "(default official static.rust-lang.org)".dimmed().to_string(),
+            "○ Direct Official Server".dimmed().to_string(),
+        ));
+    }
+
+    // Julia Package Manager (Pkg) Mirror
+    if let Ok(val) = std::env::var("JULIA_PKG_SERVER") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "Julia package mirror `JULIA_PKG_SERVER` points to unreachable mirror `{}`! (Pkg.add/update will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "Julia (Pkg)",
+                "JULIA_PKG_SERVER mirror",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR! (julia Pkg fails)"
+                        .red()
+                        .bold()
+                        .to_string()
+                },
+            ));
+        } else {
+            items.push(DiagItem::new(
+                "Julia (Pkg)",
+                "JULIA_PKG_SERVER mirror",
+                "(default official pkg.julialang.org)".dimmed().to_string(),
+                "○ Direct Official Server".dimmed().to_string(),
+            ));
+        }
+    } else {
+        items.push(DiagItem::new(
+            "Julia (Pkg)",
+            "JULIA_PKG_SERVER mirror",
+            "(default official pkg.julialang.org)".dimmed().to_string(),
+            "○ Direct Official Server".dimmed().to_string(),
+        ));
+    }
+
+    // Deno Environment Proxy
+    let deno_vars = [
+        ("DENO_HTTP_PROXY", "Deno HTTP Proxy"),
+        ("DENO_HTTPS_PROXY", "Deno HTTPS Proxy"),
+    ];
+    let mut deno_found = false;
+    for (var, desc) in deno_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                deno_found = true;
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Deno proxy variable `{}` points to dead proxy `{}`! (deno run/install will fail)",
+                        var, trim
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Deno",
+                    format!("{} ({})", var, desc),
+                    trim,
+                    if ok {
+                        "● Reachable Proxy".green().to_string()
+                    } else {
+                        "▲ DEAD PROXY PORT! (deno fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            }
+        }
+    }
+    if !deno_found {
+        items.push(DiagItem::new(
+            "Deno",
+            "DENO_HTTP_PROXY / DENO_HTTPS_PROXY",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // 14. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
@@ -3942,6 +4204,13 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "LAMBDA_BASE_URL",
         "UPSTAGE_BASE_URL",
         "AI21_BASE_URL",
+        "BAICHUAN_BASE_URL",
+        "SENSENOVA_BASE_URL",
+        "INTERNLM_BASE_URL",
+        "HUNYUAN_BASE_URL",
+        "BASETEN_BASE_URL",
+        "FRIENDLI_BASE_URL",
+        "LEPTON_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -5494,5 +5763,29 @@ clusters:
   name: docker-desktop
 "#;
         assert!(parse_kubeconfig_proxies(yaml_none).is_empty());
+    }
+
+    #[test]
+    fn test_parse_sbtopts_proxy() {
+        let sbt1 = "-J-Xmx2G\n-Dhttp.proxyHost=127.0.0.1\n-Dhttp.proxyPort=7890\n-Dhttps.proxyHost=127.0.0.1\n-Dhttps.proxyPort=7890\n";
+        assert_eq!(
+            parse_sbtopts_proxy(sbt1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sbt_inline = "-Dhttp.proxyHost=\"10.0.0.1\" -Dhttp.proxyPort='8080'";
+        assert_eq!(
+            parse_sbtopts_proxy(sbt_inline),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+
+        let sbt_socks = "-DsocksProxyHost=127.0.0.1 -DsocksProxyPort=1080";
+        assert_eq!(
+            parse_sbtopts_proxy(sbt_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let sbt_none = "# -Dhttp.proxyHost=127.0.0.1\n-J-Xmx4G\n";
+        assert_eq!(parse_sbtopts_proxy(sbt_none), None);
     }
 }

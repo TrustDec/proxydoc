@@ -140,7 +140,13 @@ enum Commands {
         /// Also configure Conan C/C++ proxy (global.conf / conan.conf)
         #[arg(long)]
         conan: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, and conan proxy
+        /// Also configure Scala Build Tool (sbt) proxy (~/.sbt/sbtopts)
+        #[arg(long)]
+        sbt: bool,
+        /// Also configure Kubernetes (kubectl) cluster proxy (~/.kube/config proxy-url)
+        #[arg(long)]
+        kube: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, and kube proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -224,7 +230,13 @@ enum Commands {
         /// Also unset Conan C/C++ proxy (global.conf / conan.conf)
         #[arg(long)]
         conan: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, and conan proxy
+        /// Also unset Scala Build Tool (sbt) proxy (~/.sbt/sbtopts)
+        #[arg(long)]
+        sbt: bool,
+        /// Also unset Kubernetes (kubectl) cluster proxy (~/.kube/config proxy-url)
+        #[arg(long)]
+        kube: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, and kube proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -293,6 +305,8 @@ async fn main() -> Result<()> {
             bazel,
             composer,
             conan,
+            sbt,
+            kube,
             all,
             shell,
         }) => {
@@ -323,6 +337,8 @@ async fn main() -> Result<()> {
                 bazel,
                 composer,
                 conan,
+                sbt,
+                kube,
                 all,
                 shell.as_deref(),
             )
@@ -354,6 +370,8 @@ async fn main() -> Result<()> {
             bazel,
             composer,
             conan,
+            sbt,
+            kube,
             all,
             shell,
         }) => {
@@ -383,6 +401,8 @@ async fn main() -> Result<()> {
                 bazel,
                 composer,
                 conan,
+                sbt,
+                kube,
                 all,
                 shell.as_deref(),
             )?;
@@ -1003,6 +1023,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { conan, .. }) => {
                 assert!(conan);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_sbt() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--sbt"]).unwrap();
+        match cli.command {
+            Some(Commands::On { sbt, .. }) => {
+                assert!(sbt);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_sbt() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--sbt"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { sbt, .. }) => {
+                assert!(sbt);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_kube() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--kube"]).unwrap();
+        match cli.command {
+            Some(Commands::On { kube, .. }) => {
+                assert!(kube);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_kube() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--kube"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { kube, .. }) => {
+                assert!(kube);
             }
             _ => panic!("Expected Off command"),
         }
