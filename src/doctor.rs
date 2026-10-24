@@ -2240,6 +2240,228 @@ pub fn get_bazelrc_write_path() -> PathBuf {
     PathBuf::from(".bazelrc")
 }
 
+pub fn parse_conan2_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.is_empty() {
+            continue;
+        }
+        if trim.starts_with("core.net.http:proxies") {
+            if let Some((_, rest)) = trim.split_once('=') {
+                let rest = rest.trim();
+                for key in ["https", "http"] {
+                    for quote in ['"', '\''] {
+                        let search = format!("{}{}{}", quote, key, quote);
+                        if let Some(idx) = rest.find(&search) {
+                            let after = &rest[idx + search.len()..];
+                            if let Some(colon_idx) = after.find(':') {
+                                let val_part = after[colon_idx + 1..].trim();
+                                if let Some(first_char) = val_part.chars().next() {
+                                    if first_char == '"' || first_char == '\'' {
+                                        let inside = &val_part[1..];
+                                        if let Some(end_idx) = inside.find(first_char) {
+                                            let proxy = inside[..end_idx].trim();
+                                            if !proxy.is_empty() {
+                                                return Some(proxy.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn parse_conan1_proxy(content: &str) -> Option<String> {
+    let mut in_proxies_section = false;
+    let mut http_proxy = None;
+    let mut https_proxy = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') || trim.is_empty() {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            in_proxies_section = section.eq_ignore_ascii_case("proxies");
+            continue;
+        }
+        if in_proxies_section {
+            if let Some((k, v)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if key == "https" && !val.is_empty() {
+                    https_proxy = Some(val.to_string());
+                } else if key == "http" && !val.is_empty() {
+                    http_proxy = Some(val.to_string());
+                }
+            }
+        }
+    }
+    https_proxy.or(http_proxy)
+}
+
+pub fn get_conan2_config_path() -> Option<PathBuf> {
+    if let Ok(val) = std::env::var("CONAN_HOME") {
+        let p = PathBuf::from(val.trim()).join("global.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".conan2").join("global.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_conan1_config_path() -> Option<PathBuf> {
+    if let Ok(val) = std::env::var("CONAN_USER_HOME") {
+        let p = PathBuf::from(val.trim()).join(".conan").join("conan.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".conan").join("conan.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_conan_proxy() -> Option<(String, PathBuf)> {
+    if let Some(p) = get_conan2_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_conan2_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Some(p) = get_conan1_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_conan1_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_conan_write_path() -> PathBuf {
+    if let Some(p) = get_conan2_config_path() {
+        return p;
+    }
+    if let Some(p) = get_conan1_config_path() {
+        return p;
+    }
+    if let Ok(val) = std::env::var("CONAN_HOME") {
+        return PathBuf::from(val.trim()).join("global.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".conan2").join("global.conf");
+    }
+    PathBuf::from("global.conf")
+}
+
+pub fn parse_kubeconfig_proxies(content: &str) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    let mut in_clusters = false;
+    let mut current_name = "default".to_string();
+    let mut current_proxy = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.is_empty() {
+            continue;
+        }
+
+        if !line.starts_with(' ') && !line.starts_with('\t') && !line.starts_with('-') {
+            if trim.starts_with("clusters:") {
+                in_clusters = true;
+            } else if in_clusters {
+                if let Some(p) = current_proxy.take() {
+                    results.push((current_name.clone(), p));
+                }
+                in_clusters = false;
+            }
+            continue;
+        }
+
+        if in_clusters {
+            if trim.starts_with("- cluster") || trim.starts_with("- name:") {
+                if let Some(p) = current_proxy.take() {
+                    results.push((current_name.clone(), p));
+                }
+                current_name = "unnamed".to_string();
+                if trim.starts_with("- name:") {
+                    let name = trim["- name:".len()..]
+                        .trim()
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .trim();
+                    if !name.is_empty() {
+                        current_name = name.to_string();
+                    }
+                }
+            } else if trim.starts_with("name:") {
+                let name = trim["name:".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim();
+                if !name.is_empty() {
+                    current_name = name.to_string();
+                }
+            } else if trim.starts_with("proxy-url:") {
+                let purl = trim["proxy-url:".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim();
+                if !purl.is_empty() {
+                    current_proxy = Some(purl.to_string());
+                }
+            }
+        }
+    }
+
+    if in_clusters {
+        if let Some(p) = current_proxy {
+            results.push((current_name, p));
+        }
+    }
+
+    results
+}
+
+pub fn get_kubeconfig_path() -> Option<PathBuf> {
+    if let Ok(val) = std::env::var("KUBECONFIG") {
+        for part in val.split(':') {
+            let p = PathBuf::from(part.trim());
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".kube").join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -3505,6 +3727,44 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Conan C/C++ Package Manager Proxy (~/.conan2/global.conf / ~/.conan/conan.conf)
+    if let Some((conan_proxy, conan_path)) = get_conan_proxy() {
+        let ok = verify_proxy_url(&conan_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Conan C/C++ proxy `{}` in {} is dead! (conan install/download will fail with proxy error)",
+                conan_proxy,
+                conan_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Conan C/C++",
+            format!(
+                "{} proxy",
+                conan_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("config")
+            ),
+            conan_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (conan install fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Conan C/C++",
+            "global.conf / conan.conf proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // Flutter / Dart Environment & Mirrors
     let flutter_vars = [
         ("PUB_HOSTED_URL", "Dart/Flutter package repository mirror"),
@@ -3548,6 +3808,102 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Swift Package Manager & CocoaPods Mirrors
+    let swift_vars = [
+        ("CP_REPO_DIR_URL", "CocoaPods spec repository mirror"),
+        ("SWIFT_PACKAGE_REGISTRY_URL", "Swift Package Manager registry mirror"),
+        ("SWIFT_PACKAGE_COLLECTION_URL", "Swift Package collection URL"),
+    ];
+    let mut swift_found = false;
+    for (var, desc) in swift_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                swift_found = true;
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Swift/CocoaPods mirror variable `{}` points to unreachable mirror `{}`! (pod install or swift package resolve will fail)",
+                        var, trim
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Swift / CocoaPods",
+                    format!("{} ({})", var, desc),
+                    trim,
+                    if ok {
+                        "● Reachable Mirror".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE MIRROR! (pod/swift fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            }
+        }
+    }
+    if !swift_found {
+        items.push(DiagItem::new(
+            "Swift / CocoaPods",
+            "CP_REPO_DIR_URL & SWIFT_PACKAGE_REGISTRY_URL",
+            "(not set)".dimmed().to_string(),
+            "○ Direct (cdn.cocoapods.org & GitHub)".dimmed().to_string(),
+        ));
+    }
+
+    // Kubernetes (kubectl) Cluster Proxy Inspection (~/.kube/config)
+    if let Some(kpath) = get_kubeconfig_path() {
+        if let Ok(content) = std::fs::read_to_string(&kpath) {
+            let kube_proxies = parse_kubeconfig_proxies(&content);
+            if kube_proxies.is_empty() {
+                items.push(DiagItem::new(
+                    "Kubernetes (kubectl)",
+                    "~/.kube/config cluster proxy-url",
+                    "(not set)".dimmed().to_string(),
+                    "○ Direct cluster connection".dimmed().to_string(),
+                ));
+            } else {
+                for (cluster, proxy_url) in kube_proxies {
+                    let ok = verify_proxy_url(&proxy_url).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "Kubernetes kubeconfig cluster `{}` has dead proxy-url `{}`! (kubectl & k9s will hang/timeout)",
+                            cluster, proxy_url
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "Kubernetes (kubectl)",
+                        format!("cluster `{}`", cluster),
+                        proxy_url,
+                        if ok {
+                            "● Reachable Proxy".green().to_string()
+                        } else {
+                            "▲ DEAD PROXY PORT! (kubectl hangs)"
+                                .red()
+                                .bold()
+                                .to_string()
+                        },
+                    ));
+                }
+            }
+        } else {
+            items.push(DiagItem::new(
+                "Kubernetes (kubectl)",
+                "~/.kube/config cluster proxy-url",
+                "(not set)".dimmed().to_string(),
+                "○ Direct cluster connection".dimmed().to_string(),
+            ));
+        }
+    } else {
+        items.push(DiagItem::new(
+            "Kubernetes (kubectl)",
+            "~/.kube/config cluster proxy-url",
+            "(not set)".dimmed().to_string(),
+            "○ Direct cluster connection".dimmed().to_string(),
+        ));
+    }
+
     // 14. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
@@ -3582,6 +3938,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "YI_BASE_URL",
         "VOYAGE_BASE_URL",
         "NOVITA_BASE_URL",
+        "HYPERBOLIC_BASE_URL",
+        "LAMBDA_BASE_URL",
+        "UPSTAGE_BASE_URL",
+        "AI21_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -5052,5 +5412,87 @@ cache-dir = "~/.cache/uv"
         let bazel2 =
             "# build --action_env=HTTP_PROXY=http://127.0.0.1:7890\ntest --verbose_failures\n";
         assert_eq!(parse_bazelrc_proxy(bazel2), None);
+    }
+
+    #[test]
+    fn test_parse_conan2_proxy() {
+        let conf1 = r#"
+core.net.http:proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+"#;
+        assert_eq!(
+            parse_conan2_proxy(conf1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let conf2 = r#"
+core.net.http:proxies = {'http': 'socks5://127.0.0.1:1080'}
+"#;
+        assert_eq!(
+            parse_conan2_proxy(conf2),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let conf3 =
+            "# core.net.http:proxies = {'http': 'http://127.0.0.1:7890'}\ntools.build:jobs = 8\n";
+        assert_eq!(parse_conan2_proxy(conf3), None);
+
+        let conf4 = "tools.build:jobs = 4\n";
+        assert_eq!(parse_conan2_proxy(conf4), None);
+    }
+
+    #[test]
+    fn test_parse_conan1_proxy() {
+        let ini1 = r#"
+[general]
+revisions_enabled = 1
+
+[proxies]
+http = http://127.0.0.1:7890
+https = http://127.0.0.1:8080
+"#;
+        assert_eq!(
+            parse_conan1_proxy(ini1),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let ini2 = r#"
+# [proxies]
+# http = http://127.0.0.1:7890
+"#;
+        assert_eq!(parse_conan1_proxy(ini2), None);
+    }
+
+    #[test]
+    fn test_parse_kubeconfig_proxies() {
+        let yaml = r#"
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority: /path/to/ca.crt
+    proxy-url: http://127.0.0.1:7890
+    server: https://192.168.49.2:8443
+  name: minikube
+- cluster:
+    server: https://127.0.0.1:6443
+  name: docker-desktop
+contexts:
+- context:
+    cluster: minikube
+    user: minikube
+  name: minikube
+"#;
+        let proxies = parse_kubeconfig_proxies(yaml);
+        assert_eq!(proxies.len(), 1);
+        assert_eq!(proxies[0].0, "minikube");
+        assert_eq!(proxies[0].1, "http://127.0.0.1:7890");
+
+        let yaml_none = r#"
+apiVersion: v1
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: docker-desktop
+"#;
+        assert!(parse_kubeconfig_proxies(yaml_none).is_empty());
     }
 }

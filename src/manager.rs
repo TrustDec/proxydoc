@@ -2286,6 +2286,178 @@ pub fn unset_composer_proxy() -> Result<bool> {
     Ok(changed)
 }
 
+pub fn apply_conan2_global_conf(content: &str, proxy_url: &str) -> String {
+    let new_line = format!(
+        "core.net.http:proxies = {{\"http\": \"{}\", \"https\": \"{}\"}}",
+        proxy_url, proxy_url
+    );
+    let mut replaced = false;
+    let mut out_lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("core.net.http:proxies") {
+            out_lines.push(new_line.clone());
+            replaced = true;
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    if !replaced {
+        if !out_lines.is_empty() && !out_lines.last().unwrap().trim().is_empty() {
+            out_lines.push(String::new());
+        }
+        out_lines.push(new_line);
+    }
+
+    out_lines.join("\n") + "\n"
+}
+
+pub fn remove_conan2_global_conf(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut out_lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("core.net.http:proxies") {
+            modified = true;
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    (out_lines.join("\n") + "\n", modified)
+}
+
+pub fn apply_conan1_conf(content: &str, proxy_url: &str) -> String {
+    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let mut section_start = None;
+    let mut section_end = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let sec = trim[1..trim.len() - 1].trim();
+            if sec.eq_ignore_ascii_case("proxies") {
+                section_start = Some(i);
+            } else if section_start.is_some() && section_end.is_none() {
+                section_end = Some(i);
+            }
+        }
+    }
+
+    if let Some(start) = section_start {
+        let mut end = section_end.unwrap_or(lines.len());
+        let mut idx = start + 1;
+        while idx < end && idx < lines.len() {
+            let trim = lines[idx].trim();
+            if trim.starts_with("http ")
+                || trim.starts_with("http=")
+                || trim.starts_with("https ")
+                || trim.starts_with("https=")
+            {
+                lines.remove(idx);
+                end -= 1;
+            } else {
+                idx += 1;
+            }
+        }
+        lines.insert(start + 1, format!("https = {}", proxy_url));
+        lines.insert(start + 1, format!("http = {}", proxy_url));
+    } else {
+        if !lines.is_empty() && !lines.last().unwrap().trim().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[proxies]".to_string());
+        lines.push(format!("http = {}", proxy_url));
+        lines.push(format!("https = {}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_conan1_conf(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut in_proxies = false;
+    let mut out_lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let sec = trim[1..trim.len() - 1].trim();
+            in_proxies = sec.eq_ignore_ascii_case("proxies");
+            out_lines.push(line.to_string());
+            continue;
+        }
+        if in_proxies {
+            if trim.starts_with("http ")
+                || trim.starts_with("http=")
+                || trim.starts_with("https ")
+                || trim.starts_with("https=")
+            {
+                modified = true;
+                continue;
+            }
+        }
+        out_lines.push(line.to_string());
+    }
+
+    (out_lines.join("\n") + "\n", modified)
+}
+
+pub fn set_conan_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_conan_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = if write_path.ends_with("conan.conf") {
+        apply_conan1_conf(&content, proxy_url)
+    } else {
+        apply_conan2_global_conf(&content, proxy_url)
+    };
+    std::fs::write(&write_path, new_content)?;
+
+    if let Some(c1_path) = crate::doctor::get_conan1_config_path() {
+        if c1_path != write_path {
+            if let Ok(c1_content) = std::fs::read_to_string(&c1_path) {
+                let updated = apply_conan1_conf(&c1_content, proxy_url);
+                let _ = std::fs::write(&c1_path, updated);
+            }
+        }
+    }
+
+    Ok(write_path)
+}
+
+pub fn unset_conan_proxy() -> Result<bool> {
+    let mut changed_any = false;
+    if let Some(p2) = crate::doctor::get_conan2_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&p2) {
+            let (new_content, changed) = remove_conan2_global_conf(&content);
+            if changed {
+                std::fs::write(&p2, new_content)?;
+                changed_any = true;
+            }
+        }
+    }
+    if let Some(p1) = crate::doctor::get_conan1_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&p1) {
+            let (new_content, changed) = remove_conan1_conf(&content);
+            if changed {
+                std::fs::write(&p1, new_content)?;
+                changed_any = true;
+            }
+        }
+    }
+    Ok(changed_any)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -2312,6 +2484,7 @@ pub async fn turn_on(
     go: bool,
     bazel: bool,
     composer: bool,
+    conan: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2337,6 +2510,7 @@ pub async fn turn_on(
     let set_go = go || all;
     let set_bazel = bazel || all;
     let set_composer = composer || all;
+    let set_conan = conan || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -2680,6 +2854,21 @@ pub async fn turn_on(
         }
     }
 
+    if set_conan {
+        match set_conan_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Conan C/C++ proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Conan config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -2719,6 +2908,7 @@ pub fn turn_off(
     go: bool,
     bazel: bool,
     composer: bool,
+    conan: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2744,6 +2934,7 @@ pub fn turn_off(
     let unset_go = go || all;
     let unset_bazel = bazel || all;
     let unset_composer = composer || all;
+    let unset_conan = conan || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -2985,6 +3176,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ PHP Composer proxy removed from config.json".green()),
             Ok(false) => eprintln!("{}", "○ PHP Composer proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset PHP Composer proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_conan {
+        match unset_conan_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Conan C/C++ proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Conan C/C++ proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Conan C/C++ proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -3577,5 +3776,46 @@ mod tests {
         assert!(!cleaned.contains("http-proxy"));
         assert!(!cleaned.contains("https-proxy"));
         assert!(cleaned.contains("packagist.org"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_conan2_global_conf() {
+        let initial = "tools.build:jobs = 8\n";
+        let configured = apply_conan2_global_conf(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("core.net.http:proxies = {\"http\": \"http://127.0.0.1:7890\", \"https\": \"http://127.0.0.1:7890\"}"));
+        assert!(configured.contains("tools.build:jobs = 8"));
+
+        // Replace existing
+        let updated = apply_conan2_global_conf(&configured, "http://127.0.0.1:8080");
+        assert!(updated.contains("8080"));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_conan2_global_conf(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("core.net.http:proxies"));
+        assert!(cleaned.contains("tools.build:jobs = 8"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_conan1_conf() {
+        let initial = "[general]\nrevisions_enabled = 1\n";
+        let configured = apply_conan1_conf(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("[proxies]"));
+        assert!(configured.contains("http = http://127.0.0.1:7890"));
+        assert!(configured.contains("https = http://127.0.0.1:7890"));
+        assert!(configured.contains("revisions_enabled = 1"));
+
+        // Replace existing
+        let updated = apply_conan1_conf(&configured, "http://127.0.0.1:8080");
+        assert!(updated.contains("8080"));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_conan1_conf(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("http = http://127.0.0.1:8080"));
+        assert!(!cleaned.contains("https = http://127.0.0.1:8080"));
+        assert!(cleaned.contains("revisions_enabled = 1"));
     }
 }

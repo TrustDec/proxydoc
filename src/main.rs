@@ -137,7 +137,10 @@ enum Commands {
         /// Also configure PHP Composer proxy (config.json)
         #[arg(long)]
         composer: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, and composer proxy
+        /// Also configure Conan C/C++ proxy (global.conf / conan.conf)
+        #[arg(long)]
+        conan: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, and conan proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -218,7 +221,10 @@ enum Commands {
         /// Also unset PHP Composer proxy (config.json)
         #[arg(long)]
         composer: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, and composer proxy
+        /// Also unset Conan C/C++ proxy (global.conf / conan.conf)
+        #[arg(long)]
+        conan: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, and conan proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -286,6 +292,7 @@ async fn main() -> Result<()> {
             go,
             bazel,
             composer,
+            conan,
             all,
             shell,
         }) => {
@@ -315,6 +322,7 @@ async fn main() -> Result<()> {
                 go,
                 bazel,
                 composer,
+                conan,
                 all,
                 shell.as_deref(),
             )
@@ -345,6 +353,7 @@ async fn main() -> Result<()> {
             go,
             bazel,
             composer,
+            conan,
             all,
             shell,
         }) => {
@@ -373,6 +382,7 @@ async fn main() -> Result<()> {
                 go,
                 bazel,
                 composer,
+                conan,
                 all,
                 shell.as_deref(),
             )?;
@@ -971,6 +981,28 @@ mod tests {
         match cli.command {
             Some(Commands::Off { composer, .. }) => {
                 assert!(composer);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_conan() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--conan"]).unwrap();
+        match cli.command {
+            Some(Commands::On { conan, .. }) => {
+                assert!(conan);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_conan() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--conan"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { conan, .. }) => {
+                assert!(conan);
             }
             _ => panic!("Expected Off command"),
         }

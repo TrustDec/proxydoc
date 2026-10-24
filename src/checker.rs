@@ -119,6 +119,10 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("01.AI (Yi) API", "https://api.lingyiwanwu.com/v1/models"),
     ("Voyage AI API", "https://api.voyageai.com/v1/models"),
     ("Novita AI API", "https://api.novita.ai/v3/openai/models"),
+    ("Hyperbolic API", "https://api.hyperbolic.xyz/v1/models"),
+    ("Lambda Labs API", "https://api.lambdalabs.com/v1/models"),
+    ("Upstage (Solar) API", "https://api.upstage.ai/v1/solar/models"),
+    ("Ai21 Labs (Jamba) API", "https://api.ai21.com/studio/v1/models"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -623,6 +627,14 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "01.AI (Yi) API"));
         assert!(standard.iter().any(|(name, _)| *name == "Voyage AI API"));
         assert!(standard.iter().any(|(name, _)| *name == "Novita AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Hyperbolic API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Lambda Labs API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Upstage (Solar) API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Ai21 Labs (Jamba) API"));
         assert!(standard.iter().any(|(name, _)| *name == "Yarn Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "PyPI Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "Go Proxy"));
