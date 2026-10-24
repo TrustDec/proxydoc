@@ -1226,6 +1226,166 @@ pub fn get_cargo_registry_replacements() -> Vec<CargoRegistryReplacement> {
     Vec::new()
 }
 
+pub fn clean_jsonc(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let chars: Vec<char> = content.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escape = false;
+
+    while i < len {
+        let ch = chars[i];
+        if in_string {
+            out.push(ch);
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+        } else {
+            if ch == '"' {
+                in_string = true;
+                out.push(ch);
+                i += 1;
+            } else if ch == '/' && i + 1 < len && chars[i + 1] == '/' {
+                i += 2;
+                while i < len && chars[i] != '\n' {
+                    i += 1;
+                }
+            } else if ch == '/' && i + 1 < len && chars[i + 1] == '*' {
+                i += 2;
+                while i + 1 < len && !(chars[i] == '*' && chars[i + 1] == '/') {
+                    i += 1;
+                }
+                if i + 1 < len {
+                    i += 2;
+                } else {
+                    i = len;
+                }
+            } else {
+                out.push(ch);
+                i += 1;
+            }
+        }
+    }
+
+    let out_chars: Vec<char> = out.chars().collect();
+    let out_len = out_chars.len();
+    let mut final_out = String::with_capacity(out_len);
+    let mut in_str = false;
+    let mut esc = false;
+
+    for idx in 0..out_len {
+        let c = out_chars[idx];
+        if in_str {
+            final_out.push(c);
+            if esc {
+                esc = false;
+            } else if c == '\\' {
+                esc = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+        } else {
+            if c == '"' {
+                in_str = true;
+                final_out.push(c);
+            } else if c == ',' {
+                let mut is_trailing = false;
+                for lookahead in (idx + 1)..out_len {
+                    let next_c = out_chars[lookahead];
+                    if next_c.is_whitespace() {
+                        continue;
+                    }
+                    if next_c == '}' || next_c == ']' {
+                        is_trailing = true;
+                    }
+                    break;
+                }
+                if !is_trailing {
+                    final_out.push(c);
+                }
+            } else {
+                final_out.push(c);
+            }
+        }
+    }
+
+    final_out
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdeProxyConfig {
+    pub ide_name: String,
+    pub path: PathBuf,
+    pub proxy: Option<String>,
+    pub strict_ssl: Option<bool>,
+    pub proxy_support: Option<String>,
+}
+
+pub const KNOWN_IDES: &[(&str, &str)] = &[
+    ("VS Code", "Code"),
+    ("Cursor", "Cursor"),
+    ("Windsurf", "Windsurf"),
+    ("VSCodium", "VSCodium"),
+];
+
+pub fn parse_ide_settings(ide_name: &str, path: &std::path::Path, content: &str) -> Option<IdeProxyConfig> {
+    let cleaned = clean_jsonc(content);
+    let val: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
+    let obj = val.as_object()?;
+
+    let proxy = obj
+        .get("http.proxy")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let strict_ssl = obj.get("http.proxyStrictSSL").and_then(|v| v.as_bool());
+
+    let proxy_support = obj
+        .get("http.proxySupport")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+
+    Some(IdeProxyConfig {
+        ide_name: ide_name.to_string(),
+        path: path.to_path_buf(),
+        proxy,
+        strict_ssl,
+        proxy_support,
+    })
+}
+
+pub fn get_ide_settings_paths() -> Vec<(&'static str, PathBuf)> {
+    let mut list = Vec::new();
+    if let Some(config_dir) = dirs::config_dir() {
+        for &(name, folder) in KNOWN_IDES {
+            let path = config_dir.join(folder).join("User").join("settings.json");
+            list.push((name, path));
+        }
+    }
+    list
+}
+
+pub fn get_ide_proxies() -> Vec<IdeProxyConfig> {
+    let mut results = Vec::new();
+    for (name, path) in get_ide_settings_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Some(info) = parse_ide_settings(name, &path, &content) {
+                    results.push(info);
+                }
+            }
+        }
+    }
+    results
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -2007,6 +2167,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "GOOGLE_AI_BASE_URL",
         "DEEPSEEK_BASE_URL",
         "GROQ_BASE_URL",
+        "OPENROUTER_BASE_URL",
+        "MISTRAL_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -2039,10 +2201,67 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
+    }
+
+    // 15. IDE Proxy & SSL Configuration (VS Code, Cursor, Windsurf, VSCodium)
+    let ide_configs = get_ide_proxies();
+    if ide_configs.is_empty() {
+        items.push(DiagItem::new(
+            "IDE Proxy",
+            "VS Code / Cursor settings.json",
+            "(no IDE settings.json found)".dimmed().to_string(),
+            "○ Skipped (Direct or not installed)".dimmed().to_string(),
+        ));
+    } else {
+        for ide in ide_configs {
+            let label = format!("{} settings.json", ide.ide_name);
+            match ide.proxy {
+                Some(ref val) => {
+                    let ok = verify_proxy_url(val).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "{} has http.proxy pointing to dead port `{}`! (GitHub Copilot, Cursor AI & extensions will fail)",
+                            label, val
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "IDE Proxy",
+                        &label,
+                        val,
+                        if ok {
+                            "● Reachable".green().to_string()
+                        } else {
+                            "▲ DEAD PORT! (Copilot & extensions fail)".red().bold().to_string()
+                        },
+                    ));
+                }
+                None => {
+                    items.push(DiagItem::new(
+                        "IDE Proxy",
+                        &label,
+                        "(not set)".dimmed().to_string(),
+                        "○ Clean (Inherits Terminal or Direct)".dimmed().to_string(),
+                    ));
+                }
+            }
+
+            if let Some(false) = ide.strict_ssl {
+                root_issues.push(format!(
+                    "{} has `http.proxyStrictSSL` set to false! Strict TLS verification is disabled.",
+                    label
+                ));
+                items.push(DiagItem::new(
+                    "IDE SSL",
+                    format!("{} strictSSL", ide.ide_name),
+                    "false".yellow().to_string(),
+                    "▲ DISABLED! (Security risk / Strict SSL off)".yellow().bold().to_string(),
+                ));
+            }
+        }
     }
 
     // 13. Homebrew Environment & Mirrors
@@ -2760,5 +2979,42 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
         assert!(!res.http_enabled);
         assert!(!res.https_enabled);
         assert!(!res.socks_enabled);
+    }
+
+    #[test]
+    fn test_clean_jsonc_with_comments_and_trailing_commas() {
+        let input = r#"{
+            // Single line comment
+            "http.proxy": "http://127.0.0.1:7890", /* block comment */
+            "http.proxyStrictSSL": false, // trailing comma follows
+        }"#;
+        let cleaned = clean_jsonc(input);
+        let val: serde_json::Value = serde_json::from_str(&cleaned).expect("Should parse valid JSON");
+        assert_eq!(val["http.proxy"], "http://127.0.0.1:7890");
+        assert_eq!(val["http.proxyStrictSSL"], false);
+    }
+
+    #[test]
+    fn test_clean_jsonc_preserves_urls() {
+        let input = r#"{"proxy": "http://127.0.0.1:7890//test"}"#;
+        let cleaned = clean_jsonc(input);
+        let val: serde_json::Value = serde_json::from_str(&cleaned).expect("Should preserve // inside strings");
+        assert_eq!(val["proxy"], "http://127.0.0.1:7890//test");
+    }
+
+    #[test]
+    fn test_parse_ide_settings() {
+        let input = r#"{
+            "workbench.colorTheme": "Cursor Dark",
+            "http.proxy": "http://127.0.0.1:7890",
+            "http.proxyStrictSSL": false,
+            "http.proxySupport": "override",
+        }"#;
+        let path = std::path::Path::new("/dummy/settings.json");
+        let parsed = parse_ide_settings("Cursor", path, input).expect("Should parse IDE settings");
+        assert_eq!(parsed.ide_name, "Cursor");
+        assert_eq!(parsed.proxy.as_deref(), Some("http://127.0.0.1:7890"));
+        assert_eq!(parsed.strict_ssl, Some(false));
+        assert_eq!(parsed.proxy_support.as_deref(), Some("override"));
     }
 }

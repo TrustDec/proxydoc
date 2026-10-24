@@ -999,6 +999,84 @@ pub fn unset_bun_proxy() -> Result<bool> {
     Ok(removed)
 }
 
+pub fn apply_vscode_proxy_json(root: &mut serde_json::Value, proxy_url: &str) {
+    if !root.is_object() {
+        *root = serde_json::json!({});
+    }
+    let map = root.as_object_mut().unwrap();
+    map.insert("http.proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    map.insert("http.proxySupport".to_string(), serde_json::Value::String("override".to_string()));
+}
+
+pub fn remove_vscode_proxy_json(root: &mut serde_json::Value) -> bool {
+    let mut removed = false;
+    if let Some(map) = root.as_object_mut() {
+        if map.remove("http.proxy").is_some() {
+            removed = true;
+        }
+        if map.remove("http.proxySupport").is_some() {
+            removed = true;
+        }
+    }
+    removed
+}
+
+pub fn set_vscode_proxy(proxy_url: &str) -> Result<Vec<String>> {
+    let mut updated = Vec::new();
+    let ides = crate::doctor::get_ide_settings_paths();
+    let mut found_existing = false;
+
+    for (name, path) in &ides {
+        if path.exists() {
+            found_existing = true;
+            let content = std::fs::read_to_string(path).unwrap_or_else(|_| "{}".to_string());
+            let cleaned = crate::doctor::clean_jsonc(&content);
+            let mut root: serde_json::Value = serde_json::from_str(&cleaned).unwrap_or_else(|_| serde_json::json!({}));
+            apply_vscode_proxy_json(&mut root, proxy_url);
+            let out = serde_json::to_string_pretty(&root)?;
+            std::fs::write(path, out)?;
+            updated.push(name.to_string());
+        }
+    }
+
+    if !found_existing {
+        if let Some((name, path)) = ides.first() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut root = serde_json::json!({});
+            apply_vscode_proxy_json(&mut root, proxy_url);
+            let out = serde_json::to_string_pretty(&root)?;
+            std::fs::write(path, out)?;
+            updated.push(name.to_string());
+        }
+    }
+
+    Ok(updated)
+}
+
+pub fn unset_vscode_proxy() -> Result<Vec<String>> {
+    let mut removed = Vec::new();
+    let ides = crate::doctor::get_ide_settings_paths();
+
+    for (name, path) in &ides {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                let cleaned = crate::doctor::clean_jsonc(&content);
+                if let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&cleaned) {
+                    if remove_vscode_proxy_json(&mut root) {
+                        let out = serde_json::to_string_pretty(&root)?;
+                        std::fs::write(path, out)?;
+                        removed.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -1012,6 +1090,7 @@ pub async fn turn_on(
     docker: bool,
     gradle: bool,
     maven: bool,
+    vscode: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1026,6 +1105,7 @@ pub async fn turn_on(
     let set_docker = docker || all;
     let set_gradle = gradle || all;
     let set_maven = maven || all;
+    let set_vscode = vscode || all;
 
     // Resolve target proxy address
     let proxy_url = if target == "auto" {
@@ -1129,6 +1209,16 @@ pub async fn turn_on(
         }
     }
 
+    if set_vscode {
+        match set_vscode_proxy(&proxy_url) {
+            Ok(ides) => {
+                let list = if ides.is_empty() { "VS Code".to_string() } else { ides.join(", ") };
+                eprintln!("{}", format!("✔ IDE proxy ({}) set to {}", list, proxy_url).green());
+            }
+            Err(e) => eprintln!("{} Failed to update VS Code / Cursor IDE settings: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
     eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
 
@@ -1147,6 +1237,7 @@ pub fn turn_off(
     docker: bool,
     gradle: bool,
     maven: bool,
+    vscode: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1161,6 +1252,7 @@ pub fn turn_off(
     let unset_docker = docker || all;
     let unset_gradle = gradle || all;
     let unset_maven = maven || all;
+    let unset_vscode = vscode || all;
 
     let target_shell = detect_shell(shell);
     for line in generate_shell_unset(target_shell) {
@@ -1245,6 +1337,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Maven global proxy unset from ~/.m2/settings.xml".green()),
             Ok(false) => eprintln!("{}", "○ Maven global proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update Maven config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_vscode {
+        match unset_vscode_proxy() {
+            Ok(ides) if !ides.is_empty() => eprintln!("{}", format!("✔ IDE proxy unset from {}", ides.join(", ")).green()),
+            Ok(_) => eprintln!("{}", "○ IDE proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update VS Code / Cursor settings: {}", "▲".yellow(), e),
         }
     }
 
@@ -1547,5 +1647,24 @@ mod tests {
         let empty_with = apply_bun_proxy_toml("", "http://127.0.0.1:7890");
         assert!(empty_with.contains("[install]"));
         assert!(empty_with.contains("proxy = \"http://127.0.0.1:7890\""));
+    }
+
+    #[test]
+    fn test_apply_and_remove_vscode_proxy_json() {
+        let mut root = serde_json::json!({
+            "workbench.colorTheme": "One Dark Pro",
+            "editor.fontSize": 14
+        });
+
+        apply_vscode_proxy_json(&mut root, "http://127.0.0.1:7890");
+        assert_eq!(root["http.proxy"], "http://127.0.0.1:7890");
+        assert_eq!(root["http.proxySupport"], "override");
+        assert_eq!(root["workbench.colorTheme"], "One Dark Pro");
+
+        let removed = remove_vscode_proxy_json(&mut root);
+        assert!(removed);
+        assert!(root.get("http.proxy").is_none());
+        assert!(root.get("http.proxySupport").is_none());
+        assert_eq!(root["workbench.colorTheme"], "One Dark Pro");
     }
 }
