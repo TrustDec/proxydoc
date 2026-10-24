@@ -791,12 +791,222 @@ pub fn unset_conda_proxy() -> Result<bool> {
     Ok(removed)
 }
 
+pub fn apply_pnpmrc_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut has_proxy = false;
+    let mut has_https_proxy = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy" || key == "http-proxy" {
+                lines.push(format!("proxy={}", proxy_url));
+                has_proxy = true;
+                continue;
+            } else if key == "https-proxy" {
+                lines.push(format!("https-proxy={}", proxy_url));
+                has_https_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !has_proxy {
+        lines.push(format!("proxy={}", proxy_url));
+    }
+    if !has_https_proxy {
+        lines.push(format!("https-proxy={}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pnpmrc_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy" || key == "http-proxy" || key == "https-proxy" {
+                removed = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_pnpm_proxy(proxy_url: &str) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let pnpmrc_path = home.join(".pnpmrc");
+    let content = if pnpmrc_path.exists() {
+        std::fs::read_to_string(&pnpmrc_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_pnpmrc_proxy(&content, proxy_url);
+    std::fs::write(&pnpmrc_path, new_content)?;
+
+    let _ = Command::new("pnpm").args(["config", "set", "proxy", proxy_url]).output();
+    let _ = Command::new("pnpm").args(["config", "set", "https-proxy", proxy_url]).output();
+
+    Ok(())
+}
+
+pub fn unset_pnpm_proxy() -> Result<bool> {
+    let mut removed = false;
+    if let Some(home) = dirs::home_dir() {
+        let pnpmrc_path = home.join(".pnpmrc");
+        if pnpmrc_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&pnpmrc_path) {
+                let (new_content, r) = remove_pnpmrc_proxy(&content);
+                if r {
+                    std::fs::write(&pnpmrc_path, new_content)?;
+                    removed = true;
+                }
+            }
+        }
+    }
+    let _ = Command::new("pnpm").args(["config", "delete", "proxy"]).output();
+    let _ = Command::new("pnpm").args(["config", "delete", "https-proxy"]).output();
+    Ok(removed)
+}
+
+pub fn apply_bun_proxy_toml(content: &str, proxy_url: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut in_install = false;
+    let mut has_install_section = false;
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let sec = trim.trim_matches(|c| c == '[' || c == ']').trim();
+            if in_install && !proxy_set {
+                lines.push(format!("proxy = \"{}\"", proxy_url));
+                proxy_set = true;
+            }
+            in_install = sec == "install";
+            if in_install {
+                has_install_section = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_install {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim() == "proxy" {
+                    lines.push(format!("proxy = \"{}\"", proxy_url));
+                    proxy_set = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_install && !proxy_set {
+        lines.push(format!("proxy = \"{}\"", proxy_url));
+        proxy_set = true;
+    }
+
+    if !proxy_set {
+        if !has_install_section {
+            if !lines.is_empty() && !lines.last().map(|l| l.trim().is_empty()).unwrap_or(true) {
+                lines.push(String::new());
+            }
+            lines.push("[install]".to_string());
+            lines.push(format!("proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_bun_proxy_toml(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_install = false;
+    let mut removed = false;
+    let has_install = content.lines().any(|l| l.trim().starts_with('[') && l.trim().trim_matches(|c| c == '[' || c == ']').trim() == "install");
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            in_install = trim.trim_matches(|c| c == '[' || c == ']').trim() == "install";
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_install || (!has_install && !trim.starts_with('[')) {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim();
+                if key == "proxy" || key == "http_proxy" || key == "https_proxy" {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_bun_proxy(proxy_url: &str) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let bunfig_path = home.join(".bunfig.toml");
+    let content = if bunfig_path.exists() {
+        std::fs::read_to_string(&bunfig_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_bun_proxy_toml(&content, proxy_url);
+    std::fs::write(&bunfig_path, new_content)?;
+    Ok(())
+}
+
+pub fn unset_bun_proxy() -> Result<bool> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Ok(false),
+    };
+    let bunfig_path = home.join(".bunfig.toml");
+    if !bunfig_path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&bunfig_path)?;
+    let (new_content, removed) = remove_bun_proxy_toml(&content);
+    if removed {
+        std::fs::write(&bunfig_path, new_content)?;
+    }
+    Ok(removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
     cargo: bool,
     npm: bool,
     yarn: bool,
+    pnpm: bool,
+    bun: bool,
     pip: bool,
     conda: bool,
     docker: bool,
@@ -809,6 +1019,8 @@ pub async fn turn_on(
     let set_cargo = cargo || all;
     let set_npm = npm || all;
     let set_yarn = yarn || all;
+    let set_pnpm = pnpm || all;
+    let set_bun = bun || all;
     let set_pip = pip || all;
     let set_conda = conda || all;
     let set_docker = docker || all;
@@ -873,6 +1085,20 @@ pub async fn turn_on(
         }
     }
 
+    if set_pnpm {
+        match set_pnpm_proxy(&proxy_url) {
+            Ok(_) => eprintln!("{}", format!("✔ pnpm proxy (~/.pnpmrc) set to {}", proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update pnpm config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_bun {
+        match set_bun_proxy(&proxy_url) {
+            Ok(_) => eprintln!("{}", format!("✔ Bun proxy (~/.bunfig.toml) set to {}", proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update Bun config: {}", "▲".yellow(), e),
+        }
+    }
+
     if set_pip {
         let _ = Command::new("pip").args(["config", "set", "global.proxy", &proxy_url]).status();
         eprintln!("{}", format!("✔ Pip global proxy set to {}", proxy_url).green());
@@ -917,6 +1143,8 @@ pub fn turn_off(
     cargo: bool,
     npm: bool,
     yarn: bool,
+    pnpm: bool,
+    bun: bool,
     pip: bool,
     conda: bool,
     docker: bool,
@@ -929,6 +1157,8 @@ pub fn turn_off(
     let unset_cargo = cargo || all;
     let unset_npm = npm || all;
     let unset_yarn = yarn || all;
+    let unset_pnpm = pnpm || all;
+    let unset_bun = bun || all;
     let unset_pip = pip || all;
     let unset_conda = conda || all;
     let unset_docker = docker || all;
@@ -965,6 +1195,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Cleared Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)".green()),
             Ok(false) => eprintln!("{}", "○ Yarn proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to clear Yarn config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pnpm {
+        match unset_pnpm_proxy() {
+            Ok(true) => eprintln!("{}", "✔ pnpm proxy unset from ~/.pnpmrc".green()),
+            Ok(false) => eprintln!("{}", "○ pnpm proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update pnpm config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_bun {
+        match unset_bun_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Bun proxy unset from ~/.bunfig.toml".green()),
+            Ok(false) => eprintln!("{}", "○ Bun proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update Bun config: {}", "▲".yellow(), e),
         }
     }
 
@@ -1262,5 +1508,47 @@ mod tests {
         assert!(!cleaned.contains("1080"));
         assert!(cleaned.contains("channels:\n  - defaults"));
         assert!(cleaned.contains("ssl_verify: true"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pnpmrc_proxy() {
+        let initial = "registry=https://registry.npmjs.org/\n";
+        let with_proxy = apply_pnpmrc_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy=http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("https-proxy=http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("registry=https://registry.npmjs.org/"));
+
+        // Replace existing proxy
+        let updated = apply_pnpmrc_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("proxy=http://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_pnpmrc_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy="));
+        assert!(cleaned.contains("registry="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_bun_proxy_toml() {
+        let initial = "[install]\nexact = true\n";
+        let with_proxy = apply_bun_proxy_toml(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy = \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("exact = true"));
+
+        // Replace existing
+        let updated = apply_bun_proxy_toml(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("proxy = \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_bun_proxy_toml(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy = "));
+        assert!(cleaned.contains("exact = true"));
+
+        // Fresh empty file
+        let empty_with = apply_bun_proxy_toml("", "http://127.0.0.1:7890");
+        assert!(empty_with.contains("[install]"));
+        assert!(empty_with.contains("proxy = \"http://127.0.0.1:7890\""));
     }
 }

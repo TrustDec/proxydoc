@@ -64,6 +64,7 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Cloudflare", "https://1.1.1.1/cdn-cgi/trace"),
     ("OpenAI API", "https://api.openai.com/v1/models"),
     ("Anthropic API", "https://api.anthropic.com/v1/messages"),
+    ("Google Gemini", "https://generativelanguage.googleapis.com/v1beta/models"),
     ("DeepSeek API", "https://api.deepseek.com/models"),
     ("HuggingFace", "https://huggingface.co/api/status"),
     ("crates.io", "https://crates.io/api/v1/summary"),
@@ -158,10 +159,15 @@ pub async fn test_endpoints(
                 Err(e) => {
                     let err_desc = if e.is_timeout() {
                         format!("Timeout ({}s)", timeout_secs)
-                    } else if e.is_connect() {
-                        "Connect Failed".to_string()
                     } else {
-                        "Error".to_string()
+                        let s = e.to_string().to_lowercase();
+                        if s.contains("cert") || s.contains("certificate") || s.contains("tls") || s.contains("ssl") || s.contains("handshake") || s.contains("self-signed") {
+                            "TLS / Cert Untrusted".to_string()
+                        } else if e.is_connect() {
+                            "Connect Failed".to_string()
+                        } else {
+                            "Error".to_string()
+                        }
                     };
                     (format!("✕ {}", err_desc).red().bold().to_string(), None, "-".dimmed().to_string(), false)
                 }

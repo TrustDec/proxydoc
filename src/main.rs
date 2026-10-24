@@ -77,6 +77,12 @@ enum Commands {
         /// Also configure Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)
         #[arg(long)]
         yarn: bool,
+        /// Also configure pnpm proxy (~/.pnpmrc)
+        #[arg(long)]
+        pnpm: bool,
+        /// Also configure Bun proxy (~/.bunfig.toml)
+        #[arg(long)]
+        bun: bool,
         /// Also configure pip global proxy
         #[arg(long)]
         pip: bool,
@@ -92,7 +98,7 @@ enum Commands {
         /// Also configure Maven global proxy (~/.m2/settings.xml)
         #[arg(long)]
         maven: bool,
-        /// Also configure git, cargo, npm, yarn, pip, conda, docker, gradle, and maven proxy
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -113,6 +119,12 @@ enum Commands {
         /// Also unset Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)
         #[arg(long)]
         yarn: bool,
+        /// Also unset pnpm proxy (~/.pnpmrc)
+        #[arg(long)]
+        pnpm: bool,
+        /// Also unset Bun proxy (~/.bunfig.toml)
+        #[arg(long)]
+        bun: bool,
         /// Also unset pip global proxy
         #[arg(long)]
         pip: bool,
@@ -128,7 +140,7 @@ enum Commands {
         /// Also unset Maven global proxy (~/.m2/settings.xml)
         #[arg(long)]
         maven: bool,
-        /// Also unset git, cargo, npm, yarn, pip, conda, docker, gradle, and maven proxy
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -163,11 +175,11 @@ async fn main() -> Result<()> {
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, cargo, npm, yarn, pip, conda, docker, gradle, maven, all, shell }) => {
-            manager::turn_on(&target, git, cargo, npm, yarn, pip, conda, docker, gradle, maven, all, shell.as_deref()).await?;
+        Some(Commands::On { target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, all, shell }) => {
+            manager::turn_on(&target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, cargo, npm, yarn, pip, conda, docker, gradle, maven, all, shell }) => {
-            manager::turn_off(git, cargo, npm, yarn, pip, conda, docker, gradle, maven, all, shell.as_deref())?;
+        Some(Commands::Off { git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, all, shell }) => {
+            manager::turn_off(git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, all, shell.as_deref())?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());
@@ -401,6 +413,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { conda, .. }) => {
                 assert!(conda);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_pnpm() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--pnpm"]).unwrap();
+        match cli.command {
+            Some(Commands::On { pnpm, .. }) => {
+                assert!(pnpm);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_pnpm() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--pnpm"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { pnpm, .. }) => {
+                assert!(pnpm);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_bun() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--bun"]).unwrap();
+        match cli.command {
+            Some(Commands::On { bun, .. }) => {
+                assert!(bun);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_bun() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--bun"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { bun, .. }) => {
+                assert!(bun);
             }
             _ => panic!("Expected Off command"),
         }

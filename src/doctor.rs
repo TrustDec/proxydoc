@@ -846,6 +846,171 @@ pub fn get_hosts_entries() -> Vec<HostsEntry> {
     Vec::new()
 }
 
+pub fn parse_bunfig_proxy(content: &str) -> Option<String> {
+    let mut current_section = "";
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            current_section = trim.trim_matches(|c| c == '[' || c == ']').trim();
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy" || key == "http_proxy" || key == "https_proxy" {
+                if current_section == "install" || current_section.is_empty() {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_bun_proxy() -> Option<String> {
+    if let Some(home) = dirs::home_dir() {
+        let paths = [
+            home.join(".bunfig.toml"),
+            home.join(".bun").join("bunfig.toml"),
+        ];
+        for path in paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Some(p) = parse_bunfig_proxy(&content) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    if let Ok(content) = std::fs::read_to_string("bunfig.toml") {
+        if let Some(p) = parse_bunfig_proxy(&content) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn parse_pnpmrc_proxy(content: &str, key: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            if k.trim().eq_ignore_ascii_case(key) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() && val != "null" && val != "undefined" {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pnpm_proxy() -> Option<String> {
+    if let Ok(out) = Command::new("pnpm").args(["config", "get", "proxy"]).output() {
+        if out.status.success() {
+            let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !val.is_empty() && val != "null" && val != "undefined" {
+                return Some(val);
+            }
+        }
+    }
+    if let Ok(out) = Command::new("pnpm").args(["config", "get", "https-proxy"]).output() {
+        if out.status.success() {
+            let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !val.is_empty() && val != "null" && val != "undefined" {
+                return Some(val);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let pnpmrc = home.join(".pnpmrc");
+        if let Ok(content) = std::fs::read_to_string(pnpmrc) {
+            if let Some(val) = parse_pnpmrc_proxy(&content, "proxy") {
+                return Some(val);
+            }
+            if let Some(val) = parse_pnpmrc_proxy(&content, "https-proxy") {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CargoRegistryReplacement {
+    pub source: String,
+    pub replace_with: String,
+    pub registry_url: Option<String>,
+}
+
+pub fn parse_cargo_registry_replacements(content: &str) -> Vec<CargoRegistryReplacement> {
+    use std::collections::HashMap;
+
+    let mut current_section = String::new();
+    let mut replace_with_map: HashMap<String, String> = HashMap::new();
+    let mut source_registries: HashMap<String, String> = HashMap::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            current_section = trim.trim_matches(|c| c == '[' || c == ']').trim().to_string();
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if key == "replace-with" {
+                if let Some(src) = current_section.strip_prefix("source.") {
+                    replace_with_map.insert(src.to_string(), val.to_string());
+                }
+            } else if key == "registry" {
+                if let Some(src) = current_section.strip_prefix("source.") {
+                    source_registries.insert(src.to_string(), val.to_string());
+                }
+            }
+        }
+    }
+
+    let mut results = Vec::new();
+    for (src, target) in replace_with_map {
+        let registry_url = source_registries.get(&target).cloned();
+        results.push(CargoRegistryReplacement {
+            source: src,
+            replace_with: target,
+            registry_url,
+        });
+    }
+    results
+}
+
+pub fn get_cargo_registry_replacements() -> Vec<CargoRegistryReplacement> {
+    if let Some(home) = dirs::home_dir() {
+        let paths = [
+            home.join(".cargo").join("config.toml"),
+            home.join(".cargo").join("config"),
+        ];
+        for path in paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                let replacements = parse_cargo_registry_replacements(&content);
+                if !replacements.is_empty() {
+                    return replacements;
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -1193,7 +1358,49 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 5. Cargo Config
+    // 6. pnpm Config (~/.pnpmrc)
+    if let Some(val) = get_pnpm_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!("pnpm proxy points to dead port `{}` (pnpm install will fail)", val));
+        }
+        items.push(DiagItem::new(
+            "pnpm",
+            "~/.pnpmrc proxy",
+            val,
+            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (pnpm install fails)".red().bold().to_string() },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "pnpm",
+            "~/.pnpmrc proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 7. Bun Config (~/.bunfig.toml)
+    if let Some(val) = get_bun_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!("Bun proxy in ~/.bunfig.toml points to dead port `{}` (bun install will fail)", val));
+        }
+        items.push(DiagItem::new(
+            "Bun",
+            "~/.bunfig.toml [install] proxy",
+            val,
+            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (bun install fails)".red().bold().to_string() },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Bun",
+            "~/.bunfig.toml proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 8. Cargo Config
     if let Some(val) = get_cargo_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
@@ -1214,7 +1421,67 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 6. Pip Config
+    // Cargo Crates.io Registry Mirror Replacements
+    let cargo_mirrors = get_cargo_registry_replacements();
+    if !cargo_mirrors.is_empty() {
+        for cm in cargo_mirrors {
+            if let Some(ref reg) = cm.registry_url {
+                let clean_url = reg.trim_start_matches("sparse+");
+                let ok = verify_proxy_url(clean_url).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Cargo registry mirror `{}` (`{}`) for `{}` is unreachable! (cargo build/fetch will fail with index download error)",
+                        cm.replace_with, clean_url, cm.source
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Cargo Mirror",
+                    format!("{} replace-with {}", cm.source, cm.replace_with),
+                    reg.clone(),
+                    if ok { "● Reachable Registry Mirror".green().to_string() } else { "▲ DEAD CRATES.IO MIRROR!".red().bold().to_string() },
+                ));
+            } else {
+                items.push(DiagItem::new(
+                    "Cargo Mirror",
+                    format!("{} replace-with {}", cm.source, cm.replace_with),
+                    cm.replace_with.clone(),
+                    "● Configured Mirror".dimmed().to_string(),
+                ));
+            }
+        }
+    }
+
+    // Rustup Mirrors
+    let rustup_vars = [
+        ("RUSTUP_DIST_SERVER", "Rust toolchain download server"),
+        ("RUSTUP_UPDATE_ROOT", "Rustup self-update server"),
+    ];
+    for (var, desc) in rustup_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Rustup environment variable `{}` points to unreachable mirror `{}`! (rustup toolchain install/update will fail)",
+                        var, trim
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Rustup Mirror",
+                    format!("{} ({})", var, desc),
+                    trim.to_string(),
+                    if ok {
+                        "● Reachable Mirror".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE MIRROR!".red().bold().to_string()
+                    },
+                ));
+            }
+        }
+    }
+
+    // 9. Pip Config
     if let Some(val) = get_pip_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
@@ -1233,6 +1500,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             "(not set)".dimmed().to_string(),
             "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
         ));
+    }
+
+    // Python / Astral uv Index Mirrors
+    let python_index_vars = [
+        ("UV_INDEX_URL", "Astral uv primary index mirror"),
+        ("UV_EXTRA_INDEX_URL", "Astral uv extra index mirror"),
+        ("PIP_INDEX_URL", "Pip default package index URL"),
+        ("PIP_EXTRA_INDEX_URL", "Pip extra package index URL"),
+    ];
+    for (var, desc) in python_index_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Python index mirror `{}` points to unreachable URL `{}`! (uv / pip package downloads will fail)",
+                        var, trim
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Python Index",
+                    format!("{} ({})", var, desc),
+                    trim.to_string(),
+                    if ok {
+                        "● Reachable Index".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE INDEX! (Downloads fail)".red().bold().to_string()
+                    },
+                ));
+            }
+        }
     }
 
     // 7. cURL Config (~/.curlrc)
@@ -1443,6 +1742,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     let ai_vars = [
         "OPENAI_BASE_URL",
         "ANTHROPIC_BASE_URL",
+        "GEMINI_BASE_URL",
+        "GOOGLE_AI_BASE_URL",
         "DEEPSEEK_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
@@ -1476,7 +1777,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/DeepSeek/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -2085,5 +2386,49 @@ ssl_verify: true
         assert!(entries.iter().any(|e| e.ip == "140.82.112.4" && e.domain == "api.github.com"));
         assert!(entries.iter().any(|e| e.ip == "185.199.108.133" && e.domain == "raw.githubusercontent.com"));
         assert!(entries.iter().any(|e| e.ip == "0.0.0.0" && e.domain == "telemetry.example.com"));
+    }
+
+    #[test]
+    fn test_parse_bunfig_proxy() {
+        let content = r#"
+[install]
+proxy = "http://127.0.0.1:7890"
+exact = true
+"#;
+        assert_eq!(parse_bunfig_proxy(content), Some("http://127.0.0.1:7890".to_string()));
+
+        let toplevel = "proxy = 'http://127.0.0.1:1080'\n";
+        assert_eq!(parse_bunfig_proxy(toplevel), Some("http://127.0.0.1:1080".to_string()));
+
+        let clean = "[install]\nexact = true\n";
+        assert_eq!(parse_bunfig_proxy(clean), None);
+    }
+
+    #[test]
+    fn test_parse_pnpmrc_proxy() {
+        let content = r#"
+proxy=http://127.0.0.1:7890
+https-proxy="http://127.0.0.1:7890"
+registry=https://registry.npmjs.org/
+"#;
+        assert_eq!(parse_pnpmrc_proxy(content, "proxy"), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(parse_pnpmrc_proxy(content, "https-proxy"), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(parse_pnpmrc_proxy(content, "nonexistent"), None);
+    }
+
+    #[test]
+    fn test_parse_cargo_registry_replacements() {
+        let content = r#"
+[source.crates-io]
+replace-with = "ustc"
+
+[source.ustc]
+registry = "https://mirrors.ustc.edu.cn/crates.io-index"
+"#;
+        let replacements = parse_cargo_registry_replacements(content);
+        assert_eq!(replacements.len(), 1);
+        assert_eq!(replacements[0].source, "crates-io");
+        assert_eq!(replacements[0].replace_with, "ustc");
+        assert_eq!(replacements[0].registry_url, Some("https://mirrors.ustc.edu.cn/crates.io-index".to_string()));
     }
 }
