@@ -80,7 +80,10 @@ enum Commands {
         /// Also configure Gradle global proxy (~/.gradle/gradle.properties)
         #[arg(long)]
         gradle: bool,
-        /// Also configure git, npm, pip, docker, and gradle proxy
+        /// Also configure Maven global proxy (~/.m2/settings.xml)
+        #[arg(long)]
+        maven: bool,
+        /// Also configure git, npm, pip, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -104,7 +107,10 @@ enum Commands {
         /// Also unset Gradle global proxy (~/.gradle/gradle.properties)
         #[arg(long)]
         gradle: bool,
-        /// Also unset git, npm, pip, docker, and gradle proxy
+        /// Also unset Maven global proxy (~/.m2/settings.xml)
+        #[arg(long)]
+        maven: bool,
+        /// Also unset git, npm, pip, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -139,11 +145,11 @@ async fn main() -> Result<()> {
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, npm, pip, docker, gradle, all, shell }) => {
-            manager::turn_on(&target, git, npm, pip, docker, gradle, all, shell.as_deref()).await?;
+        Some(Commands::On { target, git, npm, pip, docker, gradle, maven, all, shell }) => {
+            manager::turn_on(&target, git, npm, pip, docker, gradle, maven, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, npm, pip, docker, gradle, all, shell }) => {
-            manager::turn_off(git, npm, pip, docker, gradle, all, shell.as_deref())?;
+        Some(Commands::Off { git, npm, pip, docker, gradle, maven, all, shell }) => {
+            manager::turn_off(git, npm, pip, docker, gradle, maven, all, shell.as_deref())?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());

@@ -304,6 +304,122 @@ pub fn unset_gradle_proxy() -> Result<bool> {
     Ok(removed)
 }
 
+pub fn apply_maven_proxy_xml(content: &str, host: &str, port: u16) -> String {
+    let proxy_snippet = format!(
+        "    <proxy>\n      <id>proxydoc-proxy</id>\n      <active>true</active>\n      <protocol>http</protocol>\n      <host>{}</host>\n      <port>{}</port>\n      <nonProxyHosts>localhost|127.0.0.1|*.local</nonProxyHosts>\n    </proxy>",
+        host, port
+    );
+
+    if content.trim().is_empty() {
+        return format!(
+            "<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\"\n  xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n  xsi:schemaLocation=\"http://maven.apache.org/SETTINGS/1.0.0\n                      https://maven.apache.org/xsd/settings-1.0.0.xsd\">\n  <proxies>\n{}\n  </proxies>\n</settings>\n",
+            proxy_snippet
+        );
+    }
+
+    if let Some(doc_idx) = content.find("<id>proxydoc-proxy</id>") {
+        if let Some(p_start) = content[..doc_idx].rfind("<proxy>") {
+            if let Some(p_end) = content[doc_idx..].find("</proxy>") {
+                let end_pos = doc_idx + p_end + 8;
+                let mut res = String::new();
+                res.push_str(&content[..p_start]);
+                res.push_str(&proxy_snippet.trim());
+                res.push_str(&content[end_pos..]);
+                return res;
+            }
+        }
+    }
+
+    if let Some(proxies_end) = content.find("</proxies>") {
+        let mut res = String::new();
+        res.push_str(&content[..proxies_end]);
+        res.push_str(&proxy_snippet);
+        res.push_str("\n  ");
+        res.push_str(&content[proxies_end..]);
+        return res;
+    }
+
+    if let Some(proxies_sc) = content.find("<proxies/>") {
+        let mut res = String::new();
+        res.push_str(&content[..proxies_sc]);
+        res.push_str("<proxies>\n");
+        res.push_str(&proxy_snippet);
+        res.push_str("\n  </proxies>");
+        res.push_str(&content[proxies_sc + 10..]);
+        return res;
+    }
+
+    if let Some(settings_end) = content.find("</settings>") {
+        let mut res = String::new();
+        res.push_str(&content[..settings_end]);
+        res.push_str("  <proxies>\n");
+        res.push_str(&proxy_snippet);
+        res.push_str("\n  </proxies>\n");
+        res.push_str(&content[settings_end..]);
+        return res;
+    }
+
+    format!("<settings>\n  <proxies>\n{}\n  </proxies>\n{}\n</settings>\n", proxy_snippet, content)
+}
+
+pub fn remove_maven_proxy_xml(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut res = content.to_string();
+
+    if let Some(doc_idx) = res.find("<id>proxydoc-proxy</id>") {
+        if let Some(p_start) = res[..doc_idx].rfind("<proxy>") {
+            if let Some(p_end) = res[doc_idx..].find("</proxy>") {
+                let end_pos = doc_idx + p_end + 8;
+                res = format!("{}{}", &res[..p_start], res[end_pos..].trim_start_matches('\n'));
+                modified = true;
+            }
+        }
+    }
+
+    if !modified {
+        if let Some(_) = res.find("<active>true</active>") {
+            res = res.replacen("<active>true</active>", "<active>false</active>", 1);
+            modified = true;
+        }
+    }
+
+    (res, modified)
+}
+
+pub fn set_maven_proxy(proxy_url: &str) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let m2_dir = home.join(".m2");
+    std::fs::create_dir_all(&m2_dir)?;
+    let settings_path = m2_dir.join("settings.xml");
+    let content = if settings_path.exists() {
+        std::fs::read_to_string(&settings_path)?
+    } else {
+        String::new()
+    };
+
+    let (host, port) = extract_host_port(proxy_url);
+    let new_content = apply_maven_proxy_xml(&content, &host, port);
+    std::fs::write(&settings_path, new_content)?;
+    Ok(())
+}
+
+pub fn unset_maven_proxy() -> Result<bool> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Ok(false),
+    };
+    let settings_path = home.join(".m2").join("settings.xml");
+    if !settings_path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&settings_path)?;
+    let (new_content, removed) = remove_maven_proxy_xml(&content);
+    if removed {
+        std::fs::write(&settings_path, new_content)?;
+    }
+    Ok(removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -311,6 +427,7 @@ pub async fn turn_on(
     pip: bool,
     docker: bool,
     gradle: bool,
+    maven: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -319,6 +436,7 @@ pub async fn turn_on(
     let set_pip = pip || all;
     let set_docker = docker || all;
     let set_gradle = gradle || all;
+    let set_maven = maven || all;
 
     // Resolve target proxy address
     let proxy_url = if target == "auto" {
@@ -383,6 +501,13 @@ pub async fn turn_on(
         }
     }
 
+    if set_maven {
+        match set_maven_proxy(&proxy_url) {
+            Ok(_) => eprintln!("{}", format!("✔ Maven global proxy (~/.m2/settings.xml) set to {}", proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update Maven config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
     eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
 
@@ -395,6 +520,7 @@ pub fn turn_off(
     pip: bool,
     docker: bool,
     gradle: bool,
+    maven: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -403,6 +529,7 @@ pub fn turn_off(
     let unset_pip = pip || all;
     let unset_docker = docker || all;
     let unset_gradle = gradle || all;
+    let unset_maven = maven || all;
 
     let target_shell = detect_shell(shell);
     for line in generate_shell_unset(target_shell) {
@@ -439,6 +566,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Gradle global proxy unset from ~/.gradle/gradle.properties".green()),
             Ok(false) => eprintln!("{}", "○ Gradle global proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update Gradle config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_maven {
+        match unset_maven_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Maven global proxy unset from ~/.m2/settings.xml".green()),
+            Ok(false) => eprintln!("{}", "○ Maven global proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update Maven config: {}", "▲".yellow(), e),
         }
     }
 
@@ -598,5 +733,25 @@ mod tests {
         assert!(!cleaned.contains("systemProp.http.proxyHost"));
         assert!(!cleaned.contains("systemProp.https.proxyPort"));
         assert!(cleaned.contains("org.gradle.jvmargs=-Xmx2048m"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_maven_proxy_xml() {
+        let initial = "<settings>\n  <localRepository>/path/to/repo</localRepository>\n</settings>";
+        let with_proxy = apply_maven_proxy_xml(initial, "127.0.0.1", 7890);
+        assert!(with_proxy.contains("<id>proxydoc-proxy</id>"));
+        assert!(with_proxy.contains("<host>127.0.0.1</host>"));
+        assert!(with_proxy.contains("<port>7890</port>"));
+        assert!(with_proxy.contains("<localRepository>/path/to/repo</localRepository>"));
+
+        let (cleaned, removed) = remove_maven_proxy_xml(&with_proxy);
+        assert!(removed);
+        assert!(!cleaned.contains("<id>proxydoc-proxy</id>"));
+        assert!(cleaned.contains("<localRepository>/path/to/repo</localRepository>"));
+
+        let empty_initial = "";
+        let from_empty = apply_maven_proxy_xml(empty_initial, "127.0.0.1", 7890);
+        assert!(from_empty.contains("<settings"));
+        assert!(from_empty.contains("<id>proxydoc-proxy</id>"));
     }
 }

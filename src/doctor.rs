@@ -116,12 +116,39 @@ pub fn get_macos_system_proxy() -> Option<SystemProxyState> {
     None
 }
 
+pub fn parse_npmrc_proxy(content: &str, key: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            if k.trim().eq_ignore_ascii_case(key) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() && val != "null" && val != "undefined" {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn get_npm_config(key: &str) -> Option<String> {
-    let out = Command::new("npm").args(["config", "get", key]).output().ok()?;
-    if out.status.success() {
-        let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !val.is_empty() && val != "null" && val != "undefined" {
-            return Some(val);
+    if let Ok(out) = Command::new("npm").args(["config", "get", key]).output() {
+        if out.status.success() {
+            let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !val.is_empty() && val != "null" && val != "undefined" {
+                return Some(val);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let npmrc = home.join(".npmrc");
+        if let Ok(content) = std::fs::read_to_string(npmrc) {
+            if let Some(val) = parse_npmrc_proxy(&content, key) {
+                return Some(val);
+            }
         }
     }
     None
@@ -343,6 +370,128 @@ pub fn get_gradle_proxy() -> Option<GradleProxyConfig> {
         }
     }
     None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MavenProxyConfig {
+    pub id: String,
+    pub host: String,
+    pub port: u16,
+    pub active: bool,
+    pub protocol: String,
+}
+
+pub fn strip_xml_comments(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut remaining = content;
+    while let Some(start) = remaining.find("<!--") {
+        result.push_str(&remaining[..start]);
+        if let Some(end) = remaining[start + 4..].find("-->") {
+            remaining = &remaining[start + 4 + end + 3..];
+        } else {
+            return result;
+        }
+    }
+    result.push_str(remaining);
+    result
+}
+
+pub fn parse_maven_settings_proxy(content: &str) -> Option<MavenProxyConfig> {
+    let clean = strip_xml_comments(content);
+    let mut cursor = clean.as_str();
+
+    while let Some(start_idx) = cursor.find("<proxy>") {
+        let after_start = &cursor[start_idx + 7..];
+        let end_idx = match after_start.find("</proxy>") {
+            Some(i) => i,
+            None => break,
+        };
+        let proxy_block = &after_start[..end_idx];
+        cursor = &after_start[end_idx + 8..];
+
+        let extract_tag = |tag: &str| -> Option<String> {
+            let open = format!("<{}>", tag);
+            let close = format!("</{}>", tag);
+            let s = proxy_block.find(&open)?;
+            let rest = &proxy_block[s + open.len()..];
+            let e = rest.find(&close)?;
+            let val = rest[..e].trim();
+            if !val.is_empty() {
+                Some(val.to_string())
+            } else {
+                None
+            }
+        };
+
+        let is_active = extract_tag("active")
+            .map(|a| a.eq_ignore_ascii_case("true"))
+            .unwrap_or(true);
+
+        if is_active {
+            let host = extract_tag("host");
+            let port = extract_tag("port").and_then(|p| p.parse::<u16>().ok());
+            let id = extract_tag("id").unwrap_or_else(|| "proxy".to_string());
+            let protocol = extract_tag("protocol").unwrap_or_else(|| "http".to_string());
+
+            if let (Some(h), Some(p)) = (host, port) {
+                return Some(MavenProxyConfig {
+                    id,
+                    host: h,
+                    port: p,
+                    active: true,
+                    protocol,
+                });
+            }
+        }
+    }
+    None
+}
+
+pub fn get_maven_proxy() -> Option<MavenProxyConfig> {
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".m2").join("settings.xml");
+        if let Ok(content) = std::fs::read_to_string(path) {
+            return parse_maven_settings_proxy(&content);
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitRewrite {
+    pub replacement: String,
+    pub original: String,
+}
+
+pub fn get_git_insteadof_rewrites() -> Vec<GitRewrite> {
+    let mut rewrites = Vec::new();
+    let out = Command::new("git")
+        .args(["config", "--global", "--get-regexp", r"^url\..*\.insteadof"])
+        .output();
+
+    if let Ok(output) = out {
+        if output.status.success() {
+            let s = String::from_utf8_lossy(&output.stdout);
+            for line in s.lines() {
+                let trim = line.trim();
+                if let Some((k, v)) = trim.split_once(' ') {
+                    let key = k.trim();
+                    let orig = v.trim();
+                    if let Some(rest) = key.strip_prefix("url.") {
+                        let lower = rest.to_ascii_lowercase();
+                        if let Some(idx) = lower.rfind(".insteadof") {
+                            let repl = &rest[..idx];
+                            rewrites.push(GitRewrite {
+                                replacement: repl.to_string(),
+                                original: orig.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    rewrites
 }
 
 pub fn parse_wgetrc_proxy(content: &str) -> Option<String> {
@@ -650,6 +799,35 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         }
     }
 
+    // Git URL Rewrites (insteadOf)
+    let rewrites = get_git_insteadof_rewrites();
+    for rw in rewrites {
+        if let Ok(parsed_url) = url::Url::parse(&rw.replacement) {
+            if let Some(host) = parsed_url.host_str() {
+                let host_resolves = lookup_host(format!("{}:443", host)).await.is_ok();
+                if !host_resolves {
+                    root_issues.push(format!(
+                        "Git URL rewrite `url.{}.insteadOf {}` has unreachable mirror `{}`! (Git clone will fail with 'Could not resolve host')",
+                        rw.replacement, rw.original, host
+                    ));
+                    items.push(DiagItem::new(
+                        "Git Rewrite",
+                        format!("insteadOf {}", rw.original),
+                        rw.replacement.clone(),
+                        "▲ UNRESOLVABLE MIRROR!".red().bold().to_string(),
+                    ));
+                } else {
+                    items.push(DiagItem::new(
+                        "Git Rewrite",
+                        format!("insteadOf {}", rw.original),
+                        rw.replacement.clone(),
+                        "● Resolvable Mirror".green().to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
     // 4. SSH Config ProxyCommand (~/.ssh/config)
     let ssh_proxies = get_ssh_config_proxies();
     if ssh_proxies.is_empty() {
@@ -867,7 +1045,35 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 11. AI Developer Endpoints (Base URLs)
+    // 11. Maven Config (~/.m2/settings.xml)
+    if let Some(cfg) = get_maven_proxy() {
+        let ok = scanner::check_host_port(&cfg.host, cfg.port).await;
+        if !ok {
+            root_issues.push(format!(
+                "Maven config (~/.m2/settings.xml) points to dead proxy `{}:{}` (Maven/Java builds will fail)",
+                cfg.host, cfg.port
+            ));
+        }
+        items.push(DiagItem::new(
+            "Maven",
+            "~/.m2/settings.xml",
+            format!("{}:{}", cfg.host, cfg.port),
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (Maven builds fail)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Maven",
+            "~/.m2/settings.xml",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 12. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
         "ANTHROPIC_BASE_URL",
@@ -909,7 +1115,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 12. Homebrew Environment & Mirrors
+    // 13. Homebrew Environment & Mirrors
     let brew_vars = ["HOMEBREW_BOTTLE_DOMAIN", "HOMEBREW_API_DOMAIN", "HOMEBREW_BREW_GIT_REMOTE"];
     for var in brew_vars {
         if let Ok(val) = std::env::var(var) {
@@ -925,13 +1131,49 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         }
     }
 
-    // 9. DNS Poisoning & Resolution Check
+    // 14. CA Certificate Bundles Inspection
+    let ca_vars = [
+        ("SSL_CERT_FILE", "OpenSSL / Python / Rust CA bundle"),
+        ("REQUESTS_CA_BUNDLE", "Python Requests CA bundle"),
+        ("CURL_CA_BUNDLE", "cURL CA bundle"),
+        ("NODE_EXTRA_CA_CERTS", "Node.js extra CA certs"),
+    ];
+    for (var, desc) in ca_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                let path = std::path::Path::new(trim);
+                if path.exists() {
+                    items.push(DiagItem::new(
+                        "CA Certificate",
+                        format!("{} ({})", var, desc),
+                        trim.to_string(),
+                        "● File exists & valid".green().to_string(),
+                    ));
+                } else {
+                    root_issues.push(format!(
+                        "CA certificate variable `{}` points to non-existent file `{}`! (Dev tools like Node/Python/cURL will crash with TLS/SSL errors)",
+                        var, trim
+                    ));
+                    items.push(DiagItem::new(
+                        "CA Certificate",
+                        format!("{} ({})", var, desc),
+                        trim.to_string(),
+                        "▲ MISSING FILE! (SSL crashes)".red().bold().to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    // 15. DNS Poisoning & Resolution Check
     let dns_targets = [
         ("github.com", 443),
         ("raw.githubusercontent.com", 443),
         ("api.openai.com", 443),
         ("api.anthropic.com", 443),
         ("api.deepseek.com", 443),
+        ("pypi.org", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -1244,5 +1486,83 @@ Host *
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].host_pattern, "github.com");
         assert_eq!(list[0].target, Some("127.0.0.1:7890".to_string()));
+    }
+
+    #[test]
+    fn test_parse_npmrc_proxy() {
+        let content = r#"
+registry=https://registry.npmjs.org/
+proxy=http://127.0.0.1:7890
+https-proxy="http://127.0.0.1:7890"
+# comment=true
+"#;
+        assert_eq!(parse_npmrc_proxy(content, "proxy"), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(parse_npmrc_proxy(content, "https-proxy"), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(parse_npmrc_proxy(content, "non_existent"), None);
+    }
+
+    #[test]
+    fn test_strip_xml_comments() {
+        let xml = "<root><!-- comment --><child>hello</child></root>";
+        assert_eq!(strip_xml_comments(xml), "<root><child>hello</child></root>");
+
+        let multi = "<settings>\n<!--\n<proxy>\n  <port>8888</port>\n</proxy>\n-->\n<proxy><port>7890</port></proxy></settings>";
+        assert!(!strip_xml_comments(multi).contains("8888"));
+        assert!(strip_xml_comments(multi).contains("7890"));
+    }
+
+    #[test]
+    fn test_parse_maven_settings_proxy() {
+        let xml = r#"
+<settings>
+  <proxies>
+    <proxy>
+      <id>my-proxy</id>
+      <active>true</active>
+      <protocol>http</protocol>
+      <host>127.0.0.1</host>
+      <port>7890</port>
+      <nonProxyHosts>localhost|127.0.0.1</nonProxyHosts>
+    </proxy>
+  </proxies>
+</settings>
+"#;
+        let cfg = parse_maven_settings_proxy(xml).unwrap();
+        assert_eq!(cfg.id, "my-proxy");
+        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.port, 7890);
+        assert!(cfg.active);
+
+        // Inactive proxy
+        let inactive = r#"
+<settings>
+  <proxies>
+    <proxy>
+      <id>old</id>
+      <active>false</active>
+      <host>127.0.0.1</host>
+      <port>1080</port>
+    </proxy>
+  </proxies>
+</settings>
+"#;
+        assert_eq!(parse_maven_settings_proxy(inactive), None);
+
+        // Commented out proxy
+        let commented = r#"
+<settings>
+  <!--
+  <proxies>
+    <proxy>
+      <id>dead</id>
+      <active>true</active>
+      <host>127.0.0.1</host>
+      <port>9999</port>
+    </proxy>
+  </proxies>
+  -->
+</settings>
+"#;
+        assert_eq!(parse_maven_settings_proxy(commented), None);
     }
 }
