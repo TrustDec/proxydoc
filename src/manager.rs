@@ -2904,6 +2904,171 @@ pub fn unset_cabal_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_stack_config_proxy(content: &str, proxy_url: &str) -> String {
+    let mut in_proxy = false;
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && trim.starts_with("proxy:") {
+            in_proxy = true;
+            if !replaced {
+                lines.push("proxy:".to_string());
+                lines.push(format!("  http: \"{}\"", proxy_url));
+                lines.push(format!("  https: \"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+        if in_proxy {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                continue;
+            } else {
+                in_proxy = false;
+                lines.push(line.to_string());
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !replaced {
+        if !lines.is_empty() && !lines.last().map(|s| s.is_empty()).unwrap_or(true) {
+            lines.push(String::new());
+        }
+        lines.push("proxy:".to_string());
+        lines.push(format!("  http: \"{}\"", proxy_url));
+        lines.push(format!("  https: \"{}\"", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_stack_config_proxy(content: &str) -> (String, bool) {
+    let mut in_proxy = false;
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && trim.starts_with("proxy:") {
+            in_proxy = true;
+            modified = true;
+            continue;
+        }
+        if in_proxy {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                modified = true;
+                continue;
+            } else {
+                in_proxy = false;
+                lines.push(line.to_string());
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    (lines.join("\n") + "\n", modified)
+}
+
+pub fn set_stack_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_stack_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_stack_config_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_stack_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_stack_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_stack_config_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_hex_config_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('%') && !trim.starts_with('#') && (trim.contains("http_proxy,") || trim.contains("https_proxy,")) {
+            if !replaced {
+                lines.push(format!("{{http_proxy, \"{}\"}}.", proxy_url));
+                lines.push(format!("{{https_proxy, \"{}\"}}.", proxy_url));
+                replaced = true;
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !replaced {
+        if !lines.is_empty() && !lines.last().map(|s| s.is_empty()).unwrap_or(true) {
+            lines.push(String::new());
+        }
+        lines.push(format!("{{http_proxy, \"{}\"}}.", proxy_url));
+        lines.push(format!("{{https_proxy, \"{}\"}}.", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_hex_config_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('%') && !trim.starts_with('#') && (trim.contains("http_proxy,") || trim.contains("https_proxy,")) {
+            modified = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+    (lines.join("\n") + "\n", modified)
+}
+
+pub fn set_hex_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_hex_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_hex_config_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_hex_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_hex_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_hex_config_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -2937,6 +3102,8 @@ pub async fn turn_on(
     julia: bool,
     nix: bool,
     cabal: bool,
+    stack: bool,
+    hex: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2969,6 +3136,8 @@ pub async fn turn_on(
     let set_julia = julia || all;
     let set_nix = nix || all;
     let set_cabal = cabal || all;
+    let set_stack = stack || all;
+    let set_hex = hex || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -3387,6 +3556,26 @@ pub async fn turn_on(
         }
     }
 
+    if set_stack {
+        match set_stack_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Haskell Stack proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Haskell Stack config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_hex {
+        match set_hex_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Hex (Elixir/Gleam) proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Hex hex.config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -3433,6 +3622,8 @@ pub fn turn_off(
     julia: bool,
     nix: bool,
     cabal: bool,
+    stack: bool,
+    hex: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3465,6 +3656,8 @@ pub fn turn_off(
     let unset_julia = julia || all;
     let unset_nix = nix || all;
     let unset_cabal = cabal || all;
+    let unset_stack = stack || all;
+    let unset_hex = hex || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -3762,6 +3955,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Haskell Cabal proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Haskell Cabal proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Haskell Cabal proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_stack {
+        match unset_stack_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Haskell Stack proxy removed from config.yaml".green()),
+            Ok(false) => eprintln!("{}", "○ Haskell Stack proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Haskell Stack proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_hex {
+        match unset_hex_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Hex (Elixir/Gleam) proxy removed from hex.config".green()),
+            Ok(false) => eprintln!("{}", "○ Hex proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Hex proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -4519,5 +4728,43 @@ contexts: []
         assert!(removed);
         assert!(!cleaned.contains("proxy:"));
         assert!(cleaned.contains("remote-repo-cache:"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_stack_config_proxy() {
+        let initial = "# Stack config\nsystem-ghc: true\n";
+        let with_proxy = apply_stack_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy:"));
+        assert!(with_proxy.contains("  http: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("system-ghc: true"));
+
+        // Replace existing
+        let updated = apply_stack_config_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("  http: \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_stack_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy:"));
+        assert!(cleaned.contains("system-ghc: true"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_hex_config_proxy() {
+        let initial = "% Hex config\n{release, true}.\n";
+        let with_proxy = apply_hex_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("{http_proxy, \"http://127.0.0.1:7890\"}."));
+        assert!(with_proxy.contains("{https_proxy, \"http://127.0.0.1:7890\"}."));
+        assert!(with_proxy.contains("{release, true}."));
+
+        // Replace existing
+        let updated = apply_hex_config_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("{http_proxy, \"http://127.0.0.1:1080\"}."));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_hex_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(cleaned.contains("{release, true}."));
     }
 }

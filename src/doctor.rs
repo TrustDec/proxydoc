@@ -2849,9 +2849,226 @@ pub fn parse_swiftpm_mirrors(content: &str) -> Vec<String> {
                     urls.push(s.to_string());
                 }
             }
+        } else if let Some(object_list) = val.get("object").and_then(|o| o.as_array()) {
+            for item in object_list {
+                if let Some(mirror_url) = item.get("mirror").and_then(|m| m.as_str()) {
+                    urls.push(mirror_url.to_string());
+                }
+            }
         }
     }
     urls
+}
+
+pub fn clean_swiftpm_mirrors(content: &str, dead_mirrors: &[&str]) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        let mut changed = false;
+        if let Some(mirrors_map) = val.get_mut("mirrors").and_then(|m| m.as_object_mut()) {
+            let initial_len = mirrors_map.len();
+            mirrors_map.retain(|_orig, dest| {
+                if let Some(s) = dest.as_str() {
+                    !dead_mirrors.iter().any(|d| *d == s)
+                } else {
+                    true
+                }
+            });
+            if mirrors_map.len() != initial_len {
+                changed = true;
+            }
+        } else if let Some(object_list) = val.get_mut("object").and_then(|o| o.as_array_mut()) {
+            let initial_len = object_list.len();
+            object_list.retain(|item| {
+                if let Some(mirror_url) = item.get("mirror").and_then(|m| m.as_str()) {
+                    !dead_mirrors.iter().any(|d| *d == mirror_url)
+                } else {
+                    true
+                }
+            });
+            if object_list.len() != initial_len {
+                changed = true;
+            }
+        }
+        if changed {
+            if let Ok(pretty) = serde_json::to_string_pretty(&val) {
+                return (pretty + "\n", true);
+            }
+        }
+    }
+    (content.to_string(), false)
+}
+
+pub fn parse_stack_config_proxy(content: &str) -> Option<String> {
+    let mut in_proxy_block = false;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with("//") {
+            continue;
+        }
+        if trim.starts_with("proxy:") {
+            let after = trim.strip_prefix("proxy:").unwrap_or("").trim();
+            if after.starts_with('{') {
+                for part in after.trim_matches('{').trim_matches('}').split(',') {
+                    let ptrim = part.trim();
+                    if ptrim.starts_with("http:") || ptrim.starts_with("\"http\":") || ptrim.starts_with("'http':") {
+                        if let Some((_, v)) = ptrim.split_once(':') {
+                            let url = v.trim().trim_matches('"').trim_matches('\'').trim();
+                            if !url.is_empty() {
+                                return Some(url.to_string());
+                            }
+                        }
+                    } else if ptrim.starts_with("https:") || ptrim.starts_with("\"https\":") || ptrim.starts_with("'https':") {
+                        if let Some((_, v)) = ptrim.split_once(':') {
+                            let url = v.trim().trim_matches('"').trim_matches('\'').trim();
+                            if !url.is_empty() {
+                                return Some(url.to_string());
+                            }
+                        }
+                    }
+                }
+            } else if !after.is_empty() && (after.starts_with("http://") || after.starts_with("https://") || after.starts_with("socks")) {
+                return Some(after.trim_matches('"').trim_matches('\'').to_string());
+            } else {
+                in_proxy_block = true;
+            }
+            continue;
+        }
+        if in_proxy_block {
+            if !line.starts_with(' ') && !line.starts_with('\t') && !trim.is_empty() {
+                in_proxy_block = false;
+            } else if trim.starts_with("http:") || trim.starts_with("https:") {
+                let rest = if let Some(r) = trim.strip_prefix("http:") {
+                    r
+                } else if let Some(r) = trim.strip_prefix("https:") {
+                    r
+                } else {
+                    ""
+                };
+                let val = rest.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_stack_config_path() -> Option<PathBuf> {
+    if let Ok(stack_root) = std::env::var("STACK_ROOT") {
+        let p = PathBuf::from(stack_root).join("config.yaml");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".stack").join("config.yaml");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let p1 = PathBuf::from(&appdata).join("stack").join("config.yaml");
+            if p1.exists() {
+                return Some(p1);
+            }
+            let p2 = PathBuf::from(&appdata).join("local").join("bin").join("config.yaml");
+            if p2.exists() {
+                return Some(p2);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_stack_write_path() -> PathBuf {
+    if let Some(p) = get_stack_config_path() {
+        return p;
+    }
+    if let Ok(stack_root) = std::env::var("STACK_ROOT") {
+        return PathBuf::from(stack_root).join("config.yaml");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".stack").join("config.yaml");
+    }
+    PathBuf::from("config.yaml")
+}
+
+pub fn get_stack_proxy() -> Option<(String, PathBuf)> {
+    let p = get_stack_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_stack_config_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_hex_config_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('%') || trim.starts_with('#') {
+            continue;
+        }
+        if trim.contains("http_proxy,") || trim.contains("https_proxy,") {
+            if let Some((_, rest)) = trim.split_once(',') {
+                let clean = rest
+                    .trim()
+                    .trim_end_matches('.')
+                    .trim_end_matches('}')
+                    .trim()
+                    .trim_start_matches("<<")
+                    .trim_end_matches(">>")
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim();
+                if !clean.is_empty() && (clean.starts_with("http://") || clean.starts_with("https://") || clean.starts_with("socks")) {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_hex_config_path() -> Option<PathBuf> {
+    if let Ok(hex_home) = std::env::var("HEX_HOME") {
+        let p = PathBuf::from(hex_home).join("hex.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".hex").join("hex.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_hex_write_path() -> PathBuf {
+    if let Some(p) = get_hex_config_path() {
+        return p;
+    }
+    if let Ok(hex_home) = std::env::var("HEX_HOME") {
+        return PathBuf::from(hex_home).join("hex.config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".hex").join("hex.config");
+    }
+    PathBuf::from("hex.config")
+}
+
+pub fn get_hex_proxy() -> Option<(String, PathBuf)> {
+    if let Ok(p) = std::env::var("HEX_HTTP_PROXY").or_else(|_| std::env::var("HEX_HTTPS_PROXY")) {
+        let trim = p.trim().to_string();
+        if !trim.is_empty() {
+            return Some((trim, PathBuf::from("ENV:HEX_HTTP_PROXY")));
+        }
+    }
+    let p = get_hex_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_hex_config_proxy(&content)?;
+    Some((proxy, p))
 }
 
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
@@ -4654,6 +4871,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Haskell Stack Proxy (~/.stack/config.yaml)
+    if let Some((sproxy, spath)) = get_stack_proxy() {
+        let ok = verify_proxy_url(&sproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Haskell Stack proxy `{}` in {} is dead! (stack setup / stack build will fail)",
+                sproxy,
+                spath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Haskell Stack",
+            "~/.stack/config.yaml proxy",
+            sproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (stack fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Haskell Stack",
+            "~/.stack/config.yaml proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Elixir / Erlang / Gleam Hex Proxy (~/.hex/hex.config)
+    if let Some((hproxy, hpath)) = get_hex_proxy() {
+        let ok = verify_proxy_url(&hproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Hex package proxy `{}` in {} is dead! (mix deps.get / rebar3 / gleam deps will fail)",
+                hproxy,
+                hpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Hex (Elixir/Gleam)",
+            "~/.hex/hex.config proxy",
+            hproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (mix/gleam fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Hex (Elixir/Gleam)",
+            "~/.hex/hex.config proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // 14. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
@@ -4712,6 +4993,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "FAL_BASE_URL",
         "HELICONE_BASE_URL",
         "CLAUDE_BASE_URL",
+        "ELEVENLABS_BASE_URL",
+        "PORTKEY_BASE_URL",
+        "LANGFUSE_BASE_URL",
+        "CARTESIA_BASE_URL",
         "GLAB_PROXY",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
@@ -4745,7 +5030,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/NVIDIA/Doubao/RunPod/Fal/Helicone/Kling/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/NVIDIA/Doubao/RunPod/Fal/Helicone/Kling/ElevenLabs/Cartesia/Portkey/Langfuse/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -6403,5 +6688,88 @@ remote-repo-cache: ~/.cabal/packages
 
         let input_none = "-- proxy: http://127.0.0.1:7890\n-- cabal comments\n";
         assert_eq!(parse_cabal_config_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_stack_config_proxy() {
+        let input_yaml = r#"
+# Haskell stack config
+proxy:
+  http: "http://127.0.0.1:7890"
+  https: "http://127.0.0.1:7890"
+system-ghc: true
+"#;
+        assert_eq!(
+            parse_stack_config_proxy(input_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_flow = r#"
+proxy: { http: "http://127.0.0.1:7897", https: "http://127.0.0.1:7897" }
+"#;
+        assert_eq!(
+            parse_stack_config_proxy(input_flow),
+            Some("http://127.0.0.1:7897".to_string())
+        );
+
+        let input_none = "# proxy:\n#   http: http://127.0.0.1:7890\n";
+        assert_eq!(parse_stack_config_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_hex_config_proxy() {
+        let input_erlang = r#"
+% Hex config
+{http_proxy, "http://127.0.0.1:7890"}.
+{https_proxy, "http://127.0.0.1:7890"}.
+"#;
+        assert_eq!(
+            parse_hex_config_proxy(input_erlang),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_binary = r#"
+{http_proxy, <<"socks5://127.0.0.1:1080">>}.
+"#;
+        assert_eq!(
+            parse_hex_config_proxy(input_binary),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = "% {http_proxy, \"http://127.0.0.1:7890\"}.\n";
+        assert_eq!(parse_hex_config_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_clean_swiftpm_mirrors() {
+        let json_mirrors_map = r#"{
+  "mirrors": {
+    "https://github.com/apple/swift-nio.git": "https://mirror.dead.local/swift-nio.git",
+    "https://github.com/apple/swift-log.git": "https://mirror.good.org/swift-log.git"
+  }
+}"#;
+        let dead = ["https://mirror.dead.local/swift-nio.git"];
+        let (cleaned, modified) = clean_swiftpm_mirrors(json_mirrors_map, &dead);
+        assert!(modified);
+        assert!(!cleaned.contains("mirror.dead.local"));
+        assert!(cleaned.contains("mirror.good.org"));
+
+        let json_object_list = r#"{
+  "object": [
+    {
+      "original": "https://github.com/apple/swift-nio.git",
+      "mirror": "https://mirror.dead.local/swift-nio.git"
+    },
+    {
+      "original": "https://github.com/apple/swift-log.git",
+      "mirror": "https://mirror.good.org/swift-log.git"
+    }
+  ],
+  "version": 1
+}"#;
+        let (cleaned2, modified2) = clean_swiftpm_mirrors(json_object_list, &dead);
+        assert!(modified2);
+        assert!(!cleaned2.contains("mirror.dead.local"));
+        assert!(cleaned2.contains("mirror.good.org"));
     }
 }

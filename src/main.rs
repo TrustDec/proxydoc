@@ -158,7 +158,13 @@ enum Commands {
         /// Also configure Haskell Cabal proxy (~/.cabal/config)
         #[arg(long)]
         cabal: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, and cabal proxy
+        /// Also configure Haskell Stack proxy (~/.stack/config.yaml)
+        #[arg(long)]
+        stack: bool,
+        /// Also configure Elixir / Erlang / Gleam Hex proxy (~/.hex/hex.config)
+        #[arg(long)]
+        hex: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, and hex proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -260,7 +266,13 @@ enum Commands {
         /// Also unset Haskell Cabal proxy (~/.cabal/config)
         #[arg(long)]
         cabal: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, and cabal proxy
+        /// Also unset Haskell Stack proxy (~/.stack/config.yaml)
+        #[arg(long)]
+        stack: bool,
+        /// Also unset Elixir / Erlang / Gleam Hex proxy (~/.hex/hex.config)
+        #[arg(long)]
+        hex: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, and hex proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -335,6 +347,8 @@ async fn main() -> Result<()> {
             julia,
             nix,
             cabal,
+            stack,
+            hex,
             all,
             shell,
         }) => {
@@ -371,6 +385,8 @@ async fn main() -> Result<()> {
                 julia,
                 nix,
                 cabal,
+                stack,
+                hex,
                 all,
                 shell.as_deref(),
             )
@@ -408,6 +424,8 @@ async fn main() -> Result<()> {
             julia,
             nix,
             cabal,
+            stack,
+            hex,
             all,
             shell,
         }) => {
@@ -443,6 +461,8 @@ async fn main() -> Result<()> {
                 julia,
                 nix,
                 cabal,
+                stack,
+                hex,
                 all,
                 shell.as_deref(),
             )?;
@@ -1195,6 +1215,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { cabal, .. }) => {
                 assert!(cabal);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_stack() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--stack"]).unwrap();
+        match cli.command {
+            Some(Commands::On { stack, .. }) => {
+                assert!(stack);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_stack() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--stack"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { stack, .. }) => {
+                assert!(stack);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_hex() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--hex"]).unwrap();
+        match cli.command {
+            Some(Commands::On { hex, .. }) => {
+                assert!(hex);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_hex() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--hex"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { hex, .. }) => {
+                assert!(hex);
             }
             _ => panic!("Expected Off command"),
         }

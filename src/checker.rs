@@ -159,6 +159,12 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("RunPod API", "https://api.runpod.ai/v2"),
     ("Helicone AI Gateway", "https://api.helicone.ai/v1/models"),
     ("Kling AI API", "https://api.klingai.com/v1/models"),
+    ("ElevenLabs API", "https://api.elevenlabs.io/v1/models"),
+    ("Cartesia Voice AI API", "https://api.cartesia.ai"),
+    ("Portkey AI Gateway", "https://api.portkey.ai/v1/models"),
+    ("Langfuse API", "https://cloud.langfuse.com/api/public/health"),
+    ("Stackage (Haskell)", "https://www.stackage.org"),
+    ("Hex.pm Registry", "https://hex.pm/api/packages"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -691,6 +697,12 @@ mod tests {
             .iter()
             .any(|(name, _)| *name == "Crusoe Cloud API"));
         assert!(standard.iter().any(|(name, _)| *name == "Modal"));
+        assert!(standard.iter().any(|(name, _)| *name == "ElevenLabs API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Cartesia Voice AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Portkey AI Gateway"));
+        assert!(standard.iter().any(|(name, _)| *name == "Langfuse API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Stackage (Haskell)"));
+        assert!(standard.iter().any(|(name, _)| *name == "Hex.pm Registry"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
