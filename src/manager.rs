@@ -2119,6 +2119,173 @@ pub fn unset_go_proxy() -> Result<bool> {
     Ok(changed)
 }
 
+pub fn apply_bazelrc_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut found_http = false;
+    let mut found_https = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && trim.contains("--action_env=") {
+            let lower = trim.to_ascii_lowercase();
+            if lower.contains("--action_env=http_proxy=") {
+                lines.push(format!("build --action_env=HTTP_PROXY={}", proxy_url));
+                found_http = true;
+                continue;
+            } else if lower.contains("--action_env=https_proxy=") {
+                lines.push(format!("build --action_env=HTTPS_PROXY={}", proxy_url));
+                found_https = true;
+                continue;
+            } else if lower.contains("--action_env=all_proxy=") {
+                lines.push(format!("build --action_env=ALL_PROXY={}", proxy_url));
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !found_http {
+        lines.push(format!("build --action_env=HTTP_PROXY={}", proxy_url));
+    }
+    if !found_https {
+        lines.push(format!("build --action_env=HTTPS_PROXY={}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_bazelrc_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && trim.contains("--action_env=") {
+            let lower = trim.to_ascii_lowercase();
+            if lower.contains("--action_env=http_proxy=")
+                || lower.contains("--action_env=https_proxy=")
+                || lower.contains("--action_env=all_proxy=")
+            {
+                changed = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (
+        lines.join("\n") + if lines.is_empty() { "" } else { "\n" },
+        changed,
+    )
+}
+
+pub fn set_bazel_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_bazelrc_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_bazelrc_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_bazel_proxy() -> Result<bool> {
+    let path = crate::doctor::get_bazelrc_write_path();
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, changed) = remove_bazelrc_proxy(&content);
+    if changed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(changed)
+}
+
+pub fn apply_composer_proxy_json(content: &str, proxy_url: &str) -> String {
+    let mut val: serde_json::Value = if content.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(content).unwrap_or_else(|_| serde_json::json!({}))
+    };
+
+    if !val.is_object() {
+        val = serde_json::json!({});
+    }
+
+    let obj = val.as_object_mut().unwrap();
+    let config = obj
+        .entry("config")
+        .or_insert_with(|| serde_json::json!({}));
+
+    if !config.is_object() {
+        *config = serde_json::json!({});
+    }
+
+    let config_obj = config.as_object_mut().unwrap();
+    config_obj.insert(
+        "http-proxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+    config_obj.insert(
+        "https-proxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+
+    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n"
+}
+
+pub fn remove_composer_proxy_json(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            if let Some(cfg) = obj.get_mut("config").and_then(|c| c.as_object_mut()) {
+                let had_http = cfg.remove("http-proxy").is_some();
+                let had_https = cfg.remove("https-proxy").is_some();
+                if had_http || had_https {
+                    let new_content = serde_json::to_string_pretty(&val)
+                        .unwrap_or_else(|_| content.to_string())
+                        + "\n";
+                    return (new_content, true);
+                }
+            }
+        }
+    }
+    (content.to_string(), false)
+}
+
+pub fn set_composer_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_composer_config_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_composer_proxy_json(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_composer_proxy() -> Result<bool> {
+    let path = crate::doctor::get_composer_config_write_path();
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, changed) = remove_composer_proxy_json(&content);
+    if changed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(changed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -2143,6 +2310,8 @@ pub async fn turn_on(
     hg: bool,
     uv: bool,
     go: bool,
+    bazel: bool,
+    composer: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2166,6 +2335,8 @@ pub async fn turn_on(
     let set_hg = hg || all;
     let set_uv = uv || all;
     let set_go = go || all;
+    let set_bazel = bazel || all;
+    let set_composer = composer || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -2480,6 +2651,35 @@ pub async fn turn_on(
         }
     }
 
+    if set_bazel {
+        match set_bazel_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Bazel action_env ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Bazel ~/.bazelrc: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_composer {
+        match set_composer_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ PHP Composer proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!(
+                "{} Failed to update Composer config: {}",
+                "▲".yellow(),
+                e
+            ),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -2517,6 +2717,8 @@ pub fn turn_off(
     hg: bool,
     uv: bool,
     go: bool,
+    bazel: bool,
+    composer: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2540,6 +2742,8 @@ pub fn turn_off(
     let unset_hg = hg || all;
     let unset_uv = uv || all;
     let unset_go = go || all;
+    let unset_bazel = bazel || all;
+    let unset_composer = composer || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -2765,6 +2969,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Go GOPROXY unset / reset to default".green()),
             Ok(false) => eprintln!("{}", "○ Go GOPROXY was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update Go config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_bazel {
+        match unset_bazel_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Bazel action_env proxy removed from ~/.bazelrc".green()),
+            Ok(false) => eprintln!("{}", "○ Bazel action_env proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Bazel proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_composer {
+        match unset_composer_proxy() {
+            Ok(true) => eprintln!("{}", "✔ PHP Composer proxy removed from config.json".green()),
+            Ok(false) => eprintln!("{}", "○ PHP Composer proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset PHP Composer proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -3314,5 +3534,48 @@ mod tests {
         assert!(changed);
         assert!(!cleaned.contains("GOPROXY"));
         assert!(cleaned.contains("GOPRIVATE"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_bazelrc_proxy() {
+        let initial = "build --cxxopt=-std=c++17\ntest --verbose_failures\n";
+        let configured = apply_bazelrc_proxy(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("build --action_env=HTTP_PROXY=http://127.0.0.1:7890"));
+        assert!(configured.contains("build --action_env=HTTPS_PROXY=http://127.0.0.1:7890"));
+        assert!(configured.contains("--cxxopt=-std=c++17"));
+
+        // Replace existing
+        let updated = apply_bazelrc_proxy(&configured, "http://127.0.0.1:8080");
+        assert!(updated.contains("build --action_env=HTTP_PROXY=http://127.0.0.1:8080"));
+        assert!(updated.contains("build --action_env=HTTPS_PROXY=http://127.0.0.1:8080"));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_bazelrc_proxy(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("--action_env=HTTP_PROXY="));
+        assert!(!cleaned.contains("--action_env=HTTPS_PROXY="));
+        assert!(cleaned.contains("--cxxopt=-std=c++17"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_composer_proxy_json() {
+        let initial = r#"{ "repositories": { "packagist": { "type": "composer", "url": "https://packagist.org" } } }"#;
+        let configured = apply_composer_proxy_json(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("\"http-proxy\": \"http://127.0.0.1:7890\""));
+        assert!(configured.contains("\"https-proxy\": \"http://127.0.0.1:7890\""));
+        assert!(configured.contains("packagist.org"));
+
+        // Replace existing
+        let updated = apply_composer_proxy_json(&configured, "http://127.0.0.1:8080");
+        assert!(updated.contains("\"http-proxy\": \"http://127.0.0.1:8080\""));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_composer_proxy_json(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("http-proxy"));
+        assert!(!cleaned.contains("https-proxy"));
+        assert!(cleaned.contains("packagist.org"));
     }
 }

@@ -2131,6 +2131,58 @@ pub fn get_composer_config_path() -> Option<PathBuf> {
     None
 }
 
+pub fn parse_composer_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(cfg) = val.get("config") {
+            if let Some(p) = cfg.get("https-proxy").and_then(|v| v.as_str()) {
+                let trim = p.trim();
+                if !trim.is_empty() {
+                    return Some(trim.to_string());
+                }
+            }
+            if let Some(p) = cfg.get("http-proxy").and_then(|v| v.as_str()) {
+                let trim = p.trim();
+                if !trim.is_empty() {
+                    return Some(trim.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_composer_proxy() -> Option<(String, PathBuf)> {
+    if let Some(path) = get_composer_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Some(proxy) = parse_composer_proxy(&content) {
+                return Some((proxy, path));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_composer_config_write_path() -> PathBuf {
+    if let Some(p) = get_composer_config_path() {
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p1 = home.join(".composer");
+        if p1.is_dir() {
+            return p1.join("config.json");
+        }
+        let p2 = home.join(".config").join("composer");
+        if p2.is_dir() {
+            return p2.join("config.json");
+        }
+        return home.join(".composer").join("config.json");
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        return config_dir.join("composer").join("config.json");
+    }
+    PathBuf::from("config.json")
+}
+
 pub fn parse_bazelrc_proxy(content: &str) -> Option<String> {
     for line in content.lines() {
         let trim = line.trim();
@@ -2165,6 +2217,27 @@ pub fn get_bazelrc_path() -> Option<PathBuf> {
         return Some(local);
     }
     None
+}
+
+pub fn get_bazel_proxy() -> Option<(String, PathBuf)> {
+    if let Some(path) = get_bazelrc_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Some(proxy) = parse_bazelrc_proxy(&content) {
+                return Some((proxy, path));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_bazelrc_write_path() -> PathBuf {
+    if let Some(p) = get_bazelrc_path() {
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".bazelrc");
+    }
+    PathBuf::from(".bazelrc")
 }
 
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
@@ -3325,9 +3398,39 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // PHP Composer Packagist Mirror
+    // PHP Composer Packagist Mirror & Proxy
     if let Some(comp_path) = get_composer_config_path() {
         if let Ok(content) = std::fs::read_to_string(&comp_path) {
+            if let Some(cproxy) = parse_composer_proxy(&content) {
+                let ok = verify_proxy_url(&cproxy).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "PHP Composer proxy `{}` in {} is dead! (composer install will fail with cURL error)",
+                        cproxy, comp_path.display()
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "PHP Composer",
+                    "Config Proxy",
+                    cproxy,
+                    if ok {
+                        "● Reachable Proxy".green().to_string()
+                    } else {
+                        "▲ DEAD PROXY PORT! (composer install fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            } else {
+                items.push(DiagItem::new(
+                    "PHP Composer",
+                    "Config Proxy",
+                    "(not set)".dimmed().to_string(),
+                    "○ Inherits Shell or Direct".dimmed().to_string(),
+                ));
+            }
+
             if let Some(mirror_url) = parse_composer_packagist_repo(&content) {
                 let ok = verify_proxy_url(&mirror_url).await;
                 if !ok {
@@ -3351,6 +3454,13 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 ));
             }
         }
+    } else {
+        items.push(DiagItem::new(
+            "PHP Composer",
+            "Config Proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
     }
 
     // Bazel Proxy Configuration (~/.bazelrc)
@@ -3377,8 +3487,65 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                             .to_string()
                     },
                 ));
+            } else {
+                items.push(DiagItem::new(
+                    "Bazel",
+                    "~/.bazelrc action_env",
+                    "(not set)".dimmed().to_string(),
+                    "○ Inherits Shell or Direct".dimmed().to_string(),
+                ));
             }
         }
+    } else {
+        items.push(DiagItem::new(
+            "Bazel",
+            "~/.bazelrc action_env",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Flutter / Dart Environment & Mirrors
+    let flutter_vars = [
+        ("PUB_HOSTED_URL", "Dart/Flutter package repository mirror"),
+        ("FLUTTER_STORAGE_BASE_URL", "Flutter SDK download mirror"),
+    ];
+    let mut flutter_found = false;
+    for (var, desc) in flutter_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                flutter_found = true;
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Flutter/Dart environment variable `{}` points to unreachable mirror `{}`! (flutter pub get or engine download will fail)",
+                        var, trim
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Flutter / Dart",
+                    format!("{} ({})", var, desc),
+                    trim,
+                    if ok {
+                        "● Reachable Mirror".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE MIRROR! (flutter fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            }
+        }
+    }
+    if !flutter_found {
+        items.push(DiagItem::new(
+            "Flutter / Dart",
+            "PUB_HOSTED_URL & FLUTTER_STORAGE_BASE_URL",
+            "(not set)".dimmed().to_string(),
+            "○ Direct (pub.dev & googleapis.com)".dimmed().to_string(),
+        ));
     }
 
     // 14. AI Developer Endpoints (Base URLs)
@@ -3410,6 +3577,11 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "REPLICATE_API_BASE",
         "QIANFAN_BASE_URL",
         "DEEPL_BASE_URL",
+        "STEPFUN_BASE_URL",
+        "LINGYIWANWU_BASE_URL",
+        "YI_BASE_URL",
+        "VOYAGE_BASE_URL",
+        "NOVITA_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -4837,6 +5009,36 @@ cache-dir = "~/.cache/uv"
 
         let json2 = r#"{ "config": {} }"#;
         assert_eq!(parse_composer_packagist_repo(json2), None);
+    }
+
+    #[test]
+    fn test_parse_composer_proxy() {
+        let json1 = r#"{
+            "config": {
+                "http-proxy": "http://127.0.0.1:7890",
+                "https-proxy": "http://127.0.0.1:7890"
+            }
+        }"#;
+        assert_eq!(
+            parse_composer_proxy(json1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let json2 = r#"{
+            "config": {
+                "http-proxy": "http://127.0.0.1:8080"
+            }
+        }"#;
+        assert_eq!(
+            parse_composer_proxy(json2),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let json3 = r#"{ "config": {} }"#;
+        assert_eq!(parse_composer_proxy(json3), None);
+
+        let json4 = "invalid json";
+        assert_eq!(parse_composer_proxy(json4), None);
     }
 
     #[test]

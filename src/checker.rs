@@ -115,6 +115,10 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "https://qianfan.baidubce.com/v2/models",
     ),
     ("DeepL API", "https://api-free.deepl.com/v2/usage"),
+    ("StepFun (Step-2) API", "https://api.stepfun.com/v1/models"),
+    ("01.AI (Yi) API", "https://api.lingyiwanwu.com/v1/models"),
+    ("Voyage AI API", "https://api.voyageai.com/v1/models"),
+    ("Novita AI API", "https://api.novita.ai/v3/openai/models"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -613,6 +617,12 @@ mod tests {
             .iter()
             .any(|(name, _)| *name == "Baidu Qianfan (ERNIE)"));
         assert!(standard.iter().any(|(name, _)| *name == "DeepL API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "StepFun (Step-2) API"));
+        assert!(standard.iter().any(|(name, _)| *name == "01.AI (Yi) API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Voyage AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Novita AI API"));
         assert!(standard.iter().any(|(name, _)| *name == "Yarn Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "PyPI Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "Go Proxy"));

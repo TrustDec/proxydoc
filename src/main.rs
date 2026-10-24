@@ -131,7 +131,13 @@ enum Commands {
         /// Also configure Go modules proxy (go/env & GOPROXY)
         #[arg(long)]
         go: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, and go proxy
+        /// Also configure Bazel proxy (~/.bazelrc action_env)
+        #[arg(long)]
+        bazel: bool,
+        /// Also configure PHP Composer proxy (config.json)
+        #[arg(long)]
+        composer: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, and composer proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -206,7 +212,13 @@ enum Commands {
         /// Also unset Go modules proxy (go/env & GOPROXY)
         #[arg(long)]
         go: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, and go proxy
+        /// Also unset Bazel proxy (~/.bazelrc action_env)
+        #[arg(long)]
+        bazel: bool,
+        /// Also unset PHP Composer proxy (config.json)
+        #[arg(long)]
+        composer: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, and composer proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -272,6 +284,8 @@ async fn main() -> Result<()> {
             hg,
             uv,
             go,
+            bazel,
+            composer,
             all,
             shell,
         }) => {
@@ -299,6 +313,8 @@ async fn main() -> Result<()> {
                 hg,
                 uv,
                 go,
+                bazel,
+                composer,
                 all,
                 shell.as_deref(),
             )
@@ -327,6 +343,8 @@ async fn main() -> Result<()> {
             hg,
             uv,
             go,
+            bazel,
+            composer,
             all,
             shell,
         }) => {
@@ -353,6 +371,8 @@ async fn main() -> Result<()> {
                 hg,
                 uv,
                 go,
+                bazel,
+                composer,
                 all,
                 shell.as_deref(),
             )?;
@@ -907,6 +927,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { go, .. }) => {
                 assert!(go);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_bazel() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--bazel"]).unwrap();
+        match cli.command {
+            Some(Commands::On { bazel, .. }) => {
+                assert!(bazel);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_bazel() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--bazel"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { bazel, .. }) => {
+                assert!(bazel);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_composer() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--composer"]).unwrap();
+        match cli.command {
+            Some(Commands::On { composer, .. }) => {
+                assert!(composer);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_composer() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--composer"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { composer, .. }) => {
+                assert!(composer);
             }
             _ => panic!("Expected Off command"),
         }
