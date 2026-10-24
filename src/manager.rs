@@ -3484,6 +3484,99 @@ pub fn unset_cpan_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_luarocks_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut set_http = false;
+    let mut set_https = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with("--") {
+            let lower = trim.to_lowercase();
+            if lower.starts_with("http_proxy") || lower.starts_with("variables.http_proxy") {
+                lines.push(format!("http_proxy = \"{}\"", proxy_url));
+                set_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy") || lower.starts_with("variables.https_proxy") {
+                lines.push(format!("https_proxy = \"{}\"", proxy_url));
+                set_https = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !set_http {
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+    }
+    if !set_https {
+        lines.push(format!("https_proxy = \"{}\"", proxy_url));
+    }
+
+    let mut res = lines.join("\n");
+    if content.ends_with('\n') || content.is_empty() {
+        res.push('\n');
+    }
+    res
+}
+
+pub fn remove_luarocks_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with("--") {
+            let lower = trim.to_lowercase();
+            if lower.contains("http_proxy") || lower.contains("https_proxy") {
+                modified = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (
+        lines.join("\n")
+            + if lines.is_empty() {
+                ""
+            } else if content.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            },
+        modified,
+    )
+}
+
+pub fn set_luarocks_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_luarocks_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_luarocks_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_luarocks_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_luarocks_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_luarocks_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -3523,6 +3616,7 @@ pub async fn turn_on(
     opam: bool,
     lein: bool,
     cpan: bool,
+    luarocks: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3561,6 +3655,7 @@ pub async fn turn_on(
     let set_opam = opam || all;
     let set_lein = lein || all;
     let set_cpan = cpan || all;
+    let set_luarocks = luarocks || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -4039,6 +4134,16 @@ pub async fn turn_on(
         }
     }
 
+    if set_luarocks {
+        match set_luarocks_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ LuaRocks proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update LuaRocks config.lua: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -4091,6 +4196,7 @@ pub fn turn_off(
     opam: bool,
     lein: bool,
     cpan: bool,
+    luarocks: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4129,6 +4235,7 @@ pub fn turn_off(
     let unset_opam = opam || all;
     let unset_lein = lein || all;
     let unset_cpan = cpan || all;
+    let unset_luarocks = luarocks || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -4474,6 +4581,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Perl CPAN proxy removed from MyConfig.pm".green()),
             Ok(false) => eprintln!("{}", "○ Perl CPAN proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Perl CPAN proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_luarocks {
+        match unset_luarocks_proxy() {
+            Ok(true) => eprintln!("{}", "✔ LuaRocks proxy removed from config.lua".green()),
+            Ok(false) => eprintln!("{}", "○ LuaRocks proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset LuaRocks proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -5351,5 +5466,26 @@ contexts: []
         assert!(!cleaned.contains("'http_proxy'"));
         assert!(!cleaned.contains("'ftp_proxy'"));
         assert!(cleaned.contains("urllist"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_luarocks_proxy() {
+        let initial = "-- LuaRocks configuration\nrocks_servers = {\n   \"https://luarocks.org\"\n}\n";
+        let with_proxy = apply_luarocks_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("http_proxy = \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("https_proxy = \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("rocks_servers"));
+
+        // Replace existing
+        let updated = apply_luarocks_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("http_proxy = \"http://127.0.0.1:1080\""));
+        assert!(updated.contains("https_proxy = \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_luarocks_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(!cleaned.contains("https_proxy"));
+        assert!(cleaned.contains("rocks_servers"));
     }
 }

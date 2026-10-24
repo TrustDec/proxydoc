@@ -176,7 +176,10 @@ enum Commands {
         /// Also configure Perl CPAN package manager proxy (~/.cpan/CPAN/MyConfig.pm)
         #[arg(long)]
         cpan: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, and cpan proxy
+        /// Also configure Lua (LuaRocks) package manager proxy (~/.luarocks/config.lua)
+        #[arg(long)]
+        luarocks: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, and luarocks proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -296,7 +299,10 @@ enum Commands {
         /// Also unset Perl CPAN package manager proxy (~/.cpan/CPAN/MyConfig.pm)
         #[arg(long)]
         cpan: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, and cpan proxy
+        /// Also unset Lua (LuaRocks) package manager proxy (~/.luarocks/config.lua)
+        #[arg(long)]
+        luarocks: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, and luarocks proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -377,6 +383,7 @@ async fn main() -> Result<()> {
             opam,
             lein,
             cpan,
+            luarocks,
             all,
             shell,
         }) => {
@@ -419,6 +426,7 @@ async fn main() -> Result<()> {
                 opam,
                 lein,
                 cpan,
+                luarocks,
                 all,
                 shell.as_deref(),
             )
@@ -462,6 +470,7 @@ async fn main() -> Result<()> {
             opam,
             lein,
             cpan,
+            luarocks,
             all,
             shell,
         }) => {
@@ -503,6 +512,7 @@ async fn main() -> Result<()> {
                 opam,
                 lein,
                 cpan,
+                luarocks,
                 all,
                 shell.as_deref(),
             )?;
@@ -1387,6 +1397,28 @@ mod tests {
         match cli.command {
             Some(Commands::Off { cpan, .. }) => {
                 assert!(cpan);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_luarocks() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--luarocks"]).unwrap();
+        match cli.command {
+            Some(Commands::On { luarocks, .. }) => {
+                assert!(luarocks);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_luarocks() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--luarocks"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { luarocks, .. }) => {
+                assert!(luarocks);
             }
             _ => panic!("Expected Off command"),
         }

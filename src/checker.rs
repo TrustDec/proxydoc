@@ -177,6 +177,11 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("AssemblyAI Speech API", "https://api.assemblyai.com/v2/transcript"),
     ("Clojars (Clojure)", "https://clojars.org"),
     ("MetaCPAN (Perl)", "https://fastapi.metacpan.org/v1"),
+    ("Jina AI API", "https://r.jina.ai"),
+    ("Firecrawl API", "https://api.firecrawl.dev"),
+    ("Weaviate Cloud", "https://api.weaviate.io"),
+    ("Chroma Vector DB", "https://api.trychroma.com"),
+    ("LuaRocks Registry", "https://luarocks.org"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -721,6 +726,11 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "AssemblyAI Speech API"));
         assert!(standard.iter().any(|(name, _)| *name == "Clojars (Clojure)"));
         assert!(standard.iter().any(|(name, _)| *name == "MetaCPAN (Perl)"));
+        assert!(standard.iter().any(|(name, _)| *name == "Jina AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Firecrawl API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Weaviate Cloud"));
+        assert!(standard.iter().any(|(name, _)| *name == "Chroma Vector DB"));
+        assert!(standard.iter().any(|(name, _)| *name == "LuaRocks Registry"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

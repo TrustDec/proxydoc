@@ -3466,6 +3466,83 @@ pub fn get_cpan_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn parse_luarocks_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("--") {
+            continue;
+        }
+        let lower = trim.to_lowercase();
+        if lower.contains("http_proxy") || lower.contains("https_proxy") {
+            if let Some((_, v)) = trim.split_once('=') {
+                let clean = v.trim().trim_matches(',').trim_matches(';').trim();
+                let clean = clean.trim_matches('"').trim_matches('\'').trim();
+                if !clean.is_empty()
+                    && (clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks"))
+                {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_luarocks_config_path() -> Option<PathBuf> {
+    if let Ok(path_str) = std::env::var("LUAROCKS_CONFIG") {
+        let p = PathBuf::from(path_str);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".luarocks").join("config.lua"),
+            home.join(".luarocks").join("config-5.4.lua"),
+            home.join(".luarocks").join("config-5.3.lua"),
+            home.join(".luarocks").join("config-5.1.lua"),
+            home.join(".config").join("luarocks").join("config.lua"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("luarocks").join("config.lua");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_luarocks_write_path() -> PathBuf {
+    if let Some(p) = get_luarocks_config_path() {
+        return p;
+    }
+    if let Ok(path_str) = std::env::var("LUAROCKS_CONFIG") {
+        return PathBuf::from(path_str);
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".luarocks").join("config.lua");
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        return PathBuf::from(appdata).join("luarocks").join("config.lua");
+    }
+    PathBuf::from(".luarocks").join("config.lua")
+}
+
+pub fn get_luarocks_proxy() -> Option<(String, PathBuf)> {
+    let p = get_luarocks_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_luarocks_proxy(&content)?;
+    Some((proxy, p))
+}
+
 pub fn parse_vcpkg_asset_url(val: &str) -> Option<String> {
     for part in val.split(|c| c == ';' || c == ',') {
         let trim = part.trim();
@@ -3511,6 +3588,125 @@ pub fn get_terraform_config_paths() -> Vec<PathBuf> {
         }
     }
     paths
+}
+
+pub fn get_vcpkg_configuration_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(vcpkg_conf) = std::env::var("VCPKG_CONFIGURATION_FILE") {
+        let p = PathBuf::from(vcpkg_conf);
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    let cwd_conf = PathBuf::from("vcpkg-configuration.json");
+    if cwd_conf.exists() && !paths.contains(&cwd_conf) {
+        paths.push(cwd_conf);
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".vcpkg").join("vcpkg-configuration.json"),
+            home.join(".config").join("vcpkg").join("vcpkg-configuration.json"),
+        ];
+        for c in candidates {
+            if c.exists() && !paths.contains(&c) {
+                paths.push(c);
+            }
+        }
+    }
+    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+        let p = PathBuf::from(localappdata).join("vcpkg").join("vcpkg-configuration.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn parse_vcpkg_configuration_registries(content: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(content) else {
+        return results;
+    };
+
+    if let Some(def_reg) = val.get("default-registry") {
+        for key in ["repository", "location", "baseUrl"] {
+            if let Some(url) = def_reg.get(key).and_then(|u| u.as_str()) {
+                if url.starts_with("http://") || url.starts_with("https://") {
+                    if !results.contains(&url.to_string()) {
+                        results.push(url.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(registries) = val.get("registries").and_then(|r| r.as_array()) {
+        for reg in registries {
+            for key in ["repository", "location", "baseUrl"] {
+                if let Some(url) = reg.get(key).and_then(|u| u.as_str()) {
+                    if url.starts_with("http://") || url.starts_with("https://") {
+                        if !results.contains(&url.to_string()) {
+                            results.push(url.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
+pub fn clean_vcpkg_configuration_registries(
+    content: &str,
+    dead_registries: &[&str],
+) -> (String, bool) {
+    let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) else {
+        return (content.to_string(), false);
+    };
+
+    let mut modified = false;
+
+    if let Some(def_reg) = val.get_mut("default-registry").and_then(|d| d.as_object_mut()) {
+        for key in ["repository", "location", "baseUrl"] {
+            if let Some(url_val) = def_reg.get(key).and_then(|u| u.as_str()) {
+                if dead_registries.contains(&url_val) {
+                    if url_val != "https://github.com/microsoft/vcpkg" {
+                        def_reg.insert(
+                            key.to_string(),
+                            serde_json::Value::String("https://github.com/microsoft/vcpkg".to_string()),
+                        );
+                        modified = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(regs) = val.get_mut("registries").and_then(|r| r.as_array_mut()) {
+        let orig_len = regs.len();
+        regs.retain(|reg| {
+            for key in ["repository", "location", "baseUrl"] {
+                if let Some(u) = reg.get(key).and_then(|v| v.as_str()) {
+                    if dead_registries.contains(&u) {
+                        return false;
+                    }
+                }
+            }
+            true
+        });
+        if regs.len() != orig_len {
+            modified = true;
+        }
+    }
+
+    if modified {
+        if let Ok(formatted) = serde_json::to_string_pretty(&val) {
+            return (formatted + "\n", true);
+        }
+    }
+
+    (content.to_string(), false)
 }
 
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
@@ -5578,6 +5774,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Lua (LuaRocks) Proxy (~/.luarocks/config.lua)
+    if let Some((lproxy, lpath)) = get_luarocks_proxy() {
+        let ok = verify_proxy_url(&lproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "LuaRocks proxy `{}` in {} is dead! (luarocks install will fail)",
+                lproxy,
+                lpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Lua (LuaRocks)",
+            "~/.luarocks/config.lua proxy",
+            lproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (luarocks fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Lua (LuaRocks)",
+            "~/.luarocks/config.lua proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -5628,6 +5856,39 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             "(not set)".dimmed().to_string(),
             "○ Direct / Official Mirrors".dimmed().to_string(),
         ));
+    }
+
+    // C/C++ vcpkg Configuration Registries (vcpkg-configuration.json)
+    let vcpkg_paths = get_vcpkg_configuration_paths();
+    if !vcpkg_paths.is_empty() {
+        for vpath in vcpkg_paths {
+            if let Ok(content) = std::fs::read_to_string(&vpath) {
+                let registries = parse_vcpkg_configuration_registries(&content);
+                for reg in registries {
+                    let ok = verify_proxy_url(&reg).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "vcpkg configuration registry `{}` in {} is unreachable! (vcpkg install will fail)",
+                            reg,
+                            vpath.display()
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "C/C++ vcpkg",
+                        format!("{} registry", vpath.display()),
+                        reg,
+                        if ok {
+                            "● Reachable Registry".green().to_string()
+                        } else {
+                            "▲ UNREACHABLE REGISTRY! (vcpkg fails)"
+                                .red()
+                                .bold()
+                                .to_string()
+                        },
+                    ));
+                }
+            }
+        }
     }
 
     // 14. AI Developer Endpoints (Base URLs)
@@ -5703,6 +5964,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "EXA_BASE_URL",
         "QDRANT_URL",
         "ASSEMBLYAI_BASE_URL",
+        "JINA_BASE_URL",
+        "FIRECRAWL_BASE_URL",
+        "WEAVIATE_URL",
+        "CHROMA_URL",
     ];
     let mut ai_found = false;
     for var in ai_vars {
@@ -6101,6 +6366,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("api.assemblyai.com", 443),
         ("clojars.org", 443),
         ("fastapi.metacpan.org", 443),
+        ("luarocks.org", 443),
+        ("r.jina.ai", 443),
+        ("api.firecrawl.dev", 443),
+        ("api.weaviate.io", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -7658,5 +7927,80 @@ $CPAN::Config = {
 
         let input_none = "clear;files,C:\\vcpkg-cache,readwrite";
         assert_eq!(parse_vcpkg_asset_url(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_luarocks_proxy() {
+        let input_std = r#"
+variables = {
+    HTTP_PROXY = "http://127.0.0.1:7890",
+    HTTPS_PROXY = "http://127.0.0.1:7890",
+}
+"#;
+        assert_eq!(
+            parse_luarocks_proxy(input_std),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_simple = "http_proxy = 'http://127.0.0.1:1080'\nhttps_proxy = 'http://127.0.0.1:1080'";
+        assert_eq!(
+            parse_luarocks_proxy(input_simple),
+            Some("http://127.0.0.1:1080".to_string())
+        );
+
+        let input_commented = "-- http_proxy = 'http://127.0.0.1:7890'\n";
+        assert_eq!(parse_luarocks_proxy(input_commented), None);
+    }
+
+    #[test]
+    fn test_parse_vcpkg_configuration_registries() {
+        let input_json = r#"{
+  "default-registry": {
+    "kind": "git",
+    "repository": "https://github.com/microsoft/vcpkg",
+    "baseline": "12345"
+  },
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://mirror.example.com/vcpkg-custom",
+      "baseline": "abcde"
+    }
+  ]
+}"#;
+        let regs = parse_vcpkg_configuration_registries(input_json);
+        assert_eq!(regs.len(), 2);
+        assert_eq!(regs[0], "https://github.com/microsoft/vcpkg");
+        assert_eq!(regs[1], "https://mirror.example.com/vcpkg-custom");
+    }
+
+    #[test]
+    fn test_clean_vcpkg_configuration_registries() {
+        let input_json = r#"{
+  "default-registry": {
+    "kind": "git",
+    "repository": "https://dead-mirror.example.com/vcpkg",
+    "baseline": "12345"
+  },
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://mirror.example.com/dead-reg",
+      "baseline": "abc"
+    },
+    {
+      "kind": "git",
+      "repository": "https://live.example.com/reg",
+      "baseline": "xyz"
+    }
+  ]
+}"#;
+        let dead = ["https://dead-mirror.example.com/vcpkg", "https://mirror.example.com/dead-reg"];
+        let (cleaned, modified) = clean_vcpkg_configuration_registries(input_json, &dead);
+        assert!(modified);
+        let remaining = parse_vcpkg_configuration_registries(&cleaned);
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(remaining[0], "https://github.com/microsoft/vcpkg");
+        assert_eq!(remaining[1], "https://live.example.com/reg");
     }
 }
