@@ -3709,6 +3709,329 @@ pub fn clean_vcpkg_configuration_registries(
     (content.to_string(), false)
 }
 
+pub fn parse_nimble_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let lower = trim.to_lowercase();
+        if lower.starts_with("http_proxy") || lower.starts_with("https_proxy") {
+            if let Some((_, v)) = trim.split_once('=') {
+                let clean = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !clean.is_empty()
+                    && (clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks"))
+                {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nimble_config_path() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("NIMBLE_DIR") {
+        let p = PathBuf::from(dir).join("nimble.ini");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("nimble").join("nimble.ini");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".config").join("nimble").join("nimble.ini"),
+            home.join(".nimble").join("nimble.ini"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("nimble").join("nimble.ini");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_nimble_write_path() -> PathBuf {
+    if let Some(p) = get_nimble_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("NIMBLE_DIR") {
+        return PathBuf::from(dir).join("nimble.ini");
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        return config_dir.join("nimble").join("nimble.ini");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("nimble").join("nimble.ini");
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        return PathBuf::from(appdata).join("nimble").join("nimble.ini");
+    }
+    PathBuf::from("nimble.ini")
+}
+
+pub fn get_nimble_proxy() -> Option<(String, PathBuf)> {
+    let p = get_nimble_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_nimble_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_rebar3_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('%') || trim.starts_with('#') {
+            continue;
+        }
+        if trim.contains("http_proxy,") || trim.contains("https_proxy,") {
+            if let Some((_, rest)) = trim.split_once(',') {
+                let clean = rest
+                    .trim()
+                    .trim_end_matches('.')
+                    .trim_end_matches('}')
+                    .trim()
+                    .trim_start_matches("<<")
+                    .trim_end_matches(">>")
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim();
+                if !clean.is_empty()
+                    && (clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks"))
+                {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_rebar3_config_path() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("REBAR_GLOBAL_CONFIG_DIR") {
+        let p = PathBuf::from(dir).join("rebar.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("rebar3").join("rebar.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".config").join("rebar3").join("rebar.config"),
+            home.join(".rebar3").join("rebar.config"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("rebar3").join("rebar.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_rebar3_write_path() -> PathBuf {
+    if let Some(p) = get_rebar3_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("REBAR_GLOBAL_CONFIG_DIR") {
+        return PathBuf::from(dir).join("rebar.config");
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        return config_dir.join("rebar3").join("rebar.config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("rebar3").join("rebar.config");
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        return PathBuf::from(appdata).join("rebar3").join("rebar.config");
+    }
+    PathBuf::from("rebar.config")
+}
+
+pub fn get_rebar3_proxy() -> Option<(String, PathBuf)> {
+    let p = get_rebar3_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_rebar3_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
+        let p = PathBuf::from(helm_home).join("repositories.yaml");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("helm").join("repositories.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".config").join("helm").join("repositories.yaml"),
+            home.join("Library")
+                .join("Preferences")
+                .join("helm")
+                .join("repositories.yaml"),
+        ];
+        for c in candidates {
+            if c.exists() && !paths.contains(&c) {
+                paths.push(c);
+            }
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("helm").join("repositories.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn parse_helm_repositories(content: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut in_repos = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if trim == "repositories:" {
+            in_repos = true;
+            continue;
+        }
+        if in_repos && !line.starts_with(' ') && !line.starts_with('\t') && trim.ends_with(':') {
+            in_repos = false;
+        }
+
+        if in_repos || line.contains("url:") {
+            if let Some((k, v)) = trim.split_once(':') {
+                let k_trim = k.trim().trim_start_matches('-').trim();
+                if k_trim == "url" {
+                    let clean = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !clean.is_empty()
+                        && (clean.starts_with("http://") || clean.starts_with("https://"))
+                        && !urls.contains(&clean.to_string())
+                    {
+                        urls.push(clean.to_string());
+                    }
+                }
+            }
+        }
+    }
+    urls
+}
+
+pub fn clean_helm_repositories(content: &str, dead_urls: &[&str]) -> (String, bool) {
+    if dead_urls.is_empty() {
+        return (content.to_string(), false);
+    }
+
+    let mut out_lines = Vec::new();
+    let mut current_block: Vec<String> = Vec::new();
+    let mut block_has_dead = false;
+    let mut in_repos = false;
+    let mut modified = false;
+
+    let flush_block = |out: &mut Vec<String>,
+                       block: &mut Vec<String>,
+                       has_dead: bool,
+                       mod_flag: &mut bool| {
+        if block.is_empty() {
+            return;
+        }
+        if has_dead {
+            out.push("  # [proxydoc disabled unreachable helm repository]".to_string());
+            for l in block.drain(..) {
+                out.push(format!("  # {}", l));
+            }
+            *mod_flag = true;
+        } else {
+            out.extend(block.drain(..));
+        }
+    };
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim == "repositories:" {
+            flush_block(&mut out_lines, &mut current_block, block_has_dead, &mut modified);
+            block_has_dead = false;
+            in_repos = true;
+            out_lines.push(line.to_string());
+            continue;
+        }
+
+        if in_repos {
+            if trim.starts_with("- ") {
+                flush_block(&mut out_lines, &mut current_block, block_has_dead, &mut modified);
+                block_has_dead = false;
+                for dead in dead_urls {
+                    if line.contains(dead) {
+                        block_has_dead = true;
+                    }
+                }
+                current_block.push(line.to_string());
+                continue;
+            } else if !line.starts_with(' ') && !line.starts_with('\t') && trim.ends_with(':') {
+                flush_block(&mut out_lines, &mut current_block, block_has_dead, &mut modified);
+                block_has_dead = false;
+                in_repos = false;
+                out_lines.push(line.to_string());
+                continue;
+            } else {
+                for dead in dead_urls {
+                    if line.contains(dead) {
+                        block_has_dead = true;
+                    }
+                }
+                current_block.push(line.to_string());
+                continue;
+            }
+        }
+
+        out_lines.push(line.to_string());
+    }
+
+    flush_block(&mut out_lines, &mut current_block, block_has_dead, &mut modified);
+
+    let mut res = out_lines.join("\n");
+    if content.ends_with('\n') {
+        res.push('\n');
+    }
+    (res, modified)
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -5806,6 +6129,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Nim (Nimble) Proxy (~/.config/nimble/nimble.ini)
+    if let Some((nproxy, npath)) = get_nimble_proxy() {
+        let ok = verify_proxy_url(&nproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Nimble proxy `{}` in {} is dead! (nimble install will fail)",
+                nproxy,
+                npath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Nim (Nimble)",
+            "~/.config/nimble/nimble.ini proxy",
+            nproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (nimble fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Nim (Nimble)",
+            "~/.config/nimble/nimble.ini proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Erlang (Rebar3) Proxy (~/.config/rebar3/rebar.config)
+    if let Some((rproxy, rpath)) = get_rebar3_proxy() {
+        let ok = verify_proxy_url(&rproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Rebar3 proxy `{}` in {} is dead! (rebar3 compile/update will fail)",
+                rproxy,
+                rpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Erlang (Rebar3)",
+            "~/.config/rebar3/rebar.config proxy",
+            rproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (rebar3 fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Erlang (Rebar3)",
+            "~/.config/rebar3/rebar.config proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -5881,6 +6268,39 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                             "● Reachable Registry".green().to_string()
                         } else {
                             "▲ UNREACHABLE REGISTRY! (vcpkg fails)"
+                                .red()
+                                .bold()
+                                .to_string()
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    // Kubernetes Helm Chart Repositories (~/.config/helm/repositories.yaml)
+    let helm_paths = get_helm_repositories_paths();
+    if !helm_paths.is_empty() {
+        for hpath in helm_paths {
+            if let Ok(content) = std::fs::read_to_string(&hpath) {
+                let repos = parse_helm_repositories(&content);
+                for repo in repos {
+                    let ok = verify_proxy_url(&repo).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "Helm chart repository `{}` in {} is unreachable! (helm repo update will fail)",
+                            repo,
+                            hpath.display()
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "Kubernetes Helm",
+                        format!("{} repo", hpath.display()),
+                        repo,
+                        if ok {
+                            "● Reachable Chart Repo".green().to_string()
+                        } else {
+                            "▲ UNREACHABLE REPO! (helm fails)"
                                 .red()
                                 .bold()
                                 .to_string()
@@ -6367,6 +6787,9 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("clojars.org", 443),
         ("fastapi.metacpan.org", 443),
         ("luarocks.org", 443),
+        ("nimble.directory", 443),
+        ("repo.hex.pm", 443),
+        ("api.perplexity.ai", 443),
         ("r.jina.ai", 443),
         ("api.firecrawl.dev", 443),
         ("api.weaviate.io", 443),
@@ -8002,5 +8425,89 @@ variables = {
         assert_eq!(remaining.len(), 2);
         assert_eq!(remaining[0], "https://github.com/microsoft/vcpkg");
         assert_eq!(remaining[1], "https://live.example.com/reg");
+    }
+
+    #[test]
+    fn test_parse_nimble_proxy() {
+        let input_ini = r#"
+# Nimble configuration file
+[Package]
+http_proxy = "http://127.0.0.1:7890"
+https_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_nimble_proxy(input_ini),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_simple = "http_proxy = http://127.0.0.1:1080\n";
+        assert_eq!(
+            parse_nimble_proxy(input_simple),
+            Some("http://127.0.0.1:1080".to_string())
+        );
+
+        let input_commented = "; http_proxy = \"http://127.0.0.1:7890\"\n# https_proxy = 127.0.0.1\n";
+        assert_eq!(parse_nimble_proxy(input_commented), None);
+    }
+
+    #[test]
+    fn test_parse_rebar3_proxy() {
+        let input_erlang = r#"
+%% Rebar3 global configuration
+{http_proxy, "http://127.0.0.1:7890"}.
+{https_proxy, "http://127.0.0.1:7890"}.
+"#;
+        assert_eq!(
+            parse_rebar3_proxy(input_erlang),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_binary = r#"
+{http_proxy, <<"socks5://127.0.0.1:1080">>}.
+"#;
+        assert_eq!(
+            parse_rebar3_proxy(input_binary),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_commented = "% {http_proxy, \"http://127.0.0.1:7890\"}.\n";
+        assert_eq!(parse_rebar3_proxy(input_commented), None);
+    }
+
+    #[test]
+    fn test_parse_helm_repositories() {
+        let input_yaml = r#"
+apiVersion: ""
+generated: "2024-01-01T00:00:00Z"
+repositories:
+  - name: stable
+    url: https://charts.helm.sh/stable
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+"#;
+        let repos = parse_helm_repositories(input_yaml);
+        assert_eq!(repos.len(), 2);
+        assert_eq!(repos[0], "https://charts.helm.sh/stable");
+        assert_eq!(repos[1], "https://charts.bitnami.com/bitnami");
+    }
+
+    #[test]
+    fn test_clean_helm_repositories() {
+        let input_yaml = r#"apiVersion: ""
+generated: "2024-01-01T00:00:00Z"
+repositories:
+  - name: dead-repo
+    url: https://dead.helm.example.com/charts
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+"#;
+        let dead = ["https://dead.helm.example.com/charts"];
+        let (cleaned, modified) = clean_helm_repositories(input_yaml, &dead);
+        assert!(modified);
+        assert!(cleaned.contains("# [proxydoc disabled unreachable helm repository]"));
+        assert!(cleaned.contains("#   - name: dead-repo"));
+        assert!(cleaned.contains("https://charts.bitnami.com/bitnami"));
+        let remaining = parse_helm_repositories(&cleaned);
+        assert_eq!(remaining, vec!["https://charts.bitnami.com/bitnami".to_string()]);
     }
 }

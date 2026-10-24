@@ -3577,6 +3577,190 @@ pub fn unset_luarocks_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_nimble_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut set_http = false;
+    let mut set_https = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            let lower = trim.to_lowercase();
+            if lower.starts_with("http_proxy") {
+                lines.push(format!("http_proxy = \"{}\"", proxy_url));
+                set_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy") {
+                lines.push(format!("https_proxy = \"{}\"", proxy_url));
+                set_https = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !set_http {
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+    }
+    if !set_https {
+        lines.push(format!("https_proxy = \"{}\"", proxy_url));
+    }
+
+    let mut res = lines.join("\n");
+    if content.ends_with('\n') || content.is_empty() {
+        res.push('\n');
+    }
+    res
+}
+
+pub fn remove_nimble_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            let lower = trim.to_lowercase();
+            if lower.starts_with("http_proxy") || lower.starts_with("https_proxy") {
+                modified = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (
+        lines.join("\n")
+            + if lines.is_empty() {
+                ""
+            } else if content.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            },
+        modified,
+    )
+}
+
+pub fn set_nimble_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_nimble_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_nimble_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_nimble_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_nimble_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_nimble_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_rebar3_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut set_http = false;
+    let mut set_https = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('%') && !trim.starts_with('#') {
+            if trim.contains("http_proxy,") {
+                lines.push(format!("{{http_proxy, \"{}\"}}.", proxy_url));
+                set_http = true;
+                continue;
+            } else if trim.contains("https_proxy,") {
+                lines.push(format!("{{https_proxy, \"{}\"}}.", proxy_url));
+                set_https = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !set_http {
+        lines.push(format!("{{http_proxy, \"{}\"}}.", proxy_url));
+    }
+    if !set_https {
+        lines.push(format!("{{https_proxy, \"{}\"}}.", proxy_url));
+    }
+
+    let mut res = lines.join("\n");
+    if content.ends_with('\n') || content.is_empty() {
+        res.push('\n');
+    }
+    res
+}
+
+pub fn remove_rebar3_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('%') && !trim.starts_with('#') {
+            if trim.contains("http_proxy,") || trim.contains("https_proxy,") {
+                modified = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (
+        lines.join("\n")
+            + if lines.is_empty() {
+                ""
+            } else if content.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            },
+        modified,
+    )
+}
+
+pub fn set_rebar3_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_rebar3_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_rebar3_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_rebar3_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_rebar3_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_rebar3_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -3617,6 +3801,8 @@ pub async fn turn_on(
     lein: bool,
     cpan: bool,
     luarocks: bool,
+    nimble: bool,
+    rebar3: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3656,6 +3842,8 @@ pub async fn turn_on(
     let set_lein = lein || all;
     let set_cpan = cpan || all;
     let set_luarocks = luarocks || all;
+    let set_nimble = nimble || all;
+    let set_rebar3 = rebar3 || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -4144,6 +4332,26 @@ pub async fn turn_on(
         }
     }
 
+    if set_nimble {
+        match set_nimble_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Nimble proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Nimble nimble.ini: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_rebar3 {
+        match set_rebar3_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Rebar3 proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Rebar3 rebar.config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -4197,6 +4405,8 @@ pub fn turn_off(
     lein: bool,
     cpan: bool,
     luarocks: bool,
+    nimble: bool,
+    rebar3: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4236,6 +4446,8 @@ pub fn turn_off(
     let unset_lein = lein || all;
     let unset_cpan = cpan || all;
     let unset_luarocks = luarocks || all;
+    let unset_nimble = nimble || all;
+    let unset_rebar3 = rebar3 || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -4589,6 +4801,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ LuaRocks proxy removed from config.lua".green()),
             Ok(false) => eprintln!("{}", "○ LuaRocks proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset LuaRocks proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_nimble {
+        match unset_nimble_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Nimble proxy removed from nimble.ini".green()),
+            Ok(false) => eprintln!("{}", "○ Nimble proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Nimble proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_rebar3 {
+        match unset_rebar3_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Rebar3 proxy removed from rebar.config".green()),
+            Ok(false) => eprintln!("{}", "○ Rebar3 proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Rebar3 proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -5487,5 +5715,47 @@ contexts: []
         assert!(!cleaned.contains("http_proxy"));
         assert!(!cleaned.contains("https_proxy"));
         assert!(cleaned.contains("rocks_servers"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_nimble_proxy() {
+        let initial = "# Nimble configuration\n[Package]\nname = \"mypkg\"\n";
+        let with_proxy = apply_nimble_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("http_proxy = \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("https_proxy = \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("name = \"mypkg\""));
+
+        // Replace existing
+        let updated = apply_nimble_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("http_proxy = \"http://127.0.0.1:1080\""));
+        assert!(updated.contains("https_proxy = \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_nimble_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(!cleaned.contains("https_proxy"));
+        assert!(cleaned.contains("name = \"mypkg\""));
+    }
+
+    #[test]
+    fn test_apply_and_remove_rebar3_proxy() {
+        let initial = "%% Erlang rebar3 config\n{erl_opts, [debug_info]}.\n";
+        let with_proxy = apply_rebar3_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("{http_proxy, \"http://127.0.0.1:7890\"}."));
+        assert!(with_proxy.contains("{https_proxy, \"http://127.0.0.1:7890\"}."));
+        assert!(with_proxy.contains("debug_info"));
+
+        // Replace existing
+        let updated = apply_rebar3_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("{http_proxy, \"http://127.0.0.1:1080\"}."));
+        assert!(updated.contains("{https_proxy, \"http://127.0.0.1:1080\"}."));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_rebar3_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(!cleaned.contains("https_proxy"));
+        assert!(cleaned.contains("debug_info"));
     }
 }

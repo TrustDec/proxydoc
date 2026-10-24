@@ -179,7 +179,13 @@ enum Commands {
         /// Also configure Lua (LuaRocks) package manager proxy (~/.luarocks/config.lua)
         #[arg(long)]
         luarocks: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, and luarocks proxy
+        /// Also configure Nim (Nimble) package manager proxy (~/.config/nimble/nimble.ini)
+        #[arg(long)]
+        nimble: bool,
+        /// Also configure Erlang (Rebar3) package manager proxy (~/.config/rebar3/rebar.config)
+        #[arg(long)]
+        rebar3: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, and rebar3 proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -302,7 +308,13 @@ enum Commands {
         /// Also unset Lua (LuaRocks) package manager proxy (~/.luarocks/config.lua)
         #[arg(long)]
         luarocks: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, and luarocks proxy
+        /// Also unset Nim (Nimble) package manager proxy (~/.config/nimble/nimble.ini)
+        #[arg(long)]
+        nimble: bool,
+        /// Also unset Erlang (Rebar3) package manager proxy (~/.config/rebar3/rebar.config)
+        #[arg(long)]
+        rebar3: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, and rebar3 proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -384,6 +396,8 @@ async fn main() -> Result<()> {
             lein,
             cpan,
             luarocks,
+            nimble,
+            rebar3,
             all,
             shell,
         }) => {
@@ -427,6 +441,8 @@ async fn main() -> Result<()> {
                 lein,
                 cpan,
                 luarocks,
+                nimble,
+                rebar3,
                 all,
                 shell.as_deref(),
             )
@@ -471,6 +487,8 @@ async fn main() -> Result<()> {
             lein,
             cpan,
             luarocks,
+            nimble,
+            rebar3,
             all,
             shell,
         }) => {
@@ -513,6 +531,8 @@ async fn main() -> Result<()> {
                 lein,
                 cpan,
                 luarocks,
+                nimble,
+                rebar3,
                 all,
                 shell.as_deref(),
             )?;
@@ -1419,6 +1439,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { luarocks, .. }) => {
                 assert!(luarocks);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_nimble() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--nimble"]).unwrap();
+        match cli.command {
+            Some(Commands::On { nimble, .. }) => {
+                assert!(nimble);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_nimble() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--nimble"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { nimble, .. }) => {
+                assert!(nimble);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_rebar3() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--rebar3"]).unwrap();
+        match cli.command {
+            Some(Commands::On { rebar3, .. }) => {
+                assert!(rebar3);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_rebar3() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--rebar3"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { rebar3, .. }) => {
+                assert!(rebar3);
             }
             _ => panic!("Expected Off command"),
         }
