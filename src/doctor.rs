@@ -3071,6 +3071,180 @@ pub fn get_hex_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn parse_renviron_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                let clean = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !clean.is_empty()
+                    && (clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks"))
+                {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_renviron_config_path() -> Option<PathBuf> {
+    if let Ok(env_path) = std::env::var("R_ENVIRON_USER") {
+        let p = PathBuf::from(env_path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".Renviron");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_renviron_write_path() -> PathBuf {
+    if let Some(p) = get_renviron_config_path() {
+        return p;
+    }
+    if let Ok(env_path) = std::env::var("R_ENVIRON_USER") {
+        return PathBuf::from(env_path);
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".Renviron");
+    }
+    PathBuf::from(".Renviron")
+}
+
+pub fn get_renviron_proxy() -> Option<(String, PathBuf)> {
+    let p = get_renviron_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_renviron_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_opam_config_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once(':') {
+            let key = k.trim().to_lowercase();
+            if key == "http-proxy" || key == "https-proxy" || key == "http_proxy" || key == "https_proxy" {
+                let clean = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !clean.is_empty()
+                    && (clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks"))
+                {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_opam_config_path() -> Option<PathBuf> {
+    if let Ok(opamroot) = std::env::var("OPAMROOT") {
+        let p = PathBuf::from(opamroot).join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".opam").join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_opam_write_path() -> PathBuf {
+    if let Some(p) = get_opam_config_path() {
+        return p;
+    }
+    if let Ok(opamroot) = std::env::var("OPAMROOT") {
+        return PathBuf::from(opamroot).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".opam").join("config");
+    }
+    PathBuf::from("config")
+}
+
+pub fn get_opam_proxy() -> Option<(String, PathBuf)> {
+    let p = get_opam_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_opam_config_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_terraform_network_mirrors(content: &str) -> Vec<String> {
+    let mut mirrors = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with("//") {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            if k.trim() == "url" {
+                let clean = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if clean.starts_with("http://") || clean.starts_with("https://") {
+                    mirrors.push(clean.to_string());
+                }
+            }
+        }
+    }
+    mirrors
+}
+
+pub fn get_terraform_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(tf_cli) = std::env::var("TF_CLI_CONFIG_FILE") {
+        let p = PathBuf::from(tf_cli);
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(tofu_cli) = std::env::var("TOFU_CLI_CONFIG_FILE") {
+        let p = PathBuf::from(tofu_cli);
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".terraformrc"),
+            home.join(".terraform.d").join("config.tfrc"),
+            home.join(".tofurc"),
+            home.join(".tofu.d").join("config.tfrc"),
+        ];
+        for c in candidates {
+            if c.exists() && !paths.contains(&c) {
+                paths.push(c);
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("terraform.rc");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -4935,6 +5109,143 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // R Package Manager Proxy (~/.Renviron) & CRAN Mirrors
+    if let Some((rproxy, rpath)) = get_renviron_proxy() {
+        let ok = verify_proxy_url(&rproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "R package manager proxy `{}` in {} is dead! (install.packages() / remotes / devtools will fail)",
+                rproxy,
+                rpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "R (~/.Renviron)",
+            "~/.Renviron proxy",
+            rproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (install.packages fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "R (~/.Renviron)",
+            "~/.Renviron proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    let r_mirror_vars = [
+        ("CRAN_MIRROR", "CRAN repository mirror"),
+        ("R_CRAN_WEB", "R CRAN web mirror"),
+    ];
+    for (var, desc) in r_mirror_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "R mirror variable `{}` points to unreachable mirror `{}`! (R package downloads will fail)",
+                        var, trim
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "R (CRAN Mirror)",
+                    format!("{} ({})", var, desc),
+                    trim,
+                    if ok {
+                        "● Reachable Mirror".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE MIRROR! (R fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            }
+        }
+    }
+
+    // OCaml OPAM Proxy (~/.opam/config)
+    if let Some((oproxy, opath)) = get_opam_proxy() {
+        let ok = verify_proxy_url(&oproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "OCaml OPAM proxy `{}` in {} is dead! (opam update / opam install will fail)",
+                oproxy,
+                opath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "OCaml OPAM",
+            "~/.opam/config proxy",
+            oproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (opam fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "OCaml OPAM",
+            "~/.opam/config proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Terraform & OpenTofu Provider Network Mirrors (~/.terraformrc / ~/.tofurc)
+    let tf_paths = get_terraform_config_paths();
+    let mut tf_mirrors_found = false;
+    for path in &tf_paths {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let mirrors = parse_terraform_network_mirrors(&content);
+            for mirror in mirrors {
+                tf_mirrors_found = true;
+                let ok = verify_proxy_url(&mirror).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Terraform/OpenTofu network mirror `{}` in {} is unreachable! (terraform init will fail)",
+                        mirror,
+                        path.display()
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Terraform / OpenTofu",
+                    format!("Mirror ({})", path.file_name().unwrap_or_default().to_string_lossy()),
+                    mirror,
+                    if ok {
+                        "● Reachable Mirror".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE MIRROR! (init fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            }
+        }
+    }
+    if !tf_mirrors_found {
+        items.push(DiagItem::new(
+            "Terraform / OpenTofu",
+            "~/.terraformrc & ~/.tofurc network_mirror",
+            "(not set)".dimmed().to_string(),
+            "○ Direct (registry.terraform.io)".dimmed().to_string(),
+        ));
+    }
+
     // 14. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
@@ -5000,6 +5311,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "GLAB_PROXY",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
+        "LIVEKIT_URL",
+        "DEEPGRAM_BASE_URL",
+        "WANDB_BASE_URL",
+        "PINECONE_BASE_URL",
     ];
     let mut ai_found = false;
     for var in ai_vars {
@@ -5030,7 +5345,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/NVIDIA/Doubao/RunPod/Fal/Helicone/Kling/ElevenLabs/Cartesia/Portkey/Langfuse/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/NVIDIA/Doubao/RunPod/Fal/Helicone/Kling/ElevenLabs/Cartesia/Portkey/Langfuse/LiveKit/Deepgram/WandB/Pinecone/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -5386,6 +5701,12 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("api.together.xyz", 443),
         ("api.moonshot.cn", 443),
         ("dashscope.aliyuncs.com", 443),
+        ("cran.r-project.org", 443),
+        ("opam.ocaml.org", 443),
+        ("api.deepgram.com", 443),
+        ("api.wandb.ai", 443),
+        ("api.pinecone.io", 443),
+        ("cloud.livekit.io", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -6771,5 +7092,74 @@ proxy: { http: "http://127.0.0.1:7897", https: "http://127.0.0.1:7897" }
         assert!(modified2);
         assert!(!cleaned2.contains("mirror.dead.local"));
         assert!(cleaned2.contains("mirror.good.org"));
+    }
+
+    #[test]
+    fn test_parse_renviron_proxy() {
+        let input_renviron = r#"
+# User R environment
+http_proxy=http://127.0.0.1:7890
+https_proxy="http://127.0.0.1:7890"
+CRAN_MIRROR="https://cloud.r-project.org"
+"#;
+        assert_eq!(
+            parse_renviron_proxy(input_renviron),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_socks = r#"
+all_proxy='socks5://127.0.0.1:1080'
+"#;
+        assert_eq!(
+            parse_renviron_proxy(input_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = "# http_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_renviron_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_opam_config_proxy() {
+        let input_opam = r#"
+opam-version: "2.0"
+http-proxy: "http://127.0.0.1:7890"
+https-proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_opam_config_proxy(input_opam),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_socks = r#"
+http_proxy: "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_opam_config_proxy(input_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = "# http-proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_opam_config_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_terraform_network_mirrors() {
+        let input_tf = r#"
+provider_installation {
+  network_mirror {
+    url = "https://terraform-mirror.example.com/"
+  }
+  direct {
+    exclude = ["example.com/*/*"]
+  }
+}
+"#;
+        let mirrors = parse_terraform_network_mirrors(input_tf);
+        assert_eq!(mirrors.len(), 1);
+        assert_eq!(mirrors[0], "https://terraform-mirror.example.com/");
+
+        let input_none = "plugin_cache_dir = \"$HOME/.terraform.d/plugin-cache\"\n";
+        assert!(parse_terraform_network_mirrors(input_none).is_empty());
     }
 }

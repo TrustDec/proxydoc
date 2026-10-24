@@ -164,7 +164,13 @@ enum Commands {
         /// Also configure Elixir / Erlang / Gleam Hex proxy (~/.hex/hex.config)
         #[arg(long)]
         hex: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, and hex proxy
+        /// Also configure R package manager proxy (~/.Renviron)
+        #[arg(long)]
+        r: bool,
+        /// Also configure OCaml OPAM proxy (~/.opam/config)
+        #[arg(long)]
+        opam: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, and opam proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -272,7 +278,13 @@ enum Commands {
         /// Also unset Elixir / Erlang / Gleam Hex proxy (~/.hex/hex.config)
         #[arg(long)]
         hex: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, and hex proxy
+        /// Also unset R package manager proxy (~/.Renviron)
+        #[arg(long)]
+        r: bool,
+        /// Also unset OCaml OPAM proxy (~/.opam/config)
+        #[arg(long)]
+        opam: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, and opam proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -349,6 +361,8 @@ async fn main() -> Result<()> {
             cabal,
             stack,
             hex,
+            r,
+            opam,
             all,
             shell,
         }) => {
@@ -387,6 +401,8 @@ async fn main() -> Result<()> {
                 cabal,
                 stack,
                 hex,
+                r,
+                opam,
                 all,
                 shell.as_deref(),
             )
@@ -426,6 +442,8 @@ async fn main() -> Result<()> {
             cabal,
             stack,
             hex,
+            r,
+            opam,
             all,
             shell,
         }) => {
@@ -463,6 +481,8 @@ async fn main() -> Result<()> {
                 cabal,
                 stack,
                 hex,
+                r,
+                opam,
                 all,
                 shell.as_deref(),
             )?;
@@ -1259,6 +1279,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { hex, .. }) => {
                 assert!(hex);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_r() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--r"]).unwrap();
+        match cli.command {
+            Some(Commands::On { r, .. }) => {
+                assert!(r);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_r() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--r"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { r, .. }) => {
+                assert!(r);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_opam() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--opam"]).unwrap();
+        match cli.command {
+            Some(Commands::On { opam, .. }) => {
+                assert!(opam);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_opam() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--opam"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { opam, .. }) => {
+                assert!(opam);
             }
             _ => panic!("Expected Off command"),
         }

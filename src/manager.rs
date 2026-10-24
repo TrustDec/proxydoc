@@ -3069,6 +3069,159 @@ pub fn unset_hex_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_renviron_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" || key == "no_proxy" {
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !lines.is_empty() && !lines.last().map(|s| s.is_empty()).unwrap_or(true) {
+        lines.push(String::new());
+    }
+    lines.push(format!("http_proxy=\"{}\"", proxy_url));
+    lines.push(format!("https_proxy=\"{}\"", proxy_url));
+    lines.push(format!("all_proxy=\"{}\"", proxy_url));
+    lines.push("no_proxy=\"localhost,127.0.0.1\"".to_string());
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_renviron_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" || key == "no_proxy" {
+                    modified = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+    (lines.join("\n") + "\n", modified)
+}
+
+pub fn set_renviron_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_renviron_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_renviron_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_renviron_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_renviron_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_renviron_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_opam_config_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if let Some((k, _)) = trim.split_once(':') {
+                let key = k.trim().to_lowercase();
+                if key == "http-proxy" || key == "https-proxy" || key == "http_proxy" || key == "https_proxy" {
+                    if !replaced {
+                        lines.push(format!("http-proxy: \"{}\"", proxy_url));
+                        lines.push(format!("https-proxy: \"{}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if !lines.is_empty() && !lines.last().map(|s| s.is_empty()).unwrap_or(true) {
+            lines.push(String::new());
+        }
+        lines.push(format!("http-proxy: \"{}\"", proxy_url));
+        lines.push(format!("https-proxy: \"{}\"", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_opam_config_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if let Some((k, _)) = trim.split_once(':') {
+                let key = k.trim().to_lowercase();
+                if key == "http-proxy" || key == "https-proxy" || key == "http_proxy" || key == "https_proxy" {
+                    modified = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+    (lines.join("\n") + "\n", modified)
+}
+
+pub fn set_opam_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_opam_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_opam_config_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_opam_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_opam_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_opam_config_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -3104,6 +3257,8 @@ pub async fn turn_on(
     cabal: bool,
     stack: bool,
     hex: bool,
+    r: bool,
+    opam: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3138,6 +3293,8 @@ pub async fn turn_on(
     let set_cabal = cabal || all;
     let set_stack = stack || all;
     let set_hex = hex || all;
+    let set_r = r || all;
+    let set_opam = opam || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -3576,6 +3733,26 @@ pub async fn turn_on(
         }
     }
 
+    if set_r {
+        match set_renviron_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ R (~/.Renviron) proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update R Renviron config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_opam {
+        match set_opam_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ OCaml OPAM proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update OPAM config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -3624,6 +3801,8 @@ pub fn turn_off(
     cabal: bool,
     stack: bool,
     hex: bool,
+    r: bool,
+    opam: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3658,6 +3837,8 @@ pub fn turn_off(
     let unset_cabal = cabal || all;
     let unset_stack = stack || all;
     let unset_hex = hex || all;
+    let unset_r = r || all;
+    let unset_opam = opam || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -3971,6 +4152,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Hex (Elixir/Gleam) proxy removed from hex.config".green()),
             Ok(false) => eprintln!("{}", "○ Hex proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Hex proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_r {
+        match unset_renviron_proxy() {
+            Ok(true) => eprintln!("{}", "✔ R proxy removed from ~/.Renviron".green()),
+            Ok(false) => eprintln!("{}", "○ R proxy was not set in ~/.Renviron".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset R Renviron proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_opam {
+        match unset_opam_proxy() {
+            Ok(true) => eprintln!("{}", "✔ OCaml OPAM proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ OCaml OPAM proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset OCaml OPAM proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -4766,5 +4963,47 @@ contexts: []
         assert!(removed);
         assert!(!cleaned.contains("http_proxy"));
         assert!(cleaned.contains("{release, true}."));
+    }
+
+    #[test]
+    fn test_apply_and_remove_renviron_proxy() {
+        let initial = "# R user environment\nCRAN_MIRROR=\"https://cloud.r-project.org\"\n";
+        let with_proxy = apply_renviron_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("http_proxy=\"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("https_proxy=\"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("all_proxy=\"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("no_proxy=\"localhost,127.0.0.1\""));
+        assert!(with_proxy.contains("CRAN_MIRROR"));
+
+        // Replace existing
+        let updated = apply_renviron_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("http_proxy=\"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_renviron_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy="));
+        assert!(!cleaned.contains("https_proxy="));
+        assert!(cleaned.contains("CRAN_MIRROR"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_opam_config_proxy() {
+        let initial = "opam-version: \"2.0\"\nrepositories: \"default\"\n";
+        let with_proxy = apply_opam_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("http-proxy: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("https-proxy: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("opam-version"));
+
+        // Replace existing
+        let updated = apply_opam_config_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("http-proxy: \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_opam_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http-proxy:"));
+        assert!(!cleaned.contains("https-proxy:"));
+        assert!(cleaned.contains("opam-version"));
     }
 }

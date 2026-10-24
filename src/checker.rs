@@ -165,6 +165,12 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Langfuse API", "https://cloud.langfuse.com/api/public/health"),
     ("Stackage (Haskell)", "https://www.stackage.org"),
     ("Hex.pm Registry", "https://hex.pm/api/packages"),
+    ("LiveKit Cloud", "https://cloud.livekit.io"),
+    ("Deepgram Speech AI API", "https://api.deepgram.com/v1/projects"),
+    ("Weights & Biases (W&B) API", "https://api.wandb.ai/viewer"),
+    ("Pinecone Vector DB", "https://api.pinecone.io/indexes"),
+    ("CRAN (R Archive)", "https://cran.r-project.org"),
+    ("OPAM Registry (OCaml)", "https://opam.ocaml.org"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -374,7 +380,7 @@ pub async fn run(
     }
 
     let mut client_builder = reqwest::Client::builder()
-        .user_agent("proxydoc/0.5.0 (https://github.com/TrustDec/proxydoc)")
+        .user_agent(concat!("proxydoc/", env!("CARGO_PKG_VERSION"), " (https://github.com/TrustDec/proxydoc)"))
         .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false);
 
@@ -478,14 +484,14 @@ async fn run_compare(
     }
 
     let direct_client = reqwest::Client::builder()
-        .user_agent("proxydoc/0.5.0 (https://github.com/TrustDec/proxydoc)")
+        .user_agent(concat!("proxydoc/", env!("CARGO_PKG_VERSION"), " (https://github.com/TrustDec/proxydoc)"))
         .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false)
         .no_proxy()
         .build()?;
 
     let mut proxy_client_builder = reqwest::Client::builder()
-        .user_agent("proxydoc/0.5.0 (https://github.com/TrustDec/proxydoc)")
+        .user_agent(concat!("proxydoc/", env!("CARGO_PKG_VERSION"), " (https://github.com/TrustDec/proxydoc)"))
         .timeout(Duration::from_secs(timeout_secs))
         .danger_accept_invalid_certs(false);
 
