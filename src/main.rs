@@ -197,7 +197,10 @@ enum Commands {
         /// Also configure AWS CLI proxy (~/.aws/config)
         #[arg(long)]
         aws: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, and aws proxy
+        /// Also configure Microsoft Azure CLI (az) proxy (~/.azure/config)
+        #[arg(long, visible_alias = "az")]
+        azure: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, and azure proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -338,7 +341,10 @@ enum Commands {
         /// Also unset AWS CLI proxy (~/.aws/config)
         #[arg(long)]
         aws: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, and aws proxy
+        /// Also unset Microsoft Azure CLI (az) proxy (~/.azure/config)
+        #[arg(long, visible_alias = "az")]
+        azure: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, and azure proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -426,6 +432,7 @@ async fn main() -> Result<()> {
             bundle,
             gcloud,
             aws,
+            azure,
             all,
             shell,
         }) => {
@@ -475,6 +482,7 @@ async fn main() -> Result<()> {
                 bundle,
                 gcloud,
                 aws,
+                azure,
                 all,
                 shell.as_deref(),
             )
@@ -525,6 +533,7 @@ async fn main() -> Result<()> {
             bundle,
             gcloud,
             aws,
+            azure,
             all,
             shell,
         }) => {
@@ -573,6 +582,7 @@ async fn main() -> Result<()> {
                 bundle,
                 gcloud,
                 aws,
+                azure,
                 all,
                 shell.as_deref(),
             )?;
@@ -1611,6 +1621,44 @@ mod tests {
         match cli.command {
             Some(Commands::Off { aws, .. }) => {
                 assert!(aws);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_azure() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--azure"]).unwrap();
+        match cli.command {
+            Some(Commands::On { azure, .. }) => {
+                assert!(azure);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--az"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { azure, .. }) => {
+                assert!(azure);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_azure() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--azure"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { azure, .. }) => {
+                assert!(azure);
+            }
+            _ => panic!("Expected Off command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "off", "--az"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::Off { azure, .. }) => {
+                assert!(azure);
             }
             _ => panic!("Expected Off command"),
         }

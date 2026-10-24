@@ -195,6 +195,10 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Packagist", "https://repo.packagist.org/packages.json"),
     ("Vapi AI API", "https://api.vapi.ai"),
     ("Braintrust API", "https://api.braintrust.dev"),
+    ("LlamaIndex Cloud", "https://api.cloud.llamaindex.ai"),
+    ("Mem0 AI API", "https://api.mem0.ai"),
+    ("Supabase API", "https://api.supabase.com"),
+    ("Dify Cloud API", "https://api.dify.ai"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -752,6 +756,10 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "RubyGems Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "Cursor AI API"));
         assert!(standard.iter().any(|(name, _)| *name == "LanceDB Cloud"));
+        assert!(standard.iter().any(|(name, _)| *name == "LlamaIndex Cloud"));
+        assert!(standard.iter().any(|(name, _)| *name == "Mem0 AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Supabase API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Dify Cloud API"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

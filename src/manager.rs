@@ -4200,6 +4200,143 @@ pub fn unset_aws_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_azure_config_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_proxy = false;
+    let mut section_found = false;
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            if in_proxy && !proxy_set {
+                lines.push("mode = manual".to_string());
+                lines.push(format!("http = {}", proxy_url));
+                lines.push(format!("https = {}", proxy_url));
+                proxy_set = true;
+            }
+            in_proxy = section.eq_ignore_ascii_case("proxy");
+            if in_proxy {
+                section_found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_proxy {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "mode"
+                    || key == "http"
+                    || key == "https"
+                    || key == "http_proxy"
+                    || key == "https_proxy"
+                    || key == "proxy_url"
+                {
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if in_proxy && !proxy_set {
+        lines.push("mode = manual".to_string());
+        lines.push(format!("http = {}", proxy_url));
+        lines.push(format!("https = {}", proxy_url));
+    } else if !section_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[proxy]".to_string());
+        lines.push("mode = manual".to_string());
+        lines.push(format!("http = {}", proxy_url));
+        lines.push(format!("https = {}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_azure_config_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_proxy = false;
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            in_proxy = section.eq_ignore_ascii_case("proxy");
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_proxy && !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "mode"
+                    || key == "http"
+                    || key == "https"
+                    || key == "http_proxy"
+                    || key == "https_proxy"
+                    || key == "proxy_url"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    let res = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+    (res, changed)
+}
+
+pub fn set_azure_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_azure_write_path();
+    if let Some(parent) = write_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_azure_config_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_azure_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_azure_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, changed) = remove_azure_config_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+            }
+            return Ok(changed);
+        }
+    }
+    Ok(false)
+}
+
+pub fn unset_mamba_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_mambarc_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, removed) = remove_condarc_proxy(&content);
+            if removed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -4246,6 +4383,7 @@ pub async fn turn_on(
     bundle: bool,
     gcloud: bool,
     aws: bool,
+    azure: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4291,6 +4429,7 @@ pub async fn turn_on(
     let set_bundle = bundle || all;
     let set_gcloud = gcloud || all;
     let set_aws = aws || all;
+    let set_azure = azure || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -4848,6 +4987,25 @@ pub async fn turn_on(
         }
     }
 
+    if set_azure {
+        match set_azure_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Microsoft Azure CLI (az) proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!(
+                "{} Failed to update Microsoft Azure CLI config: {}",
+                "▲".yellow(),
+                e
+            ),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -4907,6 +5065,7 @@ pub fn turn_off(
     bundle: bool,
     gcloud: bool,
     aws: bool,
+    azure: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4952,6 +5111,7 @@ pub fn turn_off(
     let unset_bundle = bundle || all;
     let unset_gcloud = gcloud || all;
     let unset_aws = aws || all;
+    let unset_azure = azure || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -5363,6 +5523,24 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ AWS CLI proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ AWS CLI proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset AWS CLI proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_azure {
+        match unset_azure_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ Microsoft Azure CLI (az) proxy removed from config".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ Microsoft Azure CLI (az) proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!(
+                "{} Failed to unset Microsoft Azure CLI proxy: {}",
+                "▲".yellow(),
+                e
+            ),
         }
     }
 
@@ -6384,5 +6562,29 @@ contexts: []
         assert!(removed);
         assert!(!cleaned.contains("proxy ="));
         assert!(cleaned.contains("region = us-west-2"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_azure_config_proxy() {
+        let initial = "[cloud]\nname = AzureCloud\n";
+        let with_proxy = apply_azure_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("[proxy]"));
+        assert!(with_proxy.contains("mode = manual"));
+        assert!(with_proxy.contains("http = http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("https = http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("name = AzureCloud"));
+
+        // Replace existing with socks5
+        let updated = apply_azure_config_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("http = socks5://127.0.0.1:1080"));
+        assert!(updated.contains("https = socks5://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_azure_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http ="));
+        assert!(!cleaned.contains("https ="));
+        assert!(!cleaned.contains("mode = manual"));
+        assert!(cleaned.contains("name = AzureCloud"));
     }
 }

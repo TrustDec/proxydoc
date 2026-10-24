@@ -4274,6 +4274,131 @@ pub fn get_aws_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn parse_azure_config_proxy(content: &str) -> Option<String> {
+    let mut in_proxy = false;
+    let mut http_proxy = String::new();
+    let mut https_proxy = String::new();
+    let mut proxy_url = String::new();
+    let mut mode_disabled = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            in_proxy = section.eq_ignore_ascii_case("proxy");
+            continue;
+        }
+        if in_proxy {
+            if let Some((k, v)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                match key.as_str() {
+                    "mode" => {
+                        let m = val.to_ascii_lowercase();
+                        if m == "none" || m == "disabled" || m == "off" || m == "direct" {
+                            mode_disabled = true;
+                        }
+                    }
+                    "https" | "https_proxy" => https_proxy = val.to_string(),
+                    "http" | "http_proxy" => http_proxy = val.to_string(),
+                    "proxy_url" | "url" => proxy_url = val.to_string(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if mode_disabled {
+        return None;
+    }
+
+    let candidate = if !https_proxy.is_empty() {
+        https_proxy
+    } else if !http_proxy.is_empty() {
+        http_proxy
+    } else if !proxy_url.is_empty() {
+        proxy_url
+    } else {
+        return None;
+    };
+
+    if candidate.starts_with("http://")
+        || candidate.starts_with("https://")
+        || candidate.starts_with("socks")
+    {
+        Some(candidate)
+    } else {
+        Some(format!("http://{}", candidate))
+    }
+}
+
+pub fn get_azure_config_dir() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("AZURE_CONFIG_DIR") {
+        let p = PathBuf::from(path.trim());
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".azure");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(userprofile).join(".azure");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_azure_config_path() -> Option<PathBuf> {
+    if let Some(dir) = get_azure_config_dir() {
+        let p = dir.join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(path) = std::env::var("AZURE_CONFIG_DIR") {
+        let p = PathBuf::from(path.trim()).join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".azure").join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_azure_write_path() -> PathBuf {
+    if let Some(p) = get_azure_config_path() {
+        return p;
+    }
+    if let Ok(path) = std::env::var("AZURE_CONFIG_DIR") {
+        return PathBuf::from(path.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".azure").join("config");
+    }
+    PathBuf::from(".azure").join("config")
+}
+
+pub fn get_azure_proxy() -> Option<(String, PathBuf)> {
+    let p = get_azure_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_azure_config_proxy(&content)?;
+    Some((proxy, p))
+}
+
 pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
@@ -6767,6 +6892,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Microsoft Azure CLI (az) Proxy (~/.azure/config)
+    if let Some((azproxy, azpath)) = get_azure_proxy() {
+        let ok = verify_proxy_url(&azproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Azure CLI proxy `{}` in {} is dead! (az commands will fail)",
+                azproxy,
+                azpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Azure CLI",
+            format!("{} [proxy]", azpath.display()),
+            azproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (az fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Azure CLI",
+            "~/.azure/config [proxy]",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -9215,5 +9372,49 @@ proxy = 127.0.0.1:7890
 region = us-west-2
 "#;
         assert_eq!(parse_aws_config_proxy(input_none, Some("default")), None);
+    }
+
+    #[test]
+    fn test_parse_azure_config_proxy() {
+        let input_standard = r#"[cloud]
+name = AzureCloud
+
+[proxy]
+mode = manual
+http = http://127.0.0.1:7890
+https = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_azure_config_proxy(input_standard),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_socks = r#"[proxy]
+mode = manual
+https = socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_azure_config_proxy(input_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_url = r#"[proxy]
+proxy_url = 127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_azure_config_proxy(input_url),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_disabled = r#"[proxy]
+mode = none
+http = http://127.0.0.1:7890
+"#;
+        assert_eq!(parse_azure_config_proxy(input_disabled), None);
+
+        let input_none = r#"[cloud]
+name = AzureCloud
+"#;
+        assert_eq!(parse_azure_config_proxy(input_none), None);
     }
 }
