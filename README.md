@@ -29,14 +29,16 @@ Most developers suffer from network problems not because of complex networking, 
 ## ✨ Features
 
 - 🩺 **Deep Diagnostics (`proxydoc doctor`)**:
-  - Compares macOS GUI System Proxy (`scutil --proxy`) vs Terminal Shell environment.
+  - **Cross-Platform OS System Proxy Detection**: Compares **macOS** Web Proxy (`scutil --proxy`), **Windows** Internet Settings (Registry), and **Linux** Desktop (`gsettings`) vs Terminal Shell environment.
   - Verifies whether configured proxy ports are actually ALIVE or DEAD.
   - Inspects Git, SSH (`~/.ssh/config` ProxyCommand), NPM, **Yarn** (`~/.yarnrc` / `~/.yarnrc.yml`), **pnpm** (`~/.pnpmrc`), **Bun** (`~/.bunfig.toml` `[install] proxy`), Cargo (`[http] proxy`), Pip (`global.proxy`), **Conda** (`~/.condarc` `proxy_servers`), cURL (`~/.curlrc`), Wget (`~/.wgetrc`), Docker (`~/.docker/config.json`), **Gradle** (`~/.gradle/gradle.properties`), **Maven** (`~/.m2/settings.xml`), and **Go Modules** (`GOPROXY`).
+  - Diagnoses **Git SSL & Certificate Integrity**: warns when `http.sslVerify` is globally disabled (MITM security risk) and detects broken `http.sslCAInfo` bundle paths that cause Git fatal errors.
+  - Diagnoses **Node.js TLS security** (`NODE_TLS_REJECT_UNAUTHORIZED=0`) and CA bundle overrides (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`).
   - Diagnoses **Cargo Crates.io mirror replacements** (`[source.crates-io] replace-with`) and **Rustup download mirrors** (`RUSTUP_DIST_SERVER`, `RUSTUP_UPDATE_ROOT`) for dead/unreachable servers.
   - Diagnoses **Python / Astral `uv` index mirrors** (`UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`, `PIP_INDEX_URL`) for unreachable mirrors causing package install timeouts.
   - Diagnoses **`/etc/hosts` pinned overrides**: detects if developer domains (`github.com`, `api.openai.com`, `huggingface.co`, etc.) are mapped to dead/stale IPs or blocked to `0.0.0.0` overriding DNS.
   - Diagnoses **environment variable casing conflicts** (`http_proxy != HTTP_PROXY`) where tools like cURL (lowercase only) and Go/Python behave inconsistently.
-  - Diagnoses **AI Developer Gateways & Mirrors** (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `GEMINI_BASE_URL`, `GOOGLE_AI_BASE_URL`, `DEEPSEEK_BASE_URL`, `OLLAMA_HOST`, `HF_ENDPOINT`) for dead or unreachable local endpoints.
+  - Diagnoses **AI Developer Gateways & Mirrors** (`OPENAI_BASE_URL`, `OPENAI_API_BASE`, `ANTHROPIC_BASE_URL`, `GEMINI_BASE_URL`, `GOOGLE_AI_BASE_URL`, `DEEPSEEK_BASE_URL`, `GROQ_BASE_URL`, `OLLAMA_HOST`, `HF_ENDPOINT`) for dead or unreachable local endpoints.
   - Detects **WSL2 Linux** environment and resolves Windows Host gateway IP to prevent `127.0.0.1` routing traps.
   - Detects **SOCKS5 vs SOCKS5h DNS leak risk** (`socks5h://` tunnels DNS through the daemon to prevent local DNS poisoning).
   - Verifies `NO_PROXY` localhost bypass list to prevent local dev servers (Vite, Next.js, Docker) from failing.
@@ -44,12 +46,13 @@ Most developers suffer from network problems not because of complex networking, 
   - Supports `--json` for machine-readable CI/CD and IDE diagnostics.
 - 🩹 **1-Click Auto-Repair (`proxydoc fix`)**:
   - Clears dead Git, Cargo (`~/.cargo/config.toml`), NPM, **Yarn** (`~/.yarnrc` / `~/.yarnrc.yml`), **pnpm** (`~/.pnpmrc`), **Bun** (`~/.bunfig.toml`), Pip, **Conda** (`~/.condarc`), Docker (`~/.docker/config.json`), **Gradle** (`~/.gradle/gradle.properties`), and **Maven** (`~/.m2/settings.xml`) global proxies.
+  - Automatically unsets broken Git `http.sslCAInfo` paths pointing to missing certificate bundle files.
   - Automatically disables dead proxies in **cURL** (`~/.curlrc`) and **Wget** (`~/.wgetrc`) with automatic `.bak` backups.
   - Diagnoses dead SSH config ProxyCommand targets preventing Git SSH hangs.
   - Generates sync injection from system proxy to terminal with proper `NO_PROXY` bypass.
-  - Flushes local DNS cache.
+  - Cross-platform DNS cache flush (**macOS**, **Windows**, **Linux**).
 - ⚡ **AI & Dev Latency Checker (`proxydoc test`)**:
-  - Fully concurrent testing to DeepSeek, OpenAI, Anthropic, **Google Gemini**, GitHub, Google, Cloudflare, HuggingFace, **Docker Hub**, **crates.io**, **npm Registry**, **Yarn Registry**, and **Go Proxy**.
+  - Fully concurrent testing to DeepSeek, OpenAI, Anthropic, **Google Gemini**, **Ollama**, GitHub, Google, Cloudflare, HuggingFace, **Docker Hub**, **crates.io**, **npm Registry**, **Yarn Registry**, and **Go Proxy**.
   - **TLS/SSL Interception Detection**: Distinguishes corporate proxy MITM certificate errors and untrusted CAs from basic connection timeouts.
   - **Comparative Benchmark (`proxydoc test --compare` / `-c`)**: Tests Direct vs Proxy side-by-side, comparing latency, reachability, and egress IPs.
   - **Custom Target Benchmark (`proxydoc test -t <URL>`)**: Benchmarks custom API endpoints or internal corporate gateways.

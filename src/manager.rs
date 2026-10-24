@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use std::process::Command;
 
-use crate::doctor::get_macos_system_proxy;
+use crate::doctor::get_system_proxy;
 use crate::scanner;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1029,17 +1029,14 @@ pub async fn turn_on(
 
     // Resolve target proxy address
     let proxy_url = if target == "auto" {
-        // 1. Try system proxy from scutil
-        if let Some(sys) = get_macos_system_proxy() {
-            if sys.http_enabled && sys.http_port > 0 {
-                format!("http://{}:{}", sys.http_host, sys.http_port)
+        // 1. Try system proxy from OS
+        if let Some(sys_info) = get_system_proxy() {
+            if sys_info.state.http_enabled && sys_info.state.http_port > 0 {
+                format!("http://{}:{}", sys_info.state.http_host, sys_info.state.http_port)
+            } else if let Some(p) = scanner::find_first_active_proxy().await {
+                format!("http://127.0.0.1:{}", p.port)
             } else {
-                // 2. Try detected daemon port
-                if let Some(p) = scanner::find_first_active_proxy().await {
-                    format!("http://127.0.0.1:{}", p.port)
-                } else {
-                    "http://127.0.0.1:7890".to_string()
-                }
+                "http://127.0.0.1:7890".to_string()
             }
         } else if let Some(p) = scanner::find_first_active_proxy().await {
             format!("http://127.0.0.1:{}", p.port)

@@ -4,8 +4,8 @@ use std::process::Command;
 
 use crate::doctor::{
     get_bun_proxy, get_cargo_proxy, get_conda_proxy, get_curlrc_proxy, get_docker_proxy,
-    get_gradle_proxy, get_macos_system_proxy, get_maven_proxy, get_npm_config, get_pip_proxy,
-    get_pnpm_proxy, get_ssh_config_proxies, get_wgetrc_proxy, get_yarn_proxy, verify_proxy_url,
+    get_gradle_proxy, get_maven_proxy, get_npm_config, get_pip_proxy, get_pnpm_proxy,
+    get_ssh_config_proxies, get_system_proxy, get_wgetrc_proxy, get_yarn_proxy, verify_proxy_url,
 };
 use crate::manager::{
     unset_bun_proxy, unset_conda_proxy, unset_docker_proxy, unset_gradle_proxy, unset_maven_proxy,
@@ -53,6 +53,15 @@ pub async fn run() -> Result<()> {
         if !verify_proxy_url(&val).await {
             println!("  [1/14] Found dead Git https.proxy (`{}`), cleaning...", val.yellow());
             let _ = Command::new("git").args(["config", "--global", "--unset", "https.proxy"]).status();
+            git_cleaned = true;
+            fixed_count += 1;
+        }
+    }
+
+    if let Some(val) = get_git_config("http.sslCAInfo") {
+        if !std::path::Path::new(&val).exists() {
+            println!("  [1/14] Found broken Git http.sslCAInfo pointing to missing file (`{}`), cleaning...", val.yellow());
+            let _ = Command::new("git").args(["config", "--global", "--unset", "http.sslCAInfo"]).status();
             git_cleaned = true;
             fixed_count += 1;
         }
@@ -324,10 +333,10 @@ pub async fn run() -> Result<()> {
     }
 
     // 13. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
-    let active_port = match get_macos_system_proxy() {
-        Some(sys) if sys.http_enabled && sys.http_port > 0 => {
-            if scanner::check_host_port(&sys.http_host, sys.http_port).await {
-                Some(sys.http_port)
+    let active_port = match get_system_proxy() {
+        Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
+            if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
+                Some(sys_info.state.http_port)
             } else {
                 None
             }
@@ -357,14 +366,31 @@ pub async fn run() -> Result<()> {
         println!("  [13/14] No active local proxy client found. Ensure your proxy software is open.");
     }
 
-    // 14. Flush macOS DNS cache
+    // 14. Flush local DNS cache
     println!("  [14/14] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();
         let _ = Command::new("killall").args(["-HUP", "mDNSResponder"]).status();
-        println!("  {} Local DNS cache flushed.", "✔".green());
+        println!("  {} macOS DNS cache flushed.", "✔".green());
         fixed_count += 1;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("ipconfig").arg("/flushdns").status();
+        println!("  {} Windows DNS cache flushed.", "✔".green());
+        fixed_count += 1;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let flushed = Command::new("resolvectl").args(["flush-caches"]).status().map(|s| s.success()).unwrap_or(false)
+            || Command::new("systemd-resolve").args(["--flush-caches"]).status().map(|s| s.success()).unwrap_or(false);
+        if flushed {
+            println!("  {} Linux DNS cache flushed.", "✔".green());
+            fixed_count += 1;
+        } else {
+            println!("  {} Linux DNS cache: No systemd-resolved detected or flush skipped.", "○".dimmed());
+        }
     }
 
     println!("\n{}", format!("🎉 Auto-repair complete! ({} action(s) taken)", fixed_count).green().bold());

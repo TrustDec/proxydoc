@@ -117,6 +117,221 @@ pub fn get_macos_system_proxy() -> Option<SystemProxyState> {
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SystemProxyInfo {
+    pub source: String,
+    pub state: SystemProxyState,
+}
+
+#[allow(dead_code)]
+pub fn parse_windows_reg_proxy(enable_out: &str, server_out: &str) -> Option<SystemProxyState> {
+    let mut enabled = false;
+    for line in enable_out.lines() {
+        let trim = line.trim();
+        if trim.contains("ProxyEnable") {
+            if trim.contains("0x1") || trim.ends_with(" 1") {
+                enabled = true;
+            }
+        }
+    }
+
+    let mut server_val = None;
+    for line in server_out.lines() {
+        let trim = line.trim();
+        if trim.contains("ProxyServer") {
+            if let Some(pos) = trim.find("REG_SZ") {
+                let rest = trim[pos + 6..].trim();
+                if !rest.is_empty() {
+                    server_val = Some(rest.to_string());
+                }
+            }
+        }
+    }
+
+    let server_str = server_val.unwrap_or_default();
+    let mut http_host = "127.0.0.1".to_string();
+    let mut http_port = 0u16;
+    let mut https_host = "127.0.0.1".to_string();
+    let mut https_port = 0u16;
+    let mut socks_host = "127.0.0.1".to_string();
+    let mut socks_port = 0u16;
+
+    let parse_host_port = |val: &str| -> (String, u16) {
+        let clean = val
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .trim_start_matches("socks://")
+            .trim_start_matches("socks5://");
+        if let Some((h, p)) = clean.rsplit_once(':') {
+            let host = if h.is_empty() || h == "localhost" { "127.0.0.1".to_string() } else { h.to_string() };
+            let port = p.parse().unwrap_or(0);
+            (host, port)
+        } else {
+            ("127.0.0.1".to_string(), 0)
+        }
+    };
+
+    if server_str.contains('=') {
+        for part in server_str.split(';') {
+            let part = part.trim();
+            if let Some((proto, target)) = part.split_once('=') {
+                let (h, p) = parse_host_port(target);
+                match proto.trim().to_ascii_lowercase().as_str() {
+                    "http" => {
+                        http_host = h;
+                        http_port = p;
+                    }
+                    "https" => {
+                        https_host = h;
+                        https_port = p;
+                    }
+                    "socks" => {
+                        socks_host = h;
+                        socks_port = p;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    } else if !server_str.is_empty() {
+        let (h, p) = parse_host_port(&server_str);
+        http_host = h.clone();
+        http_port = p;
+        https_host = h;
+        https_port = p;
+    }
+
+    Some(SystemProxyState {
+        http_enabled: enabled && http_port > 0,
+        http_host,
+        http_port,
+        https_enabled: enabled && https_port > 0,
+        https_host,
+        https_port,
+        socks_enabled: enabled && socks_port > 0,
+        socks_host,
+        socks_port,
+    })
+}
+
+#[allow(dead_code)]
+pub fn parse_gnome_proxy(
+    mode_out: &str,
+    http_host: &str,
+    http_port: &str,
+    https_host: &str,
+    https_port: &str,
+    socks_host: &str,
+    socks_port: &str,
+) -> Option<SystemProxyState> {
+    let mode = mode_out.trim().trim_matches('\'').trim_matches('"');
+    let is_manual = mode.eq_ignore_ascii_case("manual");
+
+    let clean = |val: &str| val.trim().trim_matches('\'').trim_matches('"').to_string();
+    let parse_port = |val: &str| clean(val).parse::<u16>().unwrap_or(0);
+
+    let h_host = clean(http_host);
+    let h_port = parse_port(http_port);
+    let hs_host = clean(https_host);
+    let hs_port = parse_port(https_port);
+    let s_host = clean(socks_host);
+    let s_port = parse_port(socks_port);
+
+    Some(SystemProxyState {
+        http_enabled: is_manual && h_port > 0,
+        http_host: if h_host.is_empty() { "127.0.0.1".to_string() } else { h_host },
+        http_port: h_port,
+        https_enabled: is_manual && hs_port > 0,
+        https_host: if hs_host.is_empty() { "127.0.0.1".to_string() } else { hs_host },
+        https_port: hs_port,
+        socks_enabled: is_manual && s_port > 0,
+        socks_host: if s_host.is_empty() { "127.0.0.1".to_string() } else { s_host },
+        socks_port: s_port,
+    })
+}
+
+#[allow(dead_code)]
+pub fn get_windows_system_proxy() -> Option<SystemProxyState> {
+    #[cfg(target_os = "windows")]
+    {
+        let reg_key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+        let enable_out = Command::new("reg")
+            .args(["query", reg_key, "/v", "ProxyEnable"])
+            .output()
+            .ok()?;
+        let server_out = Command::new("reg")
+            .args(["query", reg_key, "/v", "ProxyServer"])
+            .output()
+            .ok()?;
+
+        let enable_s = String::from_utf8_lossy(&enable_out.stdout);
+        let server_s = String::from_utf8_lossy(&server_out.stdout);
+        return parse_windows_reg_proxy(&enable_s, &server_s);
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+#[allow(dead_code)]
+pub fn get_linux_system_proxy() -> Option<SystemProxyState> {
+    #[cfg(target_os = "linux")]
+    {
+        let run_gsettings = |schema: &str, key: &str| -> String {
+            Command::new("gsettings")
+                .args(["get", schema, key])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default()
+        };
+
+        let mode = run_gsettings("org.gnome.system.proxy", "mode");
+        if !mode.is_empty() {
+            let h_host = run_gsettings("org.gnome.system.proxy.http", "host");
+            let h_port = run_gsettings("org.gnome.system.proxy.http", "port");
+            let hs_host = run_gsettings("org.gnome.system.proxy.https", "host");
+            let hs_port = run_gsettings("org.gnome.system.proxy.https", "port");
+            let s_host = run_gsettings("org.gnome.system.proxy.socks", "host");
+            let s_port = run_gsettings("org.gnome.system.proxy.socks", "port");
+
+            return parse_gnome_proxy(&mode, &h_host, &h_port, &hs_host, &hs_port, &s_host, &s_port);
+        }
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+pub fn get_system_proxy() -> Option<SystemProxyInfo> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(state) = get_macos_system_proxy() {
+            return Some(SystemProxyInfo {
+                source: "macOS Web Proxy (scutil)".to_string(),
+                state,
+            });
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(state) = get_windows_system_proxy() {
+            return Some(SystemProxyInfo {
+                source: "Windows Internet Settings (Registry)".to_string(),
+                state,
+            });
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(state) = get_linux_system_proxy() {
+            return Some(SystemProxyInfo {
+                source: "Linux Desktop Proxy (gsettings)".to_string(),
+                state,
+            });
+        }
+    }
+    None
+}
+
 pub fn parse_npmrc_proxy(content: &str, key: &str) -> Option<String> {
     for line in content.lines() {
         let trim = line.trim();
@@ -1020,13 +1235,15 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     let mut items = Vec::new();
     let mut root_issues: Vec<String> = Vec::new();
 
-    // 1. macOS System Proxy vs Current Terminal Sync
-    if let Some(sys) = get_macos_system_proxy() {
+    // 1. OS System Proxy vs Current Terminal Sync
+    if let Some(sys_info) = get_system_proxy() {
+        let sys = &sys_info.state;
+        let source_name = &sys_info.source;
         if sys.http_enabled && sys.http_port > 0 {
             let active = scanner::check_host_port(&sys.http_host, sys.http_port).await;
             items.push(DiagItem::new(
                 "System Proxy",
-                "macOS Web Proxy (scutil)",
+                source_name,
                 format!("{}:{}", sys.http_host, sys.http_port),
                 if active {
                     "● ACTIVE in OS (Port Open)".green().to_string()
@@ -1040,8 +1257,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             let term_set = std::env::var("http_proxy").or_else(|_| std::env::var("HTTP_PROXY")).is_ok();
             if !term_set {
                 root_issues.push(format!(
-                    "macOS GUI proxy is active ({}:{}), but your Terminal is DIRECT! Run `proxydoc fix` to sync.",
-                    sys.http_host, sys.http_port
+                    "{} is active ({}:{}), but your Terminal is DIRECT! Run `proxydoc fix` to sync.",
+                    source_name, sys.http_host, sys.http_port
                 ));
                 items.push(DiagItem::new(
                     "Sync Conflict",
@@ -1053,7 +1270,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         } else {
             items.push(DiagItem::new(
                 "System Proxy",
-                "macOS Web Proxy (scutil)",
+                source_name,
                 "(disabled)".dimmed().to_string(),
                 "○ Direct in OS".dimmed().to_string(),
             ));
@@ -1220,6 +1437,49 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 "https.proxy",
                 val,
                 if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT!".red().bold().to_string() },
+            ));
+        }
+    }
+
+    // Git SSL Verification & CA Certificate checks
+    if let Some(val) = get_git_config("http.sslVerify") {
+        if val.eq_ignore_ascii_case("false") {
+            root_issues.push("`git config --global http.sslVerify false` is set! Certificate validation is globally DISABLED, exposing git traffic to MITM interception.".to_string());
+            items.push(DiagItem::new(
+                "Git SSL",
+                "http.sslVerify",
+                "false".yellow().to_string(),
+                "▲ DISABLED! (Security risk / MITM vulnerable)".yellow().bold().to_string(),
+            ));
+        } else {
+            items.push(DiagItem::new(
+                "Git SSL",
+                "http.sslVerify",
+                val,
+                "● Enabled".green().to_string(),
+            ));
+        }
+    }
+
+    if let Some(val) = get_git_config("http.sslCAInfo") {
+        let p = std::path::Path::new(&val);
+        if p.exists() {
+            items.push(DiagItem::new(
+                "Git SSL",
+                "http.sslCAInfo",
+                val,
+                "● Certificate bundle exists".green().to_string(),
+            ));
+        } else {
+            root_issues.push(format!(
+                "Git config `http.sslCAInfo` points to missing certificate file `{}`! (git clone/push will fail with 'unable to load SSL CA info')",
+                val
+            ));
+            items.push(DiagItem::new(
+                "Git SSL",
+                "http.sslCAInfo",
+                val,
+                "▲ MISSING FILE! (Git network operations will fail)".red().bold().to_string(),
             ));
         }
     }
@@ -1741,10 +2001,12 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     // 14. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
         "ANTHROPIC_BASE_URL",
         "GEMINI_BASE_URL",
         "GOOGLE_AI_BASE_URL",
         "DEEPSEEK_BASE_URL",
+        "GROQ_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -1831,6 +2093,18 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     ));
                 }
             }
+        }
+    }
+
+    if let Ok(val) = std::env::var("NODE_TLS_REJECT_UNAUTHORIZED") {
+        if val.trim() == "0" {
+            root_issues.push("NODE_TLS_REJECT_UNAUTHORIZED='0' is set in terminal environment! Node.js TLS certificate validation is disabled, creating security risks.".to_string());
+            items.push(DiagItem::new(
+                "TLS Security",
+                "NODE_TLS_REJECT_UNAUTHORIZED",
+                "0".yellow().to_string(),
+                "▲ DISABLED! (Node TLS security disabled)".yellow().bold().to_string(),
+            ));
         }
     }
 
@@ -2010,7 +2284,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     Ok(())
 }
 
-fn get_git_config(key: &str) -> Option<String> {
+pub fn get_git_config(key: &str) -> Option<String> {
     let out = Command::new("git").args(["config", "--global", "--get", key]).output().ok()?;
     if out.status.success() {
         let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -2430,5 +2704,61 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
         assert_eq!(replacements[0].source, "crates-io");
         assert_eq!(replacements[0].replace_with, "ustc");
         assert_eq!(replacements[0].registry_url, Some("https://mirrors.ustc.edu.cn/crates.io-index".to_string()));
+    }
+
+    #[test]
+    fn test_parse_windows_reg_proxy_single() {
+        let enable = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\n    ProxyEnable    REG_DWORD    0x1\n";
+        let server = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\n    ProxyServer    REG_SZ    127.0.0.1:7890\n";
+        let res = parse_windows_reg_proxy(enable, server).unwrap();
+        assert!(res.http_enabled);
+        assert_eq!(res.http_host, "127.0.0.1");
+        assert_eq!(res.http_port, 7890);
+        assert!(res.https_enabled);
+        assert_eq!(res.https_port, 7890);
+        assert!(!res.socks_enabled);
+    }
+
+    #[test]
+    fn test_parse_windows_reg_proxy_multi() {
+        let enable = "    ProxyEnable    REG_DWORD    0x1\n";
+        let server = "    ProxyServer    REG_SZ    http=127.0.0.1:7890;https=127.0.0.1:7890;socks=127.0.0.1:1080\n";
+        let res = parse_windows_reg_proxy(enable, server).unwrap();
+        assert!(res.http_enabled);
+        assert_eq!(res.http_port, 7890);
+        assert!(res.https_enabled);
+        assert_eq!(res.https_port, 7890);
+        assert!(res.socks_enabled);
+        assert_eq!(res.socks_port, 1080);
+    }
+
+    #[test]
+    fn test_parse_windows_reg_proxy_disabled() {
+        let enable = "    ProxyEnable    REG_DWORD    0x0\n";
+        let server = "    ProxyServer    REG_SZ    127.0.0.1:7890\n";
+        let res = parse_windows_reg_proxy(enable, server).unwrap();
+        assert!(!res.http_enabled);
+        assert!(!res.https_enabled);
+        assert!(!res.socks_enabled);
+    }
+
+    #[test]
+    fn test_parse_gnome_proxy_manual() {
+        let res = parse_gnome_proxy("'manual'", "'127.0.0.1'", "7890", "'127.0.0.1'", "7890", "'127.0.0.1'", "1080").unwrap();
+        assert!(res.http_enabled);
+        assert_eq!(res.http_host, "127.0.0.1");
+        assert_eq!(res.http_port, 7890);
+        assert!(res.https_enabled);
+        assert_eq!(res.https_port, 7890);
+        assert!(res.socks_enabled);
+        assert_eq!(res.socks_port, 1080);
+    }
+
+    #[test]
+    fn test_parse_gnome_proxy_none() {
+        let res = parse_gnome_proxy("'none'", "'127.0.0.1'", "7890", "'127.0.0.1'", "7890", "''", "0").unwrap();
+        assert!(!res.http_enabled);
+        assert!(!res.https_enabled);
+        assert!(!res.socks_enabled);
     }
 }
