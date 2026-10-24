@@ -3918,6 +3918,288 @@ pub fn unset_bundler_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_gcloud_config_proxy(content: &str, proxy_url: &str) -> String {
+    let (host, port) = extract_host_port(proxy_url);
+    let proxy_type = if proxy_url.starts_with("socks5") {
+        "socks5"
+    } else if proxy_url.starts_with("socks4") {
+        "socks4"
+    } else {
+        "http"
+    };
+
+    let mut lines = Vec::new();
+    let mut in_proxy = false;
+    let mut section_found = false;
+    let mut address_set = false;
+    let mut port_set = false;
+    let mut type_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            if in_proxy {
+                if !address_set {
+                    lines.push(format!("address = {}", host));
+                }
+                if !port_set {
+                    lines.push(format!("port = {}", port));
+                }
+                if !type_set {
+                    lines.push(format!("type = {}", proxy_type));
+                }
+            }
+            in_proxy = section.eq_ignore_ascii_case("proxy");
+            if in_proxy {
+                section_found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_proxy {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                match key.as_str() {
+                    "address" | "host" => {
+                        lines.push(format!("address = {}", host));
+                        address_set = true;
+                        continue;
+                    }
+                    "port" => {
+                        lines.push(format!("port = {}", port));
+                        port_set = true;
+                        continue;
+                    }
+                    "type" => {
+                        lines.push(format!("type = {}", proxy_type));
+                        type_set = true;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if in_proxy {
+        if !address_set {
+            lines.push(format!("address = {}", host));
+        }
+        if !port_set {
+            lines.push(format!("port = {}", port));
+        }
+        if !type_set {
+            lines.push(format!("type = {}", proxy_type));
+        }
+    } else if !section_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[proxy]".to_string());
+        lines.push(format!("address = {}", host));
+        lines.push(format!("port = {}", port));
+        lines.push(format!("type = {}", proxy_type));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_gcloud_config_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_proxy = false;
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            if section.eq_ignore_ascii_case("proxy") {
+                in_proxy = true;
+                changed = true;
+                continue;
+            } else {
+                in_proxy = false;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+        if in_proxy {
+            changed = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    while lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+    let res = if lines.is_empty() {
+        String::new()
+    } else {
+        lines.join("\n") + "\n"
+    };
+    (res, changed)
+}
+
+pub fn set_gcloud_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_gcloud_write_path();
+    if let Some(parent) = write_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_gcloud_config_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_gcloud_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_gcloud_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, changed) = remove_gcloud_config_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+            }
+            return Ok(changed);
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_aws_config_proxy(content: &str, proxy_url: &str, profile: Option<&str>) -> String {
+    let env_profile = std::env::var("AWS_PROFILE").unwrap_or_else(|_| "default".to_string());
+    let target_profile = profile.unwrap_or(&env_profile);
+    let mut lines = Vec::new();
+    let mut in_target = false;
+    let mut section_found = false;
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            if in_target && !proxy_set {
+                lines.push(format!("proxy = {}", proxy_url));
+                proxy_set = true;
+            }
+            if target_profile == "default" {
+                in_target = section.eq_ignore_ascii_case("default")
+                    || section.eq_ignore_ascii_case("profile default");
+            } else {
+                in_target = section.eq_ignore_ascii_case(target_profile)
+                    || section.eq_ignore_ascii_case(&format!("profile {}", target_profile));
+            }
+            if in_target {
+                section_found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_target {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy" || key == "http_proxy" {
+                    lines.push(format!("proxy = {}", proxy_url));
+                    proxy_set = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if in_target && !proxy_set {
+        lines.push(format!("proxy = {}", proxy_url));
+    } else if !section_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        if target_profile == "default" {
+            lines.push("[default]".to_string());
+        } else {
+            lines.push(format!("[profile {}]", target_profile));
+        }
+        lines.push(format!("proxy = {}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_aws_config_proxy(content: &str, profile: Option<&str>) -> (String, bool) {
+    let env_profile = std::env::var("AWS_PROFILE").unwrap_or_else(|_| "default".to_string());
+    let target_profile = profile.unwrap_or(&env_profile);
+    let mut lines = Vec::new();
+    let mut in_target = false;
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            if target_profile == "default" {
+                in_target = section.eq_ignore_ascii_case("default")
+                    || section.eq_ignore_ascii_case("profile default");
+            } else {
+                in_target = section.eq_ignore_ascii_case(target_profile)
+                    || section.eq_ignore_ascii_case(&format!("profile {}", target_profile));
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_target && !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy" || key == "http_proxy" || key == "https_proxy" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    let res = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+    (res, changed)
+}
+
+pub fn set_aws_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_aws_write_path();
+    if let Some(parent) = write_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_aws_config_proxy(&content, proxy_url, None);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_aws_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_aws_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, changed) = remove_aws_config_proxy(&content, None);
+            if changed {
+                std::fs::write(&path, new_content)?;
+            }
+            return Ok(changed);
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -3962,6 +4244,8 @@ pub async fn turn_on(
     rebar3: bool,
     scoop: bool,
     bundle: bool,
+    gcloud: bool,
+    aws: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4005,6 +4289,8 @@ pub async fn turn_on(
     let set_rebar3 = rebar3 || all;
     let set_scoop = scoop || all;
     let set_bundle = bundle || all;
+    let set_gcloud = gcloud || all;
+    let set_aws = aws || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -4533,6 +4819,35 @@ pub async fn turn_on(
         }
     }
 
+    if set_gcloud {
+        match set_gcloud_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Google Cloud SDK (gcloud) proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!(
+                "{} Failed to update Google Cloud SDK (gcloud) config: {}",
+                "▲".yellow(),
+                e
+            ),
+        }
+    }
+
+    if set_aws {
+        match set_aws_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ AWS CLI proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update AWS CLI config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -4590,6 +4905,8 @@ pub fn turn_off(
     rebar3: bool,
     scoop: bool,
     bundle: bool,
+    gcloud: bool,
+    aws: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4633,6 +4950,8 @@ pub fn turn_off(
     let unset_rebar3 = rebar3 || all;
     let unset_scoop = scoop || all;
     let unset_bundle = bundle || all;
+    let unset_gcloud = gcloud || all;
+    let unset_aws = aws || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -5018,6 +5337,32 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Ruby Bundler proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Ruby Bundler proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Ruby Bundler proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_gcloud {
+        match unset_gcloud_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ Google Cloud SDK (gcloud) proxy removed from config".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ Google Cloud SDK (gcloud) proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!(
+                "{} Failed to unset Google Cloud SDK (gcloud) proxy: {}",
+                "▲".yellow(),
+                e
+            ),
+        }
+    }
+
+    if unset_aws {
+        match unset_aws_proxy() {
+            Ok(true) => eprintln!("{}", "✔ AWS CLI proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ AWS CLI proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset AWS CLI proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -5997,5 +6342,47 @@ contexts: []
         assert!(!cleaned.contains("BUNDLE_HTTP_PROXY"));
         assert!(!cleaned.contains("BUNDLE_HTTPS_PROXY"));
         assert!(cleaned.contains("BUNDLE_FROZEN"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_gcloud_config_proxy() {
+        let initial = "[core]\nproject = my-project\n";
+        let with_proxy = apply_gcloud_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("[proxy]"));
+        assert!(with_proxy.contains("address = 127.0.0.1"));
+        assert!(with_proxy.contains("port = 7890"));
+        assert!(with_proxy.contains("type = http"));
+        assert!(with_proxy.contains("project = my-project"));
+
+        // Replace existing with socks5
+        let updated = apply_gcloud_config_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("port = 1080"));
+        assert!(updated.contains("type = socks5"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_gcloud_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("[proxy]"));
+        assert!(!cleaned.contains("address ="));
+        assert!(!cleaned.contains("port ="));
+        assert!(cleaned.contains("project = my-project"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_aws_config_proxy() {
+        let initial = "[default]\nregion = us-west-2\n";
+        let with_proxy = apply_aws_config_proxy(initial, "http://127.0.0.1:7890", Some("default"));
+        assert!(with_proxy.contains("proxy = http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("region = us-west-2"));
+
+        // Replace existing
+        let updated = apply_aws_config_proxy(&with_proxy, "http://127.0.0.1:1080", Some("default"));
+        assert!(updated.contains("proxy = http://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_aws_config_proxy(&updated, Some("default"));
+        assert!(removed);
+        assert!(!cleaned.contains("proxy ="));
+        assert!(cleaned.contains("region = us-west-2"));
     }
 }

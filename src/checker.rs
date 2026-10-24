@@ -190,6 +190,11 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("RubyGems Registry", "https://rubygems.org/api/v1/gems"),
     ("Cursor AI API", "https://api2.cursor.sh"),
     ("LanceDB Cloud", "https://api.lancedb.com"),
+    ("Maven Central", "https://repo1.maven.org/maven2"),
+    ("NuGet Gallery", "https://api.nuget.org/v3/index.json"),
+    ("Packagist", "https://repo.packagist.org/packages.json"),
+    ("Vapi AI API", "https://api.vapi.ai"),
+    ("Braintrust API", "https://api.braintrust.dev"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {

@@ -191,7 +191,13 @@ enum Commands {
         /// Also configure Ruby Bundler proxy (~/.bundle/config)
         #[arg(long, visible_alias = "bundler")]
         bundle: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, and bundle proxy
+        /// Also configure Google Cloud SDK (gcloud) proxy (~/.config/gcloud/configurations/config_*)
+        #[arg(long)]
+        gcloud: bool,
+        /// Also configure AWS CLI proxy (~/.aws/config)
+        #[arg(long)]
+        aws: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, and aws proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -326,7 +332,13 @@ enum Commands {
         /// Also unset Ruby Bundler proxy (~/.bundle/config)
         #[arg(long, visible_alias = "bundler")]
         bundle: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, and bundle proxy
+        /// Also unset Google Cloud SDK (gcloud) proxy (~/.config/gcloud/configurations/config_*)
+        #[arg(long)]
+        gcloud: bool,
+        /// Also unset AWS CLI proxy (~/.aws/config)
+        #[arg(long)]
+        aws: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, and aws proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -412,6 +424,8 @@ async fn main() -> Result<()> {
             rebar3,
             scoop,
             bundle,
+            gcloud,
+            aws,
             all,
             shell,
         }) => {
@@ -459,6 +473,8 @@ async fn main() -> Result<()> {
                 rebar3,
                 scoop,
                 bundle,
+                gcloud,
+                aws,
                 all,
                 shell.as_deref(),
             )
@@ -507,6 +523,8 @@ async fn main() -> Result<()> {
             rebar3,
             scoop,
             bundle,
+            gcloud,
+            aws,
             all,
             shell,
         }) => {
@@ -553,6 +571,8 @@ async fn main() -> Result<()> {
                 rebar3,
                 scoop,
                 bundle,
+                gcloud,
+                aws,
                 all,
                 shell.as_deref(),
             )?;
@@ -1547,6 +1567,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { bundle, .. }) => {
                 assert!(bundle);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_gcloud() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--gcloud"]).unwrap();
+        match cli.command {
+            Some(Commands::On { gcloud, .. }) => {
+                assert!(gcloud);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_gcloud() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--gcloud"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { gcloud, .. }) => {
+                assert!(gcloud);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_aws() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--aws"]).unwrap();
+        match cli.command {
+            Some(Commands::On { aws, .. }) => {
+                assert!(aws);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_aws() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--aws"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { aws, .. }) => {
+                assert!(aws);
             }
             _ => panic!("Expected Off command"),
         }

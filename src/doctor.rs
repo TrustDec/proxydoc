@@ -1115,6 +1115,22 @@ pub fn get_condarc_path() -> Option<PathBuf> {
     None
 }
 
+pub fn get_mambarc_path() -> Option<PathBuf> {
+    if let Ok(mambarc_env) = std::env::var("MAMBARC") {
+        let p = PathBuf::from(mambarc_env.trim());
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".mambarc");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 pub fn get_conda_proxy() -> Option<CondaProxyConfig> {
     if let Some(path) = get_condarc_path() {
         if let Ok(content) = std::fs::read_to_string(path) {
@@ -4039,6 +4055,225 @@ pub fn get_bundler_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn parse_gcloud_config_proxy(content: &str) -> Option<String> {
+    let mut in_proxy = false;
+    let mut address = String::new();
+    let mut port = String::new();
+    let mut proxy_type = "http".to_string();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            in_proxy = section.eq_ignore_ascii_case("proxy");
+            continue;
+        }
+        if in_proxy {
+            if let Some((k, v)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                match key.as_str() {
+                    "address" | "host" => address = val.to_string(),
+                    "port" => port = val.to_string(),
+                    "type" => proxy_type = val.to_ascii_lowercase(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if address.is_empty() {
+        return None;
+    }
+
+    if address.starts_with("http://") || address.starts_with("https://") || address.starts_with("socks") {
+        if !port.is_empty() && !address.contains(':') {
+            return Some(format!("{}:{}", address, port));
+        }
+        return Some(address);
+    }
+
+    let scheme = match proxy_type.as_str() {
+        "socks5" | "socks5h" => "socks5",
+        "socks4" => "socks4",
+        _ => "http",
+    };
+
+    if !port.is_empty() {
+        Some(format!("{}://{}:{}", scheme, address, port))
+    } else {
+        Some(format!("{}://{}", scheme, address))
+    }
+}
+
+pub fn get_gcloud_config_dir() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("CLOUDSDK_CONFIG") {
+        let p = PathBuf::from(path.trim());
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".config").join("gcloud");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("gcloud");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("gcloud");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_gcloud_config_path() -> Option<PathBuf> {
+    let root = get_gcloud_config_dir()?;
+    let active_name = if let Ok(act) = std::fs::read_to_string(root.join("active_config")) {
+        let t = act.trim().to_string();
+        if !t.is_empty() {
+            t
+        } else {
+            "default".to_string()
+        }
+    } else {
+        "default".to_string()
+    };
+
+    let p = root.join("configurations").join(format!("config_{}", active_name));
+    if p.exists() {
+        return Some(p);
+    }
+    let p_default = root.join("configurations").join("config_default");
+    if p_default.exists() {
+        return Some(p_default);
+    }
+    None
+}
+
+pub fn get_gcloud_write_path() -> PathBuf {
+    if let Some(p) = get_gcloud_config_path() {
+        return p;
+    }
+    let root = if let Ok(path) = std::env::var("CLOUDSDK_CONFIG") {
+        PathBuf::from(path.trim())
+    } else if let Some(home) = dirs::home_dir() {
+        home.join(".config").join("gcloud")
+    } else if let Some(config_dir) = dirs::config_dir() {
+        config_dir.join("gcloud")
+    } else if let Ok(appdata) = std::env::var("APPDATA") {
+        PathBuf::from(appdata).join("gcloud")
+    } else {
+        PathBuf::from(".config").join("gcloud")
+    };
+
+    let active_name = if let Ok(act) = std::fs::read_to_string(root.join("active_config")) {
+        let t = act.trim().to_string();
+        if !t.is_empty() {
+            t
+        } else {
+            "default".to_string()
+        }
+    } else {
+        "default".to_string()
+    };
+    root.join("configurations").join(format!("config_{}", active_name))
+}
+
+pub fn get_gcloud_proxy() -> Option<(String, PathBuf)> {
+    let p = get_gcloud_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_gcloud_config_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_aws_config_proxy(content: &str, profile: Option<&str>) -> Option<String> {
+    let env_profile = std::env::var("AWS_PROFILE").unwrap_or_else(|_| "default".to_string());
+    let target_profile = profile.unwrap_or(&env_profile);
+    let mut in_target_section = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim();
+            if target_profile == "default" {
+                in_target_section = section.eq_ignore_ascii_case("default")
+                    || section.eq_ignore_ascii_case("profile default");
+            } else {
+                in_target_section = section.eq_ignore_ascii_case(target_profile)
+                    || section.eq_ignore_ascii_case(&format!("profile {}", target_profile));
+            }
+            continue;
+        }
+        if in_target_section {
+            if let Some((k, v)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if (key == "proxy" || key == "http_proxy" || key == "https_proxy") && !val.is_empty() {
+                    if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        return Some(val.to_string());
+                    } else {
+                        return Some(format!("http://{}", val));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_aws_config_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("AWS_CONFIG_FILE") {
+        let p = PathBuf::from(path.trim());
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".aws").join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_aws_write_path() -> PathBuf {
+    if let Some(p) = get_aws_config_path() {
+        return p;
+    }
+    if let Ok(path) = std::env::var("AWS_CONFIG_FILE") {
+        return PathBuf::from(path.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".aws").join("config");
+    }
+    PathBuf::from(".aws").join("config")
+}
+
+pub fn get_aws_proxy() -> Option<(String, PathBuf)> {
+    let p = get_aws_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_aws_config_proxy(&content, None)?;
+    Some((proxy, p))
+}
+
 pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
@@ -5379,6 +5614,59 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Mamba / Micromamba Config (~/.mambarc)
+    if let Some(mamba_path) = get_mambarc_path() {
+        if let Ok(content) = std::fs::read_to_string(&mamba_path) {
+            if let Some(cfg) = parse_condarc_proxy(&content) {
+                let mut any_dead = false;
+                let mut display_parts = Vec::new();
+
+                if let Some(ref http) = cfg.http {
+                    let ok = verify_proxy_url(http).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "Mamba proxy (http) in {} points to dead port `{}` (mamba install will fail)",
+                            mamba_path.display(),
+                            http
+                        ));
+                        any_dead = true;
+                    }
+                    display_parts.push(format!("http: {}", http));
+                }
+
+                if let Some(ref https) = cfg.https {
+                    let ok = verify_proxy_url(https).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "Mamba proxy (https) in {} points to dead port `{}` (mamba install will fail)",
+                            mamba_path.display(),
+                            https
+                        ));
+                        any_dead = true;
+                    }
+                    display_parts.push(format!("https: {}", https));
+                }
+
+                let val_str = display_parts.join(", ");
+                let status = if any_dead {
+                    "▲ DEAD PORT! (mamba install fails)"
+                        .red()
+                        .bold()
+                        .to_string()
+                } else {
+                    "● Reachable".green().to_string()
+                };
+
+                items.push(DiagItem::new(
+                    "Mamba",
+                    format!("{} proxy_servers", mamba_path.display()),
+                    val_str,
+                    status,
+                ));
+            }
+        }
+    }
+
     // PHP Composer Packagist Mirror & Proxy
     if let Some(comp_path) = get_composer_config_path() {
         if let Ok(content) = std::fs::read_to_string(&comp_path) {
@@ -6410,6 +6698,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Ruby (Bundler)",
             "~/.bundle/config proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Google Cloud SDK (gcloud) Proxy (~/.config/gcloud/configurations/config_*)
+    if let Some((gproxy, gpath)) = get_gcloud_proxy() {
+        let ok = verify_proxy_url(&gproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Google Cloud SDK (gcloud) proxy `{}` in {} is dead! (gcloud commands will fail)",
+                gproxy,
+                gpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Google Cloud SDK (gcloud)",
+            format!("{} [proxy]", gpath.display()),
+            gproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (gcloud fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Google Cloud SDK (gcloud)",
+            "gcloud config [proxy]",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // AWS CLI Proxy (~/.aws/config)
+    if let Some((aproxy, apath)) = get_aws_proxy() {
+        let ok = verify_proxy_url(&aproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "AWS CLI proxy `{}` in {} is dead! (aws commands will fail)",
+                aproxy,
+                apath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "AWS CLI",
+            format!("{} proxy", apath.display()),
+            aproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (aws fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "AWS CLI",
+            "~/.aws/config proxy",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -8788,5 +9140,80 @@ BUNDLE_HTTPS_PROXY: "http://127.0.0.1:7890"
 
         let input_commented = "# BUNDLE_HTTP_PROXY: \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_bundler_proxy(input_commented), None);
+    }
+
+    #[test]
+    fn test_parse_gcloud_config_proxy() {
+        let input_ini = r#"[core]
+account = test@example.com
+project = my-project
+
+[proxy]
+address = 127.0.0.1
+port = 7890
+type = http
+"#;
+        assert_eq!(
+            parse_gcloud_config_proxy(input_ini),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_socks = r#"[proxy]
+address = 127.0.0.1
+port = 1080
+type = socks5
+"#;
+        assert_eq!(
+            parse_gcloud_config_proxy(input_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_url = r#"[proxy]
+address = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_gcloud_config_proxy(input_url),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_none = r#"[core]
+project = my-project
+"#;
+        assert_eq!(parse_gcloud_config_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_aws_config_proxy() {
+        let input_ini = r#"[default]
+region = us-west-2
+output = json
+proxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_aws_config_proxy(input_ini, Some("default")),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_profile = r#"[profile dev]
+region = us-east-1
+http_proxy = socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_aws_config_proxy(input_profile, Some("dev")),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_host_port = r#"[default]
+proxy = 127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_aws_config_proxy(input_host_port, Some("default")),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_none = r#"[default]
+region = us-west-2
+"#;
+        assert_eq!(parse_aws_config_proxy(input_none, Some("default")), None);
     }
 }
