@@ -3222,6 +3222,268 @@ pub fn unset_opam_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_lein_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with(';') {
+            if trim.contains(":http-proxy") {
+                lines.push(format!("        :http-proxy \"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if trim.contains(":https-proxy") {
+                lines.push(format!("        :https-proxy \"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_http || replaced_https {
+        if !replaced_http {
+            let idx = lines.len().saturating_sub(1);
+            lines.insert(idx, format!("        :http-proxy \"{}\"", proxy_url));
+        }
+        if !replaced_https {
+            let idx = lines.len().saturating_sub(1);
+            lines.insert(idx, format!("        :https-proxy \"{}\"", proxy_url));
+        }
+        let mut res = lines.join("\n");
+        if content.ends_with('\n') {
+            res.push('\n');
+        }
+        return res;
+    }
+
+    if content.trim().is_empty() {
+        return format!(
+            "{{:user {{:http-proxy \"{}\"\n        :https-proxy \"{}\"}}}}\n",
+            proxy_url, proxy_url
+        );
+    }
+
+    let mut out_lines = Vec::new();
+    let mut inserted = false;
+    for line in content.lines() {
+        out_lines.push(line.to_string());
+        if !inserted && (line.contains("{:user {") || line.contains(":user {")) {
+            out_lines.push(format!("        :http-proxy \"{}\"", proxy_url));
+            out_lines.push(format!("        :https-proxy \"{}\"", proxy_url));
+            inserted = true;
+        }
+    }
+
+    if !inserted {
+        if let Some(pos) = content.rfind('}') {
+            let before = &content[..pos];
+            let after = &content[pos..];
+            return format!(
+                "{}\n        :http-proxy \"{}\"\n        :https-proxy \"{}\"{}",
+                before.trim_end(),
+                proxy_url,
+                proxy_url,
+                after
+            );
+        } else {
+            return format!(
+                "{{:user {{:http-proxy \"{}\"\n        :https-proxy \"{}\"}}}}\n",
+                proxy_url, proxy_url
+            );
+        }
+    }
+
+    let mut res = out_lines.join("\n");
+    if content.ends_with('\n') {
+        res.push('\n');
+    }
+    res
+}
+
+pub fn remove_lein_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with(';') && (trim.contains(":http-proxy") || trim.contains(":https-proxy")) {
+            modified = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    (
+        lines.join("\n")
+            + if lines.is_empty() {
+                ""
+            } else if content.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            },
+        modified,
+    )
+}
+
+pub fn set_lein_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_lein_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_lein_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_lein_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_lein_profiles_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_lein_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_cpan_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut set_http = false;
+    let mut set_ftp = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if trim.contains("'http_proxy'") || trim.contains("\"http_proxy\"") {
+                lines.push(format!("  'http_proxy' => q[{}],", proxy_url));
+                set_http = true;
+                continue;
+            } else if trim.contains("'ftp_proxy'") || trim.contains("\"ftp_proxy\"") {
+                lines.push(format!("  'ftp_proxy' => q[{}],", proxy_url));
+                set_ftp = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if set_http || set_ftp {
+        if !set_http {
+            let idx = lines.len().saturating_sub(1);
+            lines.insert(idx, format!("  'http_proxy' => q[{}],", proxy_url));
+        }
+        if !set_ftp {
+            let idx = lines.len().saturating_sub(1);
+            lines.insert(idx, format!("  'ftp_proxy' => q[{}],", proxy_url));
+        }
+        let mut res = lines.join("\n");
+        if content.ends_with('\n') {
+            res.push('\n');
+        }
+        return res;
+    }
+
+    if content.trim().is_empty() {
+        return format!(
+            "$CPAN::Config = {{\n  'http_proxy' => q[{}],\n  'ftp_proxy' => q[{}],\n}};\n1;\n__END__\n",
+            proxy_url, proxy_url
+        );
+    }
+
+    let mut out_lines = Vec::new();
+    let mut inserted = false;
+    for line in content.lines() {
+        let trim = line.trim();
+        if !inserted && (trim == "};" || trim.starts_with("};")) {
+            out_lines.push(format!("  'http_proxy' => q[{}],", proxy_url));
+            out_lines.push(format!("  'ftp_proxy' => q[{}],", proxy_url));
+            inserted = true;
+        }
+        out_lines.push(line.to_string());
+    }
+    if !inserted {
+        out_lines.push(format!("  'http_proxy' => q[{}],", proxy_url));
+        out_lines.push(format!("  'ftp_proxy' => q[{}],", proxy_url));
+    }
+
+    let mut res = out_lines.join("\n");
+    if content.ends_with('\n') {
+        res.push('\n');
+    }
+    res
+}
+
+pub fn remove_cpan_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if trim.contains("'http_proxy'")
+                || trim.contains("\"http_proxy\"")
+                || trim.contains("'ftp_proxy'")
+                || trim.contains("\"ftp_proxy\"")
+            {
+                modified = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (
+        lines.join("\n")
+            + if lines.is_empty() {
+                ""
+            } else if content.ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            },
+        modified,
+    )
+}
+
+pub fn set_cpan_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_cpan_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_cpan_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_cpan_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_cpan_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_cpan_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -3259,6 +3521,8 @@ pub async fn turn_on(
     hex: bool,
     r: bool,
     opam: bool,
+    lein: bool,
+    cpan: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3295,6 +3559,8 @@ pub async fn turn_on(
     let set_hex = hex || all;
     let set_r = r || all;
     let set_opam = opam || all;
+    let set_lein = lein || all;
+    let set_cpan = cpan || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -3753,6 +4019,26 @@ pub async fn turn_on(
         }
     }
 
+    if set_lein {
+        match set_lein_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Clojure Leiningen proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Leiningen profiles.clj: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_cpan {
+        match set_cpan_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Perl CPAN proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Perl CPAN MyConfig.pm: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -3803,6 +4089,8 @@ pub fn turn_off(
     hex: bool,
     r: bool,
     opam: bool,
+    lein: bool,
+    cpan: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3839,6 +4127,8 @@ pub fn turn_off(
     let unset_hex = hex || all;
     let unset_r = r || all;
     let unset_opam = opam || all;
+    let unset_lein = lein || all;
+    let unset_cpan = cpan || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -4168,6 +4458,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ OCaml OPAM proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ OCaml OPAM proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset OCaml OPAM proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_lein {
+        match unset_lein_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Clojure Leiningen proxy removed from profiles.clj".green()),
+            Ok(false) => eprintln!("{}", "○ Clojure Leiningen proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Leiningen proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_cpan {
+        match unset_cpan_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Perl CPAN proxy removed from MyConfig.pm".green()),
+            Ok(false) => eprintln!("{}", "○ Perl CPAN proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Perl CPAN proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -5005,5 +5311,45 @@ contexts: []
         assert!(!cleaned.contains("http-proxy:"));
         assert!(!cleaned.contains("https-proxy:"));
         assert!(cleaned.contains("opam-version"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_lein_proxy() {
+        let initial = "{:user {:plugins [[lein-ancient \"0.6.15\"]]}}\n";
+        let with_proxy = apply_lein_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains(":http-proxy \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains(":https-proxy \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("lein-ancient"));
+
+        // Replace existing
+        let updated = apply_lein_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains(":http-proxy \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_lein_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains(":http-proxy"));
+        assert!(!cleaned.contains(":https-proxy"));
+        assert!(cleaned.contains("lein-ancient"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cpan_proxy() {
+        let initial = "$CPAN::Config = {\n  'urllist' => [q[https://cpan.metacpan.org/]],\n};\n1;\n__END__\n";
+        let with_proxy = apply_cpan_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("'http_proxy' => q[http://127.0.0.1:7890],"));
+        assert!(with_proxy.contains("'ftp_proxy' => q[http://127.0.0.1:7890],"));
+        assert!(with_proxy.contains("urllist"));
+
+        // Replace existing
+        let updated = apply_cpan_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("'http_proxy' => q[http://127.0.0.1:1080],"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_cpan_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("'http_proxy'"));
+        assert!(!cleaned.contains("'ftp_proxy'"));
+        assert!(cleaned.contains("urllist"));
     }
 }

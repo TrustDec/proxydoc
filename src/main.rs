@@ -170,7 +170,13 @@ enum Commands {
         /// Also configure OCaml OPAM proxy (~/.opam/config)
         #[arg(long)]
         opam: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, and opam proxy
+        /// Also configure Clojure Leiningen proxy (~/.lein/profiles.clj)
+        #[arg(long)]
+        lein: bool,
+        /// Also configure Perl CPAN package manager proxy (~/.cpan/CPAN/MyConfig.pm)
+        #[arg(long)]
+        cpan: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, and cpan proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -284,7 +290,13 @@ enum Commands {
         /// Also unset OCaml OPAM proxy (~/.opam/config)
         #[arg(long)]
         opam: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, and opam proxy
+        /// Also unset Clojure Leiningen proxy (~/.lein/profiles.clj)
+        #[arg(long)]
+        lein: bool,
+        /// Also unset Perl CPAN package manager proxy (~/.cpan/CPAN/MyConfig.pm)
+        #[arg(long)]
+        cpan: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, and cpan proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -363,6 +375,8 @@ async fn main() -> Result<()> {
             hex,
             r,
             opam,
+            lein,
+            cpan,
             all,
             shell,
         }) => {
@@ -403,6 +417,8 @@ async fn main() -> Result<()> {
                 hex,
                 r,
                 opam,
+                lein,
+                cpan,
                 all,
                 shell.as_deref(),
             )
@@ -444,6 +460,8 @@ async fn main() -> Result<()> {
             hex,
             r,
             opam,
+            lein,
+            cpan,
             all,
             shell,
         }) => {
@@ -483,6 +501,8 @@ async fn main() -> Result<()> {
                 hex,
                 r,
                 opam,
+                lein,
+                cpan,
                 all,
                 shell.as_deref(),
             )?;
@@ -1323,6 +1343,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { opam, .. }) => {
                 assert!(opam);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_lein() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--lein"]).unwrap();
+        match cli.command {
+            Some(Commands::On { lein, .. }) => {
+                assert!(lein);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_lein() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--lein"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { lein, .. }) => {
+                assert!(lein);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_cpan() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--cpan"]).unwrap();
+        match cli.command {
+            Some(Commands::On { cpan, .. }) => {
+                assert!(cpan);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_cpan() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--cpan"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { cpan, .. }) => {
+                assert!(cpan);
             }
             _ => panic!("Expected Off command"),
         }

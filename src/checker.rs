@@ -171,6 +171,12 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Pinecone Vector DB", "https://api.pinecone.io/indexes"),
     ("CRAN (R Archive)", "https://cran.r-project.org"),
     ("OPAM Registry (OCaml)", "https://opam.ocaml.org"),
+    ("Tavily AI Search API", "https://api.tavily.com/search"),
+    ("Exa AI Search API", "https://api.exa.ai/search"),
+    ("Qdrant Cloud", "https://cloud.qdrant.io"),
+    ("AssemblyAI Speech API", "https://api.assemblyai.com/v2/transcript"),
+    ("Clojars (Clojure)", "https://clojars.org"),
+    ("MetaCPAN (Perl)", "https://fastapi.metacpan.org/v1"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -709,6 +715,12 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Langfuse API"));
         assert!(standard.iter().any(|(name, _)| *name == "Stackage (Haskell)"));
         assert!(standard.iter().any(|(name, _)| *name == "Hex.pm Registry"));
+        assert!(standard.iter().any(|(name, _)| *name == "Tavily AI Search API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Exa AI Search API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Qdrant Cloud"));
+        assert!(standard.iter().any(|(name, _)| *name == "AssemblyAI Speech API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Clojars (Clojure)"));
+        assert!(standard.iter().any(|(name, _)| *name == "MetaCPAN (Perl)"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

@@ -3208,6 +3208,274 @@ pub fn parse_terraform_network_mirrors(content: &str) -> Vec<String> {
     mirrors
 }
 
+pub fn clean_terraform_network_mirrors(content: &str, dead_mirrors: &[&str]) -> (String, bool) {
+    if dead_mirrors.is_empty() {
+        return (content.to_string(), false);
+    }
+    let mut out_lines = Vec::new();
+    let mut changed = false;
+    let mut in_mirror_block = false;
+    let mut block_lines: Vec<String> = Vec::new();
+    let mut block_has_dead = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !in_mirror_block && (trim.starts_with("network_mirror") || trim.contains("network_mirror {")) {
+            in_mirror_block = true;
+            block_lines.clear();
+            block_has_dead = false;
+            block_lines.push(line.to_string());
+            continue;
+        }
+
+        if in_mirror_block {
+            block_lines.push(line.to_string());
+            for dead in dead_mirrors {
+                if trim.contains(dead) {
+                    block_has_dead = true;
+                }
+            }
+            if trim == "}" || trim.ends_with('}') {
+                in_mirror_block = false;
+                if block_has_dead {
+                    out_lines.push("  # [proxydoc disabled dead mirror(s)]".to_string());
+                    for bl in &block_lines {
+                        out_lines.push(format!("  # {}", bl));
+                    }
+                    changed = true;
+                } else {
+                    out_lines.extend(block_lines.drain(..));
+                }
+            }
+            continue;
+        }
+
+        let mut single_dead = false;
+        for dead in dead_mirrors {
+            if trim.contains(dead) && (trim.starts_with("url") || trim.contains("url =") || trim.contains("url=")) {
+                single_dead = true;
+                break;
+            }
+        }
+        if single_dead {
+            out_lines.push(format!("# [proxydoc disabled dead mirror] # {}", line));
+            changed = true;
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    if in_mirror_block {
+        if block_has_dead {
+            out_lines.push("  # [proxydoc disabled dead mirror(s)]".to_string());
+            for bl in &block_lines {
+                out_lines.push(format!("  # {}", bl));
+            }
+            changed = true;
+        } else {
+            out_lines.extend(block_lines);
+        }
+    }
+
+    let mut res = out_lines.join("\n");
+    if content.ends_with('\n') {
+        res.push('\n');
+    }
+    (res, changed)
+}
+
+pub fn parse_lein_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with(';') {
+            continue;
+        }
+        if let Some(pos) = trim.find(":http-proxy") {
+            let rest = trim[pos + 11..].trim();
+            let clean = rest
+                .trim_start_matches(|c| c == ' ' || c == '\t' || c == ':')
+                .trim_matches('"')
+                .trim_matches('\'')
+                .trim();
+            let val = clean
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_matches('"')
+                .trim_matches('\'');
+            if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                return Some(val.to_string());
+            }
+        }
+        if let Some(pos) = trim.find(":https-proxy") {
+            let rest = trim[pos + 12..].trim();
+            let clean = rest
+                .trim_start_matches(|c| c == ' ' || c == '\t' || c == ':')
+                .trim_matches('"')
+                .trim_matches('\'')
+                .trim();
+            let val = clean
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_matches('"')
+                .trim_matches('\'');
+            if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                return Some(val.to_string());
+            }
+        }
+    }
+
+    let mut host = None;
+    let mut port = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with(';') {
+            continue;
+        }
+        if let Some(idx) = trim.find("-Dhttp.proxyHost=") {
+            let h = &trim[idx + 17..];
+            let end = h
+                .find(|c| c == '"' || c == '\'' || c == ' ' || c == ']')
+                .unwrap_or(h.len());
+            host = Some(h[..end].to_string());
+        }
+        if let Some(idx) = trim.find("-Dhttp.proxyPort=") {
+            let p = &trim[idx + 17..];
+            let end = p
+                .find(|c| c == '"' || c == '\'' || c == ' ' || c == ']')
+                .unwrap_or(p.len());
+            port = Some(p[..end].to_string());
+        }
+    }
+    if let (Some(h), Some(p)) = (host, port) {
+        if !h.is_empty() && !p.is_empty() {
+            return Some(format!("http://{}:{}", h, p));
+        }
+    }
+    None
+}
+
+pub fn get_lein_profiles_path() -> Option<PathBuf> {
+    if let Ok(lein_home) = std::env::var("LEIN_HOME") {
+        let p = PathBuf::from(lein_home).join("profiles.clj");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".lein").join("profiles.clj");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_lein_write_path() -> PathBuf {
+    if let Some(p) = get_lein_profiles_path() {
+        return p;
+    }
+    if let Ok(lein_home) = std::env::var("LEIN_HOME") {
+        return PathBuf::from(lein_home).join("profiles.clj");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".lein").join("profiles.clj");
+    }
+    PathBuf::from("profiles.clj")
+}
+
+pub fn get_lein_proxy() -> Option<(String, PathBuf)> {
+    let p = get_lein_profiles_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_lein_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_cpan_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if trim.contains("'http_proxy'")
+            || trim.contains("\"http_proxy\"")
+            || trim.contains("http_proxy =>")
+        {
+            if let Some((_, v)) = trim.split_once("=>") {
+                let clean = v
+                    .trim()
+                    .trim_matches(',')
+                    .trim_matches(';')
+                    .trim();
+                let extracted = if clean.starts_with("q[") && clean.ends_with(']') {
+                    &clean[2..clean.len() - 1]
+                } else if clean.starts_with("q(") && clean.ends_with(')') {
+                    &clean[2..clean.len() - 1]
+                } else {
+                    clean.trim_matches('\'').trim_matches('"')
+                }
+                .trim();
+
+                if !extracted.is_empty()
+                    && (extracted.starts_with("http://")
+                        || extracted.starts_with("https://")
+                        || extracted.starts_with("socks"))
+                {
+                    return Some(extracted.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_cpan_config_path() -> Option<PathBuf> {
+    if let Ok(cpan_home) = std::env::var("PERL_CPAN_DIR") {
+        let p = PathBuf::from(cpan_home).join("CPAN").join("MyConfig.pm");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".cpan").join("CPAN").join("MyConfig.pm");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_cpan_write_path() -> PathBuf {
+    if let Some(p) = get_cpan_config_path() {
+        return p;
+    }
+    if let Ok(cpan_home) = std::env::var("PERL_CPAN_DIR") {
+        return PathBuf::from(cpan_home).join("CPAN").join("MyConfig.pm");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".cpan").join("CPAN").join("MyConfig.pm");
+    }
+    PathBuf::from("MyConfig.pm")
+}
+
+pub fn get_cpan_proxy() -> Option<(String, PathBuf)> {
+    let p = get_cpan_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_cpan_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_vcpkg_asset_url(val: &str) -> Option<String> {
+    for part in val.split(|c| c == ';' || c == ',') {
+        let trim = part.trim();
+        if trim.starts_with("http://") || trim.starts_with("https://") {
+            return Some(trim.to_string());
+        }
+    }
+    None
+}
+
 pub fn get_terraform_config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(tf_cli) = std::env::var("TF_CLI_CONFIG_FILE") {
@@ -5246,6 +5514,122 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Clojure Leiningen Proxy (~/.lein/profiles.clj)
+    if let Some((lproxy, lpath)) = get_lein_proxy() {
+        let ok = verify_proxy_url(&lproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Clojure Leiningen proxy `{}` in {} is dead! (lein deps / lein new will fail)",
+                lproxy,
+                lpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Clojure (Leiningen)",
+            "~/.lein/profiles.clj proxy",
+            lproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (lein fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Clojure (Leiningen)",
+            "~/.lein/profiles.clj proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Perl CPAN Proxy (~/.cpan/CPAN/MyConfig.pm)
+    if let Some((cproxy, cpath)) = get_cpan_proxy() {
+        let ok = verify_proxy_url(&cproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Perl CPAN proxy `{}` in {} is dead! (cpan / cpanm install will fail)",
+                cproxy,
+                cpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Perl (CPAN)",
+            "~/.cpan/CPAN/MyConfig.pm proxy",
+            cproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (cpan fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Perl (CPAN)",
+            "~/.cpan/CPAN/MyConfig.pm proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
+    let vcpkg_vars = [
+        ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
+        ("VCPKG_BINARY_SOURCES", "vcpkg binary caching mirror source"),
+    ];
+    let mut vcpkg_found = false;
+    for (var, desc) in vcpkg_vars {
+        if let Ok(val) = std::env::var(var) {
+            let trim = val.trim();
+            if !trim.is_empty() {
+                vcpkg_found = true;
+                if let Some(url) = parse_vcpkg_asset_url(trim) {
+                    let ok = verify_proxy_url(&url).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "vcpkg mirror URL `{}` in `{}` is unreachable! (vcpkg install will fail)",
+                            url, var
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "C/C++ vcpkg",
+                        format!("{} ({})", var, desc),
+                        url,
+                        if ok {
+                            "● Reachable Mirror".green().to_string()
+                        } else {
+                            "▲ UNREACHABLE MIRROR! (vcpkg fails)"
+                                .red()
+                                .bold()
+                                .to_string()
+                        },
+                    ));
+                } else {
+                    items.push(DiagItem::new(
+                        "C/C++ vcpkg",
+                        format!("{} ({})", var, desc),
+                        trim.to_string(),
+                        "● Custom Configured".green().to_string(),
+                    ));
+                }
+            }
+        }
+    }
+    if !vcpkg_found {
+        items.push(DiagItem::new(
+            "C/C++ vcpkg",
+            "X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES",
+            "(not set)".dimmed().to_string(),
+            "○ Direct / Official Mirrors".dimmed().to_string(),
+        ));
+    }
+
     // 14. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
@@ -5315,6 +5699,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "DEEPGRAM_BASE_URL",
         "WANDB_BASE_URL",
         "PINECONE_BASE_URL",
+        "TAVILY_BASE_URL",
+        "EXA_BASE_URL",
+        "QDRANT_URL",
+        "ASSEMBLYAI_BASE_URL",
     ];
     let mut ai_found = false;
     for var in ai_vars {
@@ -5345,7 +5733,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/NVIDIA/Doubao/RunPod/Fal/Helicone/Kling/ElevenLabs/Cartesia/Portkey/Langfuse/LiveKit/Deepgram/WandB/Pinecone/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/NVIDIA/Doubao/RunPod/Fal/Helicone/Kling/ElevenLabs/Cartesia/Portkey/Langfuse/LiveKit/Deepgram/WandB/Pinecone/Tavily/Exa/Qdrant/AssemblyAI/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -5707,6 +6095,12 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("api.wandb.ai", 443),
         ("api.pinecone.io", 443),
         ("cloud.livekit.io", 443),
+        ("api.tavily.com", 443),
+        ("api.exa.ai", 443),
+        ("cloud.qdrant.io", 443),
+        ("api.assemblyai.com", 443),
+        ("clojars.org", 443),
+        ("fastapi.metacpan.org", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -7161,5 +7555,108 @@ provider_installation {
 
         let input_none = "plugin_cache_dir = \"$HOME/.terraform.d/plugin-cache\"\n";
         assert!(parse_terraform_network_mirrors(input_none).is_empty());
+    }
+
+    #[test]
+    fn test_clean_terraform_network_mirrors() {
+        let input_tf = r#"
+provider_installation {
+  network_mirror {
+    url = "https://dead.mirror.example.com/"
+  }
+  network_mirror {
+    url = "https://good.mirror.example.com/"
+  }
+}
+"#;
+        let (cleaned, changed) = clean_terraform_network_mirrors(
+            input_tf,
+            &["https://dead.mirror.example.com/"],
+        );
+        assert!(changed);
+        assert!(cleaned.contains("# [proxydoc disabled dead mirror(s)]"));
+        assert!(cleaned.contains("#   network_mirror {"));
+        assert!(cleaned.contains("#     url = \"https://dead.mirror.example.com/\""));
+        assert!(cleaned.contains("https://good.mirror.example.com/"));
+
+        // Single line url check
+        let single_tf = "url = \"https://dead.mirror.example.com/\"\n";
+        let (cleaned_single, changed_single) = clean_terraform_network_mirrors(
+            single_tf,
+            &["https://dead.mirror.example.com/"],
+        );
+        assert!(changed_single);
+        assert!(cleaned_single.contains("# [proxydoc disabled dead mirror]"));
+    }
+
+    #[test]
+    fn test_parse_lein_proxy() {
+        let input_lein = r#"
+{:user {:plugins [[lein-ancient "0.6.15"]]
+        :http-proxy "http://127.0.0.1:7890"
+        :https-proxy "http://127.0.0.1:7890"}}
+"#;
+        assert_eq!(
+            parse_lein_proxy(input_lein),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_jvm = r#"
+{:user {:jvm-opts ["-Dhttp.proxyHost=127.0.0.1" "-Dhttp.proxyPort=1080"]}}
+"#;
+        assert_eq!(
+            parse_lein_proxy(input_jvm),
+            Some("http://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = "{:user {:plugins []}}\n";
+        assert_eq!(parse_lein_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_cpan_proxy() {
+        let input_cpan = r#"
+$CPAN::Config = {
+  'http_proxy' => q[http://127.0.0.1:7890],
+  'ftp_proxy' => q[http://127.0.0.1:7890],
+};
+1;
+__END__
+"#;
+        assert_eq!(
+            parse_cpan_proxy(input_cpan),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_quotes = r#"
+$CPAN::Config = {
+  "http_proxy" => "http://127.0.0.1:1080",
+};
+"#;
+        assert_eq!(
+            parse_cpan_proxy(input_quotes),
+            Some("http://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = "# 'http_proxy' => q[http://127.0.0.1:7890],\n";
+        assert_eq!(parse_cpan_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_vcpkg_asset_url() {
+        let input_azurl = "x-azurl,https://mirror.example.com/vcpkg-assets,read";
+        assert_eq!(
+            parse_vcpkg_asset_url(input_azurl),
+            Some("https://mirror.example.com/vcpkg-assets".to_string())
+        );
+
+        let input_binary = "clear;nuget,http://127.0.0.1:8080/v2/index.json";
+        assert_eq!(
+            parse_vcpkg_asset_url(input_binary),
+            Some("http://127.0.0.1:8080/v2/index.json".to_string())
+        );
+
+        let input_none = "clear;files,C:\\vcpkg-cache,readwrite";
+        assert_eq!(parse_vcpkg_asset_url(input_none), None);
     }
 }
