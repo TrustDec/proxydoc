@@ -135,6 +135,21 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Baseten API", "https://api.baseten.co/v1/models"),
     ("FriendliAI API", "https://api.friendli.ai/v1/models"),
     ("Lepton AI API", "https://api.lepton.ai/v1/models"),
+    (
+        "Nebius AI Studio API",
+        "https://api.studio.nebius.ai/v1/models",
+    ),
+    ("Chutes AI API", "https://api.chutes.ai/v1/models"),
+    (
+        "Infini-AI API",
+        "https://cloud.infini-ai.com/api/maas/v1/models",
+    ),
+    ("AIML API", "https://api.aimlapi.com/v1/models"),
+    (
+        "Crusoe Cloud API",
+        "https://api.crusoecloud.com/v1/models",
+    ),
+    ("Modal", "https://modal.com"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -654,6 +669,19 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Ollama"));
         assert!(standard.iter().any(|(name, _)| *name == "OpenRouter API"));
         assert!(standard.iter().any(|(name, _)| *name == "Groq API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Baseten API"));
+        assert!(standard.iter().any(|(name, _)| *name == "FriendliAI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Lepton AI API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Nebius AI Studio API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Chutes AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Infini-AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "AIML API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Crusoe Cloud API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Modal"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

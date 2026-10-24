@@ -1206,6 +1206,75 @@ pub fn unset_gh_proxy() -> Result<bool> {
     Ok(removed)
 }
 
+pub fn apply_glab_config_proxy(content: &str, proxy_url: &str) -> String {
+    let mut replaced = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && (trim.starts_with("glab_proxy:") || trim.starts_with("http_proxy:")) {
+            lines.push(format!("glab_proxy: {}", proxy_url));
+            replaced = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !replaced {
+        lines.push(format!("glab_proxy: {}", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_glab_config_proxy(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && (trim.starts_with("glab_proxy:") || trim.starts_with("http_proxy:")) {
+            modified = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+    (lines.join("\n") + "\n", modified)
+}
+
+pub fn set_glab_proxy(proxy_url: &str) -> Result<()> {
+    let path = crate::doctor::get_glab_config_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_glab_config_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    let _ = Command::new("glab")
+        .args(["config", "set", "glab_proxy", proxy_url])
+        .output();
+    Ok(())
+}
+
+pub fn unset_glab_proxy() -> Result<bool> {
+    let path = crate::doctor::get_glab_config_path();
+    let mut removed = false;
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_c, m) = remove_glab_config_proxy(&content);
+            if m {
+                std::fs::write(&path, new_c)?;
+                removed = true;
+            }
+        }
+    }
+    let _ = Command::new("glab")
+        .args(["config", "set", "glab_proxy", ""])
+        .output();
+    Ok(removed)
+}
+
 pub fn apply_jetbrains_proxy_xml(content: &str, host: &str, port: u16, is_socks: bool) -> String {
     let proxy_type_val = if is_socks { "2" } else { "1" };
     let new_options = format!(
@@ -2641,6 +2710,72 @@ pub fn unset_kube_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn remove_julia_startup_proxy(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        let upper = trim.to_ascii_uppercase();
+        if (upper.starts_with("ENV[") || trim.contains("[proxydoc"))
+            && (upper.contains("HTTP_PROXY") || upper.contains("HTTPS_PROXY") || upper.contains("ALL_PROXY"))
+        {
+            modified = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+    let res = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+    (res, modified)
+}
+
+pub fn apply_julia_startup_proxy(content: &str, proxy_url: &str) -> String {
+    let (cleaned, _) = remove_julia_startup_proxy(content);
+    let mut lines: Vec<String> = cleaned.lines().map(|s| s.to_string()).collect();
+
+    while let Some(last) = lines.last() {
+        if last.trim().is_empty() {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+
+    lines.push("# [proxydoc managed proxy]".to_string());
+    lines.push(format!("ENV[\"HTTP_PROXY\"] = \"{}\"", proxy_url));
+    lines.push(format!("ENV[\"HTTPS_PROXY\"] = \"{}\"", proxy_url));
+    lines.push(format!("ENV[\"all_proxy\"] = \"{}\"", proxy_url));
+
+    lines.join("\n") + "\n"
+}
+
+pub fn set_julia_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_julia_startup_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_julia_startup_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_julia_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_julia_startup_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_julia_startup_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -2656,6 +2791,7 @@ pub async fn turn_on(
     maven: bool,
     vscode: bool,
     gh: bool,
+    glab: bool,
     jetbrains: bool,
     nuget: bool,
     curl: bool,
@@ -2670,6 +2806,7 @@ pub async fn turn_on(
     conan: bool,
     sbt: bool,
     kube: bool,
+    julia: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2686,6 +2823,7 @@ pub async fn turn_on(
     let set_maven = maven || all;
     let set_vscode = vscode || all;
     let set_gh = gh || all;
+    let set_glab = glab || all;
     let set_jetbrains = jetbrains || all;
     let set_nuget = nuget || all;
     let set_gem = gem || all;
@@ -2698,6 +2836,7 @@ pub async fn turn_on(
     let set_conan = conan || all;
     let set_sbt = sbt || all;
     let set_kube = kube || all;
+    let set_julia = julia || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -2897,6 +3036,16 @@ pub async fn turn_on(
         }
     }
 
+    if set_glab {
+        match set_glab_proxy(&proxy_url) {
+            Ok(_) => eprintln!(
+                "{}",
+                format!("✔ GitLab CLI (glab) proxy set to {}", proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update GitLab CLI config: {}", "▲".yellow(), e),
+        }
+    }
+
     if set_jetbrains {
         match set_jetbrains_proxy(&proxy_url) {
             Ok(ides) => {
@@ -3076,6 +3225,16 @@ pub async fn turn_on(
         }
     }
 
+    if set_julia {
+        match set_julia_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Julia startup proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Julia startup.jl: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -3104,6 +3263,7 @@ pub fn turn_off(
     maven: bool,
     vscode: bool,
     gh: bool,
+    glab: bool,
     jetbrains: bool,
     nuget: bool,
     curl: bool,
@@ -3118,6 +3278,7 @@ pub fn turn_off(
     conan: bool,
     sbt: bool,
     kube: bool,
+    julia: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3134,6 +3295,7 @@ pub fn turn_off(
     let unset_maven = maven || all;
     let unset_vscode = vscode || all;
     let unset_gh = gh || all;
+    let unset_glab = glab || all;
     let unset_jetbrains = jetbrains || all;
     let unset_nuget = nuget || all;
     let unset_gem = gem || all;
@@ -3146,6 +3308,7 @@ pub fn turn_off(
     let unset_conan = conan || all;
     let unset_sbt = sbt || all;
     let unset_kube = kube || all;
+    let unset_julia = julia || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -3283,6 +3446,14 @@ pub fn turn_off(
         }
     }
 
+    if unset_glab {
+        match unset_glab_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Cleared GitLab CLI (glab) proxy".green()),
+            Ok(false) => eprintln!("{}", "○ GitLab CLI (glab) proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to clear GitLab CLI config: {}", "▲".yellow(), e),
+        }
+    }
+
     if unset_jetbrains {
         match unset_jetbrains_proxy() {
             Ok(ides) if !ides.is_empty() => eprintln!(
@@ -3411,6 +3582,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Kubernetes (kubectl) cluster proxy-url removed".green()),
             Ok(false) => eprintln!("{}", "○ Kubernetes (kubectl) cluster proxy-url was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Kubernetes cluster proxy-url: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_julia {
+        match unset_julia_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Julia startup proxy removed from startup.jl".green()),
+            Ok(false) => eprintln!("{}", "○ Julia startup proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Julia startup proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -4092,5 +4271,45 @@ contexts: []
         assert!(changed);
         assert!(!cleaned.contains("proxy-url:"));
         assert!(cleaned.contains("server: https://192.168.1.100:6443"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_glab_config_proxy() {
+        let initial = "version: 1\ngit_protocol: https\n";
+        let with_proxy = apply_glab_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("glab_proxy: http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("git_protocol: https"));
+
+        // Replace existing
+        let updated = apply_glab_config_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("glab_proxy: http://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_glab_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("glab_proxy:"));
+        assert!(cleaned.contains("git_protocol: https"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_julia_startup_proxy() {
+        let initial = "using Pkg\nprintln(\"ready\")\n";
+        let configured = apply_julia_startup_proxy(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("ENV[\"HTTP_PROXY\"] = \"http://127.0.0.1:7890\""));
+        assert!(configured.contains("ENV[\"HTTPS_PROXY\"] = \"http://127.0.0.1:7890\""));
+        assert!(configured.contains("ENV[\"all_proxy\"] = \"http://127.0.0.1:7890\""));
+        assert!(configured.contains("using Pkg"));
+
+        // Replace existing
+        let updated = apply_julia_startup_proxy(&configured, "http://127.0.0.1:8080");
+        assert!(updated.contains("8080"));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_julia_startup_proxy(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("HTTP_PROXY"));
+        assert!(!cleaned.contains("all_proxy"));
+        assert!(cleaned.contains("using Pkg"));
     }
 }

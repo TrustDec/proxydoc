@@ -104,6 +104,9 @@ enum Commands {
         /// Also configure GitHub CLI (gh) proxy (~/.config/gh/config.yml)
         #[arg(long)]
         gh: bool,
+        /// Also configure GitLab CLI (glab) proxy (~/.config/glab-cli/config.yml)
+        #[arg(long)]
+        glab: bool,
         /// Also configure JetBrains & Android Studio IDE proxy (proxy.settings.xml)
         #[arg(long)]
         jetbrains: bool,
@@ -146,7 +149,10 @@ enum Commands {
         /// Also configure Kubernetes (kubectl) cluster proxy (~/.kube/config proxy-url)
         #[arg(long)]
         kube: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, and kube proxy
+        /// Also configure Julia proxy (~/.julia/config/startup.jl)
+        #[arg(long)]
+        julia: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, and julia proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -194,6 +200,9 @@ enum Commands {
         /// Also unset GitHub CLI (gh) proxy (~/.config/gh/config.yml)
         #[arg(long)]
         gh: bool,
+        /// Also unset GitLab CLI (glab) proxy (~/.config/glab-cli/config.yml)
+        #[arg(long)]
+        glab: bool,
         /// Also unset JetBrains & Android Studio IDE proxy (proxy.settings.xml)
         #[arg(long)]
         jetbrains: bool,
@@ -236,7 +245,10 @@ enum Commands {
         /// Also unset Kubernetes (kubectl) cluster proxy (~/.kube/config proxy-url)
         #[arg(long)]
         kube: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, and kube proxy
+        /// Also unset Julia proxy (~/.julia/config/startup.jl)
+        #[arg(long)]
+        julia: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, and julia proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -293,6 +305,7 @@ async fn main() -> Result<()> {
             maven,
             vscode,
             gh,
+            glab,
             jetbrains,
             nuget,
             curl,
@@ -307,6 +320,7 @@ async fn main() -> Result<()> {
             conan,
             sbt,
             kube,
+            julia,
             all,
             shell,
         }) => {
@@ -325,6 +339,7 @@ async fn main() -> Result<()> {
                 maven,
                 vscode,
                 gh,
+                glab,
                 jetbrains,
                 nuget,
                 curl,
@@ -339,6 +354,7 @@ async fn main() -> Result<()> {
                 conan,
                 sbt,
                 kube,
+                julia,
                 all,
                 shell.as_deref(),
             )
@@ -358,6 +374,7 @@ async fn main() -> Result<()> {
             maven,
             vscode,
             gh,
+            glab,
             jetbrains,
             nuget,
             curl,
@@ -372,6 +389,7 @@ async fn main() -> Result<()> {
             conan,
             sbt,
             kube,
+            julia,
             all,
             shell,
         }) => {
@@ -389,6 +407,7 @@ async fn main() -> Result<()> {
                 maven,
                 vscode,
                 gh,
+                glab,
                 jetbrains,
                 nuget,
                 curl,
@@ -403,6 +422,7 @@ async fn main() -> Result<()> {
                 conan,
                 sbt,
                 kube,
+                julia,
                 all,
                 shell.as_deref(),
             )?;
@@ -1067,6 +1087,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { kube, .. }) => {
                 assert!(kube);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_glab() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--glab"]).unwrap();
+        match cli.command {
+            Some(Commands::On { glab, .. }) => {
+                assert!(glab);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_glab() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--glab"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { glab, .. }) => {
+                assert!(glab);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_julia() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--julia"]).unwrap();
+        match cli.command {
+            Some(Commands::On { julia, .. }) => {
+                assert!(julia);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_julia() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--julia"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { julia, .. }) => {
+                assert!(julia);
             }
             _ => panic!("Expected Off command"),
         }

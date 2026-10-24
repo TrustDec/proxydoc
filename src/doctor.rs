@@ -1724,6 +1724,59 @@ pub fn get_gh_proxy() -> Option<String> {
     None
 }
 
+pub fn parse_glab_config_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once(':') {
+            let key = k.trim();
+            if key == "glab_proxy" || key == "http_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_glab_config_path() -> PathBuf {
+    if let Ok(dir) = std::env::var("GLAB_CONFIG_DIR") {
+        let p = PathBuf::from(dir).join("config.yml");
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p1 = config_dir.join("glab-cli").join("config.yml");
+        if p1.exists() {
+            return p1;
+        }
+        let p2 = config_dir.join("glab").join("config.yml");
+        if p2.exists() {
+            return p2;
+        }
+        p1
+    } else if let Some(home) = dirs::home_dir() {
+        home.join(".config").join("glab-cli").join("config.yml")
+    } else {
+        PathBuf::from(".config/glab-cli/config.yml")
+    }
+}
+
+pub fn get_glab_proxy() -> Option<String> {
+    let path = get_glab_config_path();
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            return parse_glab_config_proxy(&content);
+        }
+    }
+    None
+}
+
 pub fn extract_xml_attr(tag_content: &str, attr_name: &str) -> Option<String> {
     let lower = tag_content.to_ascii_lowercase();
     let mut search_from = 0;
@@ -2565,6 +2618,144 @@ pub fn get_sbtopts_write_path() -> PathBuf {
     PathBuf::from(".sbtopts")
 }
 
+pub fn parse_julia_startup_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        let upper = trim.to_ascii_uppercase();
+        if upper.starts_with("ENV[") {
+            if upper.contains("HTTP_PROXY") || upper.contains("HTTPS_PROXY") || upper.contains("ALL_PROXY") {
+                if let Some((_, right)) = trim.split_once('=') {
+                    let val = right.trim().trim_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_julia_startup_path() -> Option<PathBuf> {
+    if let Ok(depot) = std::env::var("JULIA_DEPOT_PATH") {
+        if let Some(first) = depot.split(':').next() {
+            let p = PathBuf::from(first.trim()).join("config").join("startup.jl");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".julia").join("config").join("startup.jl");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_julia_startup_proxy() -> Option<(String, PathBuf)> {
+    if let Some(path) = get_julia_startup_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Some(proxy) = parse_julia_startup_proxy(&content) {
+                return Some((proxy, path));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_julia_startup_write_path() -> PathBuf {
+    if let Ok(depot) = std::env::var("JULIA_DEPOT_PATH") {
+        if let Some(first) = depot.split(':').next() {
+            if !first.trim().is_empty() {
+                return PathBuf::from(first.trim()).join("config").join("startup.jl");
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".julia").join("config").join("startup.jl");
+    }
+    PathBuf::from("startup.jl")
+}
+
+pub fn parse_nix_substituters(content: &str) -> Vec<String> {
+    let mut substituters = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim();
+            if key == "substituters" || key == "extra-substituters" || key == "trusted-substituters" {
+                for token in v.split_whitespace() {
+                    let t = token.trim_matches('"').trim_matches('\'').trim();
+                    if t.starts_with("http://") || t.starts_with("https://") {
+                        if !substituters.contains(&t.to_string()) {
+                            substituters.push(t.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    substituters
+}
+
+pub fn get_nix_config_path() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("NIX_CONFIG_DIR") {
+        let p = PathBuf::from(dir).join("nix.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("nix").join("nix.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".config").join("nix").join("nix.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let system_nix = PathBuf::from("/etc/nix/nix.conf");
+    if system_nix.exists() {
+        return Some(system_nix);
+    }
+    None
+}
+
+pub fn get_swiftpm_mirrors_path() -> Option<PathBuf> {
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".swiftpm").join("configuration").join("mirrors.json");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn parse_swiftpm_mirrors(content: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(mirrors_map) = val.get("mirrors").and_then(|m| m.as_object()) {
+            for (_orig, mirror_dest) in mirrors_map {
+                if let Some(s) = mirror_dest.as_str() {
+                    urls.push(s.to_string());
+                }
+            }
+        }
+    }
+    urls
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -2985,6 +3176,37 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "GitHub CLI",
             "gh config (http_proxy)",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // GitLab CLI (glab) Config (~/.config/glab-cli/config.yml)
+    if let Some(val) = get_glab_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!(
+                "GitLab CLI (glab) config points to dead proxy `{}`! (glab repo/mr & API operations will fail)",
+                val
+            ));
+        }
+        items.push(DiagItem::new(
+            "GitLab CLI",
+            "glab config (glab_proxy)",
+            val,
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (glab repo/mr fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "GitLab CLI",
+            "glab config (glab_proxy)",
             "(not set)".dimmed().to_string(),
             "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
         ));
@@ -3987,6 +4209,79 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Swift Package Manager Mirror Config (~/.swiftpm/configuration/mirrors.json)
+    if let Some(mpath) = get_swiftpm_mirrors_path() {
+        if let Ok(content) = std::fs::read_to_string(&mpath) {
+            let mirrors = parse_swiftpm_mirrors(&content);
+            if mirrors.is_empty() {
+                items.push(DiagItem::new(
+                    "SwiftPM Mirrors",
+                    "~/.swiftpm/configuration/mirrors.json",
+                    "(empty)".dimmed().to_string(),
+                    "○ Direct Official Repositories".dimmed().to_string(),
+                ));
+            } else {
+                for mirror in mirrors {
+                    let ok = verify_proxy_url(&mirror).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "SwiftPM mirror `{}` in mirrors.json is unreachable! (swift package resolve will fail)",
+                            mirror
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "SwiftPM Mirrors",
+                        "mirrors.json mirror",
+                        mirror,
+                        if ok {
+                            "● Reachable Mirror".green().to_string()
+                        } else {
+                            "▲ UNREACHABLE MIRROR! (swift fails)"
+                                .red()
+                                .bold()
+                                .to_string()
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    // Nix Package Substituters & Binary Caches (~/.config/nix/nix.conf)
+    if let Some(npath) = get_nix_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&npath) {
+            let subs = parse_nix_substituters(&content);
+            if !subs.is_empty() {
+                for sub in subs {
+                    if sub == "https://cache.nixos.org" {
+                        continue;
+                    }
+                    let ok = verify_proxy_url(&sub).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "Nix substituter mirror `{}` in {} is unreachable! (nix-shell / nix build will stall)",
+                            sub,
+                            npath.display()
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "Nix Substituter",
+                        "nix.conf binary cache",
+                        sub,
+                        if ok {
+                            "● Reachable Cache Mirror".green().to_string()
+                        } else {
+                            "▲ UNREACHABLE CACHE! (nix build stalls)"
+                                .red()
+                                .bold()
+                                .to_string()
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
     // Kubernetes (kubectl) Cluster Proxy Inspection (~/.kube/config)
     if let Some(kpath) = get_kubeconfig_path() {
         if let Ok(content) = std::fs::read_to_string(&kpath) {
@@ -4123,6 +4418,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Julia Startup Script Proxy (~/.julia/config/startup.jl)
+    if let Some((jproxy, jpath)) = get_julia_startup_proxy() {
+        let ok = verify_proxy_url(&jproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Julia startup proxy `{}` in {} is dead! (julia Pkg and network downloads will fail)",
+                jproxy,
+                jpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Julia (startup.jl)",
+            "~/.julia/config/startup.jl proxy",
+            jproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (julia Pkg fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Julia (startup.jl)",
+            "~/.julia/config/startup.jl proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // Deno Environment Proxy
     let deno_vars = [
         ("DENO_HTTP_PROXY", "Deno HTTP Proxy"),
@@ -4211,6 +4538,13 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "BASETEN_BASE_URL",
         "FRIENDLI_BASE_URL",
         "LEPTON_BASE_URL",
+        "NEBIUS_BASE_URL",
+        "CHUTES_BASE_URL",
+        "INFINI_BASE_URL",
+        "AIMLAPI_BASE_URL",
+        "CRUSOE_BASE_URL",
+        "MODAL_BASE_URL",
+        "GLAB_PROXY",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -5787,5 +6121,79 @@ clusters:
 
         let sbt_none = "# -Dhttp.proxyHost=127.0.0.1\n-J-Xmx4G\n";
         assert_eq!(parse_sbtopts_proxy(sbt_none), None);
+    }
+
+    #[test]
+    fn test_parse_glab_config_proxy() {
+        let input = r#"version: 1
+git_protocol: https
+glab_proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_glab_config_proxy(input),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_http = "http_proxy: \"http://10.0.0.1:8080\"\n";
+        assert_eq!(
+            parse_glab_config_proxy(input_http),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_glab_config_proxy_none() {
+        let input = "git_protocol: ssh\n# glab_proxy: http://127.0.0.1:7890\n";
+        assert_eq!(parse_glab_config_proxy(input), None);
+    }
+
+    #[test]
+    fn test_parse_julia_startup_proxy() {
+        let input = r#"
+# Some comments
+println("Welcome to Julia")
+ENV["HTTP_PROXY"] = "http://127.0.0.1:7890"
+ENV["HTTPS_PROXY"] = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_julia_startup_proxy(input),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_socks = "ENV[\"all_proxy\"] = \"socks5://127.0.0.1:1080\";\n";
+        assert_eq!(
+            parse_julia_startup_proxy(input_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_julia_startup_proxy_none() {
+        let input = "# ENV[\"HTTP_PROXY\"] = \"http://127.0.0.1:7890\"\nusing Pkg\n";
+        assert_eq!(parse_julia_startup_proxy(input), None);
+    }
+
+    #[test]
+    fn test_parse_nix_substituters() {
+        let input = r#"
+substituters = https://cache.nixos.org https://mirrors.tuna.tsinghua.edu.cn/nix-channels/store https://mirror.sjtu.edu.cn/nix-channels/store
+trusted-users = root @wheel
+"#;
+        let subs = parse_nix_substituters(input);
+        assert_eq!(subs.len(), 3);
+        assert!(subs.contains(&"https://cache.nixos.org".to_string()));
+        assert!(subs.contains(&"https://mirrors.tuna.tsinghua.edu.cn/nix-channels/store".to_string()));
+    }
+
+    #[test]
+    fn test_parse_swiftpm_mirrors() {
+        let input = r#"{
+  "mirrors": {
+    "https://github.com/apple/swift-argument-parser.git": "https://hub.fastgit.xyz/apple/swift-argument-parser.git"
+  },
+  "version": 1
+}"#;
+        let mirrors = parse_swiftpm_mirrors(input);
+        assert_eq!(mirrors, vec!["https://hub.fastgit.xyz/apple/swift-argument-parser.git".to_string()]);
     }
 }
