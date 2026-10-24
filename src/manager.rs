@@ -1,5 +1,6 @@
 use anyhow::Result;
 use colored::*;
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::doctor::get_system_proxy;
@@ -1254,6 +1255,324 @@ pub fn unset_jetbrains_proxy() -> Result<Vec<String>> {
     Ok(deactivated)
 }
 
+pub fn apply_nuget_proxy_xml(content: &str, proxy_url: &str) -> String {
+    let proxy_line = format!("    <add key=\"http_proxy\" value=\"{}\" />", proxy_url);
+
+    if content.trim().is_empty() {
+        return format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <config>\n{}\n  </config>\n</configuration>\n",
+            proxy_line
+        );
+    }
+
+    let mut replaced = false;
+    let mut out_lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+        if !trim.starts_with("<!--")
+            && trim.starts_with("<add")
+            && (lower.contains("key=\"http_proxy\"")
+                || lower.contains("key='http_proxy'")
+                || lower.contains("key=\"https_proxy\"")
+                || lower.contains("key='https_proxy'")
+                || (lower.contains("http_proxy") && lower.contains("key=")))
+        {
+            if !replaced {
+                let leading_ws = line.len() - line.trim_start().len();
+                let indent = if leading_ws > 0 { &line[..leading_ws] } else { "    " };
+                out_lines.push(format!("{}<add key=\"http_proxy\" value=\"{}\" />", indent, proxy_url));
+                replaced = true;
+            }
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    if replaced {
+        let mut res = out_lines.join("\n");
+        if content.ends_with('\n') {
+            res.push('\n');
+        }
+        return res;
+    }
+
+    let text = out_lines.join("\n");
+    if let Some(config_idx) = text.find("<config>") {
+        let insert_pos = config_idx + 8;
+        let mut res = String::new();
+        res.push_str(&text[..insert_pos]);
+        res.push('\n');
+        res.push_str(&proxy_line);
+        res.push_str(&text[insert_pos..]);
+        if content.ends_with('\n') && !res.ends_with('\n') {
+            res.push('\n');
+        }
+        return res;
+    }
+
+    if let Some(config_sc) = text.find("<config/>") {
+        let mut res = String::new();
+        res.push_str(&text[..config_sc]);
+        res.push_str("<config>\n");
+        res.push_str(&proxy_line);
+        res.push_str("\n  </config>");
+        res.push_str(&text[config_sc + 9..]);
+        if content.ends_with('\n') && !res.ends_with('\n') {
+            res.push('\n');
+        }
+        return res;
+    }
+
+    if let Some(config_sc2) = text.find("<config />") {
+        let mut res = String::new();
+        res.push_str(&text[..config_sc2]);
+        res.push_str("<config>\n");
+        res.push_str(&proxy_line);
+        res.push_str("\n  </config>");
+        res.push_str(&text[config_sc2 + 10..]);
+        if content.ends_with('\n') && !res.ends_with('\n') {
+            res.push('\n');
+        }
+        return res;
+    }
+
+    if let Some(conf_end) = text.find("</configuration>") {
+        let mut res = String::new();
+        res.push_str(&text[..conf_end]);
+        res.push_str("  <config>\n");
+        res.push_str(&proxy_line);
+        res.push_str("\n  </config>\n");
+        res.push_str(&text[conf_end..]);
+        if content.ends_with('\n') && !res.ends_with('\n') {
+            res.push('\n');
+        }
+        return res;
+    }
+
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <config>\n{}\n  </config>\n{}\n</configuration>\n",
+        proxy_line, text
+    )
+}
+
+pub fn remove_nuget_proxy_xml(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut out_lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+        if !trim.starts_with("<!--")
+            && trim.starts_with("<add")
+            && (lower.contains("http_proxy") || lower.contains("https_proxy"))
+        {
+            modified = true;
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    let mut res = out_lines.join("\n");
+    if content.ends_with('\n') && !res.is_empty() {
+        res.push('\n');
+    }
+    (res, modified)
+}
+
+pub fn set_nuget_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_nuget_config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_nuget_proxy_xml(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_nuget_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    let mut candidates = Vec::new();
+    #[cfg(windows)]
+    if let Some(appdata) = dirs::config_dir() {
+        candidates.push(appdata.join("NuGet").join("NuGet.Config"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".nuget").join("NuGet").join("NuGet.Config"));
+        candidates.push(home.join(".config").join("NuGet").join("NuGet.Config"));
+    }
+    for path in candidates {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_nuget_proxy_xml(&content);
+                if removed {
+                    std::fs::write(&path, new_content)?;
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_curlrc_lines(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#')
+            && (trim.starts_with("proxy") || trim.starts_with("-x") || trim.starts_with("--proxy"))
+        {
+            if !replaced {
+                lines.push(format!("proxy = \"{}\"", proxy_url));
+                replaced = true;
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !replaced {
+        lines.push(format!("proxy = \"{}\"", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_curlrc_lines(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#')
+            && (trim.starts_with("proxy") || trim.starts_with("-x") || trim.starts_with("--proxy"))
+        {
+            changed = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    let res = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+    (res, changed)
+}
+
+pub fn apply_curlrc_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let path = home.join(".curlrc");
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_curlrc_lines(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_curlrc_proxy() -> Result<bool> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let path = home.join(".curlrc");
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, changed) = remove_curlrc_lines(&content);
+    if changed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(changed)
+}
+
+pub fn apply_wgetrc_lines(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut set_http = false;
+    let mut set_https = false;
+    let mut set_use = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+        if !trim.starts_with('#') && lower.starts_with("http_proxy") {
+            if !set_http {
+                lines.push(format!("http_proxy = {}", proxy_url));
+                set_http = true;
+            }
+        } else if !trim.starts_with('#') && lower.starts_with("https_proxy") {
+            if !set_https {
+                lines.push(format!("https_proxy = {}", proxy_url));
+                set_https = true;
+            }
+        } else if !trim.starts_with('#') && lower.starts_with("use_proxy") {
+            if !set_use {
+                lines.push("use_proxy = on".to_string());
+                set_use = true;
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !set_http {
+        lines.push(format!("http_proxy = {}", proxy_url));
+    }
+    if !set_https {
+        lines.push(format!("https_proxy = {}", proxy_url));
+    }
+    if !set_use {
+        lines.push("use_proxy = on".to_string());
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_wgetrc_lines(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+        if !trim.starts_with('#')
+            && (lower.starts_with("http_proxy") || lower.starts_with("https_proxy") || lower.starts_with("use_proxy"))
+        {
+            changed = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    let res = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+    (res, changed)
+}
+
+pub fn apply_wgetrc_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let path = home.join(".wgetrc");
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_wgetrc_lines(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_wgetrc_proxy() -> Result<bool> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let path = home.join(".wgetrc");
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, changed) = remove_wgetrc_lines(&content);
+    if changed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(changed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -1270,6 +1589,9 @@ pub async fn turn_on(
     vscode: bool,
     gh: bool,
     jetbrains: bool,
+    nuget: bool,
+    curl: bool,
+    wget: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1287,6 +1609,9 @@ pub async fn turn_on(
     let set_vscode = vscode || all;
     let set_gh = gh || all;
     let set_jetbrains = jetbrains || all;
+    let set_nuget = nuget || all;
+    let set_curl = curl;
+    let set_wget = wget;
 
     // Resolve target proxy address
     let proxy_url = if target == "auto" {
@@ -1417,6 +1742,27 @@ pub async fn turn_on(
         }
     }
 
+    if set_nuget {
+        match set_nuget_proxy(&proxy_url) {
+            Ok(p) => eprintln!("{}", format!("✔ NuGet (.NET) proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update NuGet config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_curl {
+        match apply_curlrc_proxy(&proxy_url) {
+            Ok(p) => eprintln!("{}", format!("✔ cURL proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update ~/.curlrc: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_wget {
+        match apply_wgetrc_proxy(&proxy_url) {
+            Ok(p) => eprintln!("{}", format!("✔ Wget proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update ~/.wgetrc: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
     eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
 
@@ -1438,6 +1784,9 @@ pub fn turn_off(
     vscode: bool,
     gh: bool,
     jetbrains: bool,
+    nuget: bool,
+    curl: bool,
+    wget: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1455,6 +1804,9 @@ pub fn turn_off(
     let unset_vscode = vscode || all;
     let unset_gh = gh || all;
     let unset_jetbrains = jetbrains || all;
+    let unset_nuget = nuget || all;
+    let unset_curl = curl;
+    let unset_wget = wget;
 
     let target_shell = detect_shell(shell);
     for line in generate_shell_unset(target_shell) {
@@ -1563,6 +1915,30 @@ pub fn turn_off(
             Ok(ides) if !ides.is_empty() => eprintln!("{}", format!("✔ JetBrains IDE proxy deactivated in {}", ides.join(", ")).green()),
             Ok(_) => eprintln!("{}", "○ JetBrains IDE proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to deactivate JetBrains IDE proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_nuget {
+        match unset_nuget_proxy() {
+            Ok(true) => eprintln!("{}", "✔ NuGet global proxy removed from NuGet.Config".green()),
+            Ok(false) => eprintln!("{}", "○ NuGet global proxy was not configured".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset NuGet proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_curl {
+        match unset_curlrc_proxy() {
+            Ok(true) => eprintln!("{}", "✔ cURL proxy removed from ~/.curlrc".green()),
+            Ok(false) => eprintln!("{}", "○ cURL proxy was not set in ~/.curlrc".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset ~/.curlrc proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_wget {
+        match unset_wgetrc_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Wget proxy removed from ~/.wgetrc".green()),
+            Ok(false) => eprintln!("{}", "○ Wget proxy was not set in ~/.wgetrc".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset ~/.wgetrc proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -1933,5 +2309,76 @@ mod tests {
         assert!(configured.contains("<component name=\"HttpConfigurable\">"));
         assert!(configured.contains(r#"<option name="USE_HTTP_PROXY" value="true" />"#));
         assert!(configured.contains(r#"<option name="PROXY_PORT" value="7890" />"#));
+    }
+
+    #[test]
+    fn test_apply_and_remove_nuget_proxy_xml() {
+        let initial = r#"<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+  <config>
+    <add key="repositoryPath" value="./packages" />
+  </config>
+</configuration>"#;
+        let configured = apply_nuget_proxy_xml(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains(r#"<add key="http_proxy" value="http://127.0.0.1:7890" />"#));
+        assert!(configured.contains(r#"<add key="repositoryPath" value="./packages" />"#));
+
+        let (cleaned, modified) = remove_nuget_proxy_xml(&configured);
+        assert!(modified);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(cleaned.contains(r#"<add key="repositoryPath" value="./packages" />"#));
+    }
+
+    #[test]
+    fn test_apply_nuget_proxy_xml_new() {
+        let empty = "";
+        let configured = apply_nuget_proxy_xml(empty, "http://127.0.0.1:7890");
+        assert!(configured.contains("<configuration>"));
+        assert!(configured.contains("<config>"));
+        assert!(configured.contains(r#"<add key="http_proxy" value="http://127.0.0.1:7890" />"#));
+    }
+
+    #[test]
+    fn test_apply_nuget_proxy_xml_replace_existing() {
+        let initial = r#"<configuration>
+  <config>
+    <add key="http_proxy" value="http://127.0.0.1:1080" />
+  </config>
+</configuration>"#;
+        let configured = apply_nuget_proxy_xml(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains(r#"<add key="http_proxy" value="http://127.0.0.1:7890" />"#));
+        assert!(!configured.contains("1080"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_curlrc_lines() {
+        let initial = "# curl config\nsilent\nproxy = \"http://127.0.0.1:1080\"\n";
+        let configured = apply_curlrc_lines(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("proxy = \"http://127.0.0.1:7890\""));
+        assert!(!configured.contains("1080"));
+        assert!(configured.contains("silent"));
+
+        let (cleaned, changed) = remove_curlrc_lines(&configured);
+        assert!(changed);
+        assert!(!cleaned.contains("proxy ="));
+        assert!(cleaned.contains("silent"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_wgetrc_lines() {
+        let initial = "# wget config\nhttp_proxy = http://127.0.0.1:1080\nhttps_proxy = http://127.0.0.1:1080\nuse_proxy = on\n";
+        let configured = apply_wgetrc_lines(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("http_proxy = http://127.0.0.1:7890"));
+        assert!(configured.contains("https_proxy = http://127.0.0.1:7890"));
+        assert!(!configured.contains("1080"));
+
+        let (cleaned, changed) = remove_wgetrc_lines(&configured);
+        assert!(changed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(!cleaned.contains("https_proxy"));
+        assert!(!cleaned.contains("use_proxy"));
     }
 }

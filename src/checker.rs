@@ -66,6 +66,8 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Anthropic API", "https://api.anthropic.com/v1/messages"),
     ("Google Gemini", "https://generativelanguage.googleapis.com/v1beta/models"),
     ("DeepSeek API", "https://api.deepseek.com/models"),
+    ("xAI (Grok) API", "https://api.x.ai/v1/models"),
+    ("SiliconFlow API", "https://api.siliconflow.cn/v1/models"),
     ("HuggingFace", "https://huggingface.co/api/status"),
     ("crates.io", "https://crates.io/api/v1/summary"),
     ("npm Registry", "https://registry.npmjs.org"),
@@ -522,6 +524,8 @@ mod tests {
     fn test_build_target_list() {
         let standard = build_target_list(None);
         assert!(standard.iter().any(|(name, _)| *name == "DeepSeek API"));
+        assert!(standard.iter().any(|(name, _)| *name == "xAI (Grok) API"));
+        assert!(standard.iter().any(|(name, _)| *name == "SiliconFlow API"));
         assert!(standard.iter().any(|(name, _)| *name == "OpenAI API"));
         assert!(standard.iter().any(|(name, _)| *name == "crates.io"));
         assert!(standard.iter().any(|(name, _)| *name == "npm Registry"));

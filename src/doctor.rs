@@ -1584,6 +1584,96 @@ pub fn get_gh_proxy() -> Option<String> {
     None
 }
 
+pub fn extract_xml_attr(tag_content: &str, attr_name: &str) -> Option<String> {
+    let lower = tag_content.to_ascii_lowercase();
+    let mut search_from = 0;
+    while let Some(pos) = lower[search_from..].find(attr_name) {
+        let abs_pos = search_from + pos;
+        let after_name = &tag_content[abs_pos + attr_name.len()..];
+        let trimmed_after = after_name.trim_start();
+        if trimmed_after.starts_with('=') {
+            let after_eq = trimmed_after[1..].trim_start();
+            if let Some(quote) = after_eq.chars().next() {
+                if quote == '"' || quote == '\'' {
+                    let val_str = &after_eq[quote.len_utf8()..];
+                    if let Some(end_q) = val_str.find(quote) {
+                        return Some(val_str[..end_q].trim().to_string());
+                    }
+                }
+            }
+        }
+        search_from = abs_pos + attr_name.len();
+    }
+    None
+}
+
+pub fn parse_nuget_config_proxy(content: &str) -> Option<String> {
+    let clean = strip_xml_comments(content);
+    let mut cursor = clean.as_str();
+
+    while let Some(idx) = cursor.find("<add") {
+        let rest = &cursor[idx + 4..];
+        let end_idx = match rest.find('>') {
+            Some(e) => e,
+            None => break,
+        };
+        let tag_content = &rest[..end_idx];
+        cursor = &rest[end_idx + 1..];
+
+        if let (Some(key), Some(val)) = (
+            extract_xml_attr(tag_content, "key"),
+            extract_xml_attr(tag_content, "value"),
+        ) {
+            let k_lower = key.to_ascii_lowercase();
+            if (k_lower == "http_proxy" || k_lower == "https_proxy") && !val.is_empty() {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nuget_config_path() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(appdata) = dirs::config_dir() {
+        return appdata.join("NuGet").join("NuGet.Config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p1 = home.join(".nuget").join("NuGet").join("NuGet.Config");
+        if p1.exists() {
+            return p1;
+        }
+        let p2 = home.join(".config").join("NuGet").join("NuGet.Config");
+        if p2.exists() {
+            return p2;
+        }
+        return p1;
+    }
+    PathBuf::from("NuGet.Config")
+}
+
+pub fn get_nuget_proxy() -> Option<(String, PathBuf)> {
+    let mut candidates = Vec::new();
+    #[cfg(windows)]
+    if let Some(appdata) = dirs::config_dir() {
+        candidates.push(appdata.join("NuGet").join("NuGet.Config"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".nuget").join("NuGet").join("NuGet.Config"));
+        candidates.push(home.join(".config").join("NuGet").join("NuGet.Config"));
+    }
+    for p in candidates {
+        if p.exists() {
+            if let Ok(content) = std::fs::read_to_string(&p) {
+                if let Some(proxy) = parse_nuget_config_proxy(&content) {
+                    return Some((proxy, p));
+                }
+            }
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -2306,6 +2396,35 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // 12. NuGet (.NET) Config (~/.nuget/NuGet/NuGet.Config)
+    if let Some((val, path)) = get_nuget_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!(
+                "NuGet config ({}) points to dead proxy `{}` (.NET restore & package installs will fail)",
+                path.display(),
+                val
+            ));
+        }
+        items.push(DiagItem::new(
+            "NuGet (.NET)",
+            "NuGet.Config http_proxy",
+            val,
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (dotnet restore fails)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "NuGet (.NET)",
+            "NuGet.Config http_proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
     // 12. Go Proxy (GOPROXY)
     if let Some(gp) = get_goproxy() {
         let mirrors = parse_goproxy(&gp);
@@ -2397,6 +2516,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "MISTRAL_BASE_URL",
         "PERPLEXITY_BASE_URL",
         "COHERE_BASE_URL",
+        "XAI_BASE_URL",
+        "SILICONFLOW_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -2429,7 +2550,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -3423,5 +3544,51 @@ git_protocol: https
 editor:
 "#;
         assert!(parse_gh_config_proxy(input).is_none());
+    }
+
+    #[test]
+    fn test_parse_nuget_config_proxy_standard() {
+        let input = r#"<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+  </packageSources>
+  <config>
+    <add key="http_proxy" value="http://127.0.0.1:7890" />
+  </config>
+</configuration>"#;
+        let proxy = parse_nuget_config_proxy(input).expect("Should find http_proxy in NuGet.Config");
+        assert_eq!(proxy, "http://127.0.0.1:7890");
+    }
+
+    #[test]
+    fn test_parse_nuget_config_proxy_case_and_quotes() {
+        let input = r#"<configuration>
+  <config>
+    <add KEY = 'HTTP_PROXY' VALUE = 'http://127.0.0.1:1080' />
+  </config>
+</configuration>"#;
+        let proxy = parse_nuget_config_proxy(input).expect("Should find HTTP_PROXY with single quotes");
+        assert_eq!(proxy, "http://127.0.0.1:1080");
+    }
+
+    #[test]
+    fn test_parse_nuget_config_proxy_commented() {
+        let input = r#"<configuration>
+  <!-- <config>
+    <add key="http_proxy" value="http://127.0.0.1:7890" />
+  </config> -->
+</configuration>"#;
+        assert!(parse_nuget_config_proxy(input).is_none());
+    }
+
+    #[test]
+    fn test_parse_nuget_config_proxy_none() {
+        let input = r#"<configuration>
+  <packageSources>
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+</configuration>"#;
+        assert!(parse_nuget_config_proxy(input).is_none());
     }
 }

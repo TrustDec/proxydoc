@@ -107,7 +107,16 @@ enum Commands {
         /// Also configure JetBrains & Android Studio IDE proxy (proxy.settings.xml)
         #[arg(long)]
         jetbrains: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, and jetbrains proxy
+        /// Also configure NuGet (.NET) proxy (NuGet.Config)
+        #[arg(long)]
+        nuget: bool,
+        /// Also configure cURL proxy (~/.curlrc)
+        #[arg(long)]
+        curl: bool,
+        /// Also configure Wget proxy (~/.wgetrc)
+        #[arg(long)]
+        wget: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, and nuget proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -158,7 +167,16 @@ enum Commands {
         /// Also unset JetBrains & Android Studio IDE proxy (proxy.settings.xml)
         #[arg(long)]
         jetbrains: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, and jetbrains proxy
+        /// Also unset NuGet (.NET) proxy (NuGet.Config)
+        #[arg(long)]
+        nuget: bool,
+        /// Also unset cURL proxy (~/.curlrc)
+        #[arg(long)]
+        curl: bool,
+        /// Also unset Wget proxy (~/.wgetrc)
+        #[arg(long)]
+        wget: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, and nuget proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -193,11 +211,11 @@ async fn main() -> Result<()> {
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, all, shell }) => {
-            manager::turn_on(&target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, all, shell.as_deref()).await?;
+        Some(Commands::On { target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, curl, wget, all, shell }) => {
+            manager::turn_on(&target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, curl, wget, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, all, shell }) => {
-            manager::turn_off(git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, all, shell.as_deref())?;
+        Some(Commands::Off { git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, curl, wget, all, shell }) => {
+            manager::turn_off(git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, curl, wget, all, shell.as_deref())?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());
@@ -541,6 +559,72 @@ mod tests {
         match cli.command {
             Some(Commands::Off { jetbrains, .. }) => {
                 assert!(jetbrains);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_nuget() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--nuget"]).unwrap();
+        match cli.command {
+            Some(Commands::On { nuget, .. }) => {
+                assert!(nuget);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_nuget() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--nuget"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { nuget, .. }) => {
+                assert!(nuget);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_curl() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--curl"]).unwrap();
+        match cli.command {
+            Some(Commands::On { curl, .. }) => {
+                assert!(curl);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_curl() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--curl"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { curl, .. }) => {
+                assert!(curl);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_wget() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--wget"]).unwrap();
+        match cli.command {
+            Some(Commands::On { wget, .. }) => {
+                assert!(wget);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_wget() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--wget"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { wget, .. }) => {
+                assert!(wget);
             }
             _ => panic!("Expected Off command"),
         }
