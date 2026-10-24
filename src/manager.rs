@@ -130,6 +130,130 @@ pub fn remove_docker_proxy_json(root: &mut serde_json::Value) -> bool {
     removed
 }
 
+pub fn apply_cargo_proxy_toml(content: &str, proxy_url: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut in_http = false;
+    let mut http_seen = false;
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') {
+            if in_http && !proxy_set {
+                lines.push(format!("proxy = \"{}\"", proxy_url));
+                proxy_set = true;
+            }
+            in_http = trim == "[http]";
+            if in_http {
+                http_seen = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_http {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim() == "proxy" {
+                    lines.push(format!("proxy = \"{}\"", proxy_url));
+                    proxy_set = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_http && !proxy_set {
+        lines.push(format!("proxy = \"{}\"", proxy_url));
+    }
+
+    if !http_seen {
+        if !lines.is_empty() && !lines.last().map(|l| l.trim().is_empty()).unwrap_or(true) {
+            lines.push(String::new());
+        }
+        lines.push("[http]".to_string());
+        lines.push(format!("proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_cargo_proxy_toml(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_http = false;
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') {
+            in_http = trim == "[http]";
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_http {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim() == "proxy" {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_cargo_proxy(proxy_url: &str) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let cargo_dir = home.join(".cargo");
+    std::fs::create_dir_all(&cargo_dir)?;
+    let config_path = if cargo_dir.join("config.toml").exists() {
+        cargo_dir.join("config.toml")
+    } else if cargo_dir.join("config").exists() {
+        cargo_dir.join("config")
+    } else {
+        cargo_dir.join("config.toml")
+    };
+
+    let content = if config_path.exists() {
+        std::fs::read_to_string(&config_path)?
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_cargo_proxy_toml(&content, proxy_url);
+    std::fs::write(&config_path, new_content)?;
+    Ok(())
+}
+
+pub fn unset_cargo_proxy() -> Result<bool> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return Ok(false),
+    };
+    let cargo_dir = home.join(".cargo");
+    let mut modified = false;
+
+    for file_name in &["config.toml", "config"] {
+        let path = cargo_dir.join(file_name);
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_cargo_proxy_toml(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    modified = true;
+                }
+            }
+        }
+    }
+
+    Ok(modified)
+}
+
 pub fn set_docker_proxy(proxy_url: &str) -> Result<()> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
     let docker_dir = home.join(".docker");
@@ -423,6 +547,7 @@ pub fn unset_maven_proxy() -> Result<bool> {
 pub async fn turn_on(
     target: &str,
     git: bool,
+    cargo: bool,
     npm: bool,
     pip: bool,
     docker: bool,
@@ -432,6 +557,7 @@ pub async fn turn_on(
     shell: Option<&str>,
 ) -> Result<()> {
     let set_git = git || all;
+    let set_cargo = cargo || all;
     let set_npm = npm || all;
     let set_pip = pip || all;
     let set_docker = docker || all;
@@ -476,6 +602,13 @@ pub async fn turn_on(
         eprintln!("{}", format!("✔ Git global proxy set to {}", proxy_url).green());
     }
 
+    if set_cargo {
+        match set_cargo_proxy(&proxy_url) {
+            Ok(_) => eprintln!("{}", format!("✔ Cargo [http] proxy (~/.cargo/config.toml) set to {}", proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update Cargo config: {}", "▲".yellow(), e),
+        }
+    }
+
     if set_npm {
         let _ = Command::new("npm").args(["config", "set", "proxy", &proxy_url]).status();
         let _ = Command::new("npm").args(["config", "set", "https-proxy", &proxy_url]).status();
@@ -516,6 +649,7 @@ pub async fn turn_on(
 
 pub fn turn_off(
     git: bool,
+    cargo: bool,
     npm: bool,
     pip: bool,
     docker: bool,
@@ -525,6 +659,7 @@ pub fn turn_off(
     shell: Option<&str>,
 ) -> Result<()> {
     let unset_git = git || all;
+    let unset_cargo = cargo || all;
     let unset_npm = npm || all;
     let unset_pip = pip || all;
     let unset_docker = docker || all;
@@ -540,6 +675,14 @@ pub fn turn_off(
         let _ = Command::new("git").args(["config", "--global", "--unset", "http.proxy"]).status();
         let _ = Command::new("git").args(["config", "--global", "--unset", "https.proxy"]).status();
         eprintln!("{}", "✔ Git global proxy unset".green());
+    }
+
+    if unset_cargo {
+        match unset_cargo_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Cargo proxy unset from ~/.cargo/config.toml".green()),
+            Ok(false) => eprintln!("{}", "○ Cargo proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update Cargo config: {}", "▲".yellow(), e),
+        }
     }
 
     if unset_npm {
@@ -753,5 +896,24 @@ mod tests {
         let from_empty = apply_maven_proxy_xml(empty_initial, "127.0.0.1", 7890);
         assert!(from_empty.contains("<settings"));
         assert!(from_empty.contains("<id>proxydoc-proxy</id>"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cargo_proxy_toml() {
+        let initial = "[build]\njobs = 4\n";
+        let with_proxy = apply_cargo_proxy_toml(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("[http]"));
+        assert!(with_proxy.contains("proxy = \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("jobs = 4"));
+
+        // Replace existing proxy
+        let updated = apply_cargo_proxy_toml(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("proxy = \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_cargo_proxy_toml(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy = "));
+        assert!(cleaned.contains("jobs = 4"));
     }
 }

@@ -68,6 +68,9 @@ enum Commands {
         /// Also configure git global proxy
         #[arg(long)]
         git: bool,
+        /// Also configure cargo proxy (~/.cargo/config.toml)
+        #[arg(long)]
+        cargo: bool,
         /// Also configure npm proxy
         #[arg(long)]
         npm: bool,
@@ -83,7 +86,7 @@ enum Commands {
         /// Also configure Maven global proxy (~/.m2/settings.xml)
         #[arg(long)]
         maven: bool,
-        /// Also configure git, npm, pip, docker, gradle, and maven proxy
+        /// Also configure git, cargo, npm, pip, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -95,6 +98,9 @@ enum Commands {
         /// Also unset git global proxy
         #[arg(long)]
         git: bool,
+        /// Also unset cargo proxy (~/.cargo/config.toml)
+        #[arg(long)]
+        cargo: bool,
         /// Also unset npm proxy
         #[arg(long)]
         npm: bool,
@@ -110,7 +116,7 @@ enum Commands {
         /// Also unset Maven global proxy (~/.m2/settings.xml)
         #[arg(long)]
         maven: bool,
-        /// Also unset git, npm, pip, docker, gradle, and maven proxy
+        /// Also unset git, cargo, npm, pip, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -145,11 +151,11 @@ async fn main() -> Result<()> {
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, npm, pip, docker, gradle, maven, all, shell }) => {
-            manager::turn_on(&target, git, npm, pip, docker, gradle, maven, all, shell.as_deref()).await?;
+        Some(Commands::On { target, git, cargo, npm, pip, docker, gradle, maven, all, shell }) => {
+            manager::turn_on(&target, git, cargo, npm, pip, docker, gradle, maven, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, npm, pip, docker, gradle, maven, all, shell }) => {
-            manager::turn_off(git, npm, pip, docker, gradle, maven, all, shell.as_deref())?;
+        Some(Commands::Off { git, cargo, npm, pip, docker, gradle, maven, all, shell }) => {
+            manager::turn_off(git, cargo, npm, pip, docker, gradle, maven, all, shell.as_deref())?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());
@@ -307,6 +313,29 @@ mod tests {
                 assert!(gradle);
             }
             _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_cargo() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "7890", "--cargo"]).unwrap();
+        match cli.command {
+            Some(Commands::On { target, cargo, .. }) => {
+                assert_eq!(target, "7890");
+                assert!(cargo);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_cargo() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--cargo"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { cargo, .. }) => {
+                assert!(cargo);
+            }
+            _ => panic!("Expected Off command"),
         }
     }
 

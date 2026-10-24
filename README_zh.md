@@ -31,7 +31,7 @@
 - 🩺 **深度环境与根因体检 (`proxydoc doctor`)**：
   - 自动对比 macOS 系统代理（`scutil --proxy`）与当前终端 Shell 状态，揪出“浏览器能上、终端上不了”的脱节问题；
   - 深度校验已配置端口是否真实存活，杜绝幽灵死代理；
-  - 全面体检 Git、SSH（`~/.ssh/config` ProxyCommand）、NPM、Cargo（`[http] proxy`）、Pip（`global.proxy`）、cURL（`~/.curlrc`）、Wget（`~/.wgetrc`）、Docker（`~/.docker/config.json`）及 **Gradle**（`~/.gradle/gradle.properties`）代理配置；
+  - 全面体检 Git、SSH（`~/.ssh/config` ProxyCommand）、NPM、Cargo（`[http] proxy`）、Pip（`global.proxy`）、cURL（`~/.curlrc`）、Wget（`~/.wgetrc`）、Docker（`~/.docker/config.json`）、**Gradle**（`~/.gradle/gradle.properties`）、**Maven**（`~/.m2/settings.xml`）及 **Go 模块**（`GOPROXY`）代理配置；
   - 诊断 **AI 开发者网关与 Base URL**（`OPENAI_BASE_URL`、`ANTHROPIC_BASE_URL`、`DEEPSEEK_BASE_URL`、`OLLAMA_HOST`）是否指向不可达的幽灵端口；
   - 自动识别 **WSL2 Linux** 环境，定位 Windows 主机网关 IP，避免使用 `127.0.0.1` 导致的网络隔离死锁；
   - 检测 **SOCKS5 vs SOCKS5h DNS 泄漏风险**（`socks5h://` 走远端代理隧道解析 DNS，避免本地 DNS 污染与解析失败）；
@@ -39,7 +39,7 @@
   - 检测 `github.com`、`raw.githubusercontent.com`、`api.openai.com`、`api.anthropic.com`、`api.deepseek.com` 的本地 DNS 解析完整性；
   - 支持 `--json` 格式输出，方便集成 CI/CD、脚本与 IDE。
 - 🩹 **一键自动修复 (`proxydoc fix`)**：
-  - 自动清理 Git、NPM、Pip、Docker（`~/.docker/config.json`）及 **Gradle**（`~/.gradle/gradle.properties`）残留的失效死代理；
+  - 自动清理 Git、Cargo（`~/.cargo/config.toml`）、NPM、Pip、Docker（`~/.docker/config.json`）、Gradle（`~/.gradle/gradle.properties`）及 Maven 残留的失效死代理；
   - 自动备份（`.bak`）并注释禁用 **cURL**（`~/.curlrc`）与 **Wget**（`~/.wgetrc`）中的死代理配置；
   - 检测 SSH 配置中导致 `git clone git@...` 挂起的失效 ProxyCommand；
   - 将系统有效代理一键生成同步注入到终端，并自动配置标准 `NO_PROXY` 绕行；
@@ -55,7 +55,7 @@
 - 🔍 **本地代理客户端扫描 (`proxydoc scan`)**：智能探测 Shadowrocket、Clash、Sing-box、Surge、CPA 等端口（支持 `--json`）。
 - 🟢 **多 Shell 极简切换 (`proxydoc on` / `proxydoc off`)**：
   - 支持 **Bash/Zsh**、**Fish** 与 **PowerShell** 专属语法导出（`--shell fish`、`--shell pwsh`）；
-  - 支持 `--git`、`--npm`、`--pip`、`--docker`、`--gradle` 或 `-a, --all` 一键联动包管理器与容器并注入 `no_proxy`。
+  - 支持 `--git`、`--cargo`、`--npm`、`--pip`、`--docker`、`--gradle`、`--maven` 或 `-a, --all` 一键联动包管理器与容器并注入 `no_proxy`。
 
 ---
 

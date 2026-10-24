@@ -494,6 +494,30 @@ pub fn get_git_insteadof_rewrites() -> Vec<GitRewrite> {
     rewrites
 }
 
+pub fn parse_goproxy(val: &str) -> Vec<String> {
+    val.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s != "direct" && s != "off")
+        .collect()
+}
+
+pub fn get_goproxy() -> Option<String> {
+    if let Ok(val) = std::env::var("GOPROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            return Some(trim.to_string());
+        }
+    }
+    if let Ok(out) = Command::new("go").args(["env", "GOPROXY"]).output() {
+        if out.status.success() {
+            let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !val.is_empty() {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
 pub fn parse_wgetrc_proxy(content: &str) -> Option<String> {
     for line in content.lines() {
         let trim = line.trim();
@@ -1073,7 +1097,40 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 12. AI Developer Endpoints (Base URLs)
+    // 12. Go Proxy (GOPROXY)
+    if let Some(gp) = get_goproxy() {
+        let mirrors = parse_goproxy(&gp);
+        let mut any_dead = false;
+        for mirror in &mirrors {
+            let ok = verify_proxy_url(mirror).await;
+            if !ok {
+                root_issues.push(format!("GOPROXY mirror `{}` is unreachable! (go get / go build will fail)", mirror));
+                any_dead = true;
+            }
+        }
+        let status = if mirrors.is_empty() {
+            "○ Direct (direct / off)".dimmed().to_string()
+        } else if any_dead {
+            "▲ DEAD GOPROXY MIRROR! (go get fails)".red().bold().to_string()
+        } else {
+            "● Reachable GOPROXY".green().to_string()
+        };
+        items.push(DiagItem::new(
+            "Go Modules",
+            "GOPROXY",
+            gp,
+            status,
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Go Modules",
+            "GOPROXY",
+            "(default proxy.golang.org,direct)".dimmed().to_string(),
+            "○ Default Official Proxy".dimmed().to_string(),
+        ));
+    }
+
+    // 13. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
         "ANTHROPIC_BASE_URL",
@@ -1564,5 +1621,15 @@ https-proxy="http://127.0.0.1:7890"
 </settings>
 "#;
         assert_eq!(parse_maven_settings_proxy(commented), None);
+    }
+
+    #[test]
+    fn test_parse_goproxy() {
+        let val = "https://goproxy.cn,https://proxy.golang.org,direct";
+        let parsed = parse_goproxy(val);
+        assert_eq!(parsed, vec!["https://goproxy.cn", "https://proxy.golang.org"]);
+
+        let direct_only = "direct";
+        assert!(parse_goproxy(direct_only).is_empty());
     }
 }

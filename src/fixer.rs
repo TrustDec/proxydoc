@@ -202,11 +202,21 @@ pub async fn run() -> Result<()> {
     if let Some(val) = get_cargo_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [7/10] {} Cargo config has dead proxy `{}`! Please remove `proxy` in ~/.cargo/config.toml",
-                "▲".yellow(),
+                "  [7/10] Found dead Cargo proxy (`{}`), cleaning ~/.cargo/config.toml...",
                 val.yellow()
             );
-            static_fixed = true;
+            if let Ok(true) = crate::manager::unset_cargo_proxy() {
+                println!("  {} Cleared broken Cargo global proxy.", "✔".green());
+                static_fixed = true;
+                fixed_count += 1;
+            } else {
+                println!(
+                    "  [7/10] {} Cargo config has dead proxy `{}`! Please remove `proxy` in ~/.cargo/config.toml",
+                    "▲".yellow(),
+                    val.yellow()
+                );
+                static_fixed = true;
+            }
         }
     }
 

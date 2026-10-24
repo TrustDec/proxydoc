@@ -31,7 +31,7 @@ Most developers suffer from network problems not because of complex networking, 
 - 🩺 **Deep Diagnostics (`proxydoc doctor`)**:
   - Compares macOS GUI System Proxy (`scutil --proxy`) vs Terminal Shell environment.
   - Verifies whether configured proxy ports are actually ALIVE or DEAD.
-  - Inspects Git, SSH (`~/.ssh/config` ProxyCommand), NPM, Cargo (`[http] proxy`), Pip (`global.proxy`), cURL (`~/.curlrc`), Wget (`~/.wgetrc`), Docker (`~/.docker/config.json`), and **Gradle** (`~/.gradle/gradle.properties`).
+  - Inspects Git, SSH (`~/.ssh/config` ProxyCommand), NPM, Cargo (`[http] proxy`), Pip (`global.proxy`), cURL (`~/.curlrc`), Wget (`~/.wgetrc`), Docker (`~/.docker/config.json`), **Gradle** (`~/.gradle/gradle.properties`), **Maven** (`~/.m2/settings.xml`), and **Go Modules** (`GOPROXY`).
   - Diagnoses **AI Developer Gateways & Base URLs** (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `DEEPSEEK_BASE_URL`, `OLLAMA_HOST`) for dead or unreachable local endpoints.
   - Detects **WSL2 Linux** environment and resolves Windows Host gateway IP to prevent `127.0.0.1` routing traps.
   - Detects **SOCKS5 vs SOCKS5h DNS leak risk** (`socks5h://` tunnels DNS through the daemon to prevent local DNS poisoning).
@@ -39,7 +39,7 @@ Most developers suffer from network problems not because of complex networking, 
   - Detects DNS poisoning on `github.com`, `raw.githubusercontent.com`, `api.openai.com`, `api.anthropic.com`, and `api.deepseek.com`.
   - Supports `--json` for machine-readable CI/CD and IDE diagnostics.
 - 🩹 **1-Click Auto-Repair (`proxydoc fix`)**:
-  - Clears dead Git, NPM, Pip, Docker (`~/.docker/config.json`), and **Gradle** (`~/.gradle/gradle.properties`) global proxies.
+  - Clears dead Git, Cargo (`~/.cargo/config.toml`), NPM, Pip, Docker (`~/.docker/config.json`), **Gradle** (`~/.gradle/gradle.properties`), and **Maven** (`~/.m2/settings.xml`) global proxies.
   - Automatically disables dead proxies in **cURL** (`~/.curlrc`) and **Wget** (`~/.wgetrc`) with automatic `.bak` backups.
   - Diagnoses dead SSH config ProxyCommand targets preventing Git SSH hangs.
   - Generates sync injection from system proxy to terminal with proper `NO_PROXY` bypass.
@@ -55,7 +55,7 @@ Most developers suffer from network problems not because of complex networking, 
 - 🔍 **Active Client Scanner (`proxydoc scan`)**: Detects Clash, Clash Verge, Shadowrocket, Sing-box, V2Ray, Surge, and CPA.
 - 🟢 **Multi-Shell Switcher (`proxydoc on` / `proxydoc off`)**:
   - Toggle proxies in current shell session with syntax tailored for **Bash/Zsh**, **Fish**, and **PowerShell** (`--shell fish`, `--shell pwsh`).
-  - Configure package managers & dev tools on demand: `--git`, `--npm`, `--pip`, `--docker`, `--gradle`, or `--all` (`-a`). Sets standard `no_proxy` bypass automatically.
+  - Configure package managers & dev tools on demand: `--git`, `--cargo`, `--npm`, `--pip`, `--docker`, `--gradle`, `--maven`, or `--all` (`-a`). Sets standard `no_proxy` bypass automatically.
 
 ---
 
