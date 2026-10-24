@@ -187,6 +187,9 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Zilliz Cloud (Milvus)", "https://cloud.zilliz.com"),
     ("Nimble Directory", "https://nimble.directory"),
     ("Hex PM Registry (Erlang)", "https://repo.hex.pm"),
+    ("RubyGems Registry", "https://rubygems.org/api/v1/gems"),
+    ("Cursor AI API", "https://api2.cursor.sh"),
+    ("LanceDB Cloud", "https://api.lancedb.com"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -741,6 +744,9 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Zilliz Cloud (Milvus)"));
         assert!(standard.iter().any(|(name, _)| *name == "Nimble Directory"));
         assert!(standard.iter().any(|(name, _)| *name == "Hex PM Registry (Erlang)"));
+        assert!(standard.iter().any(|(name, _)| *name == "RubyGems Registry"));
+        assert!(standard.iter().any(|(name, _)| *name == "Cursor AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "LanceDB Cloud"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

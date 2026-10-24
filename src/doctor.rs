@@ -3881,6 +3881,164 @@ pub fn get_rebar3_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn parse_scoop_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(p) = val.get("proxy").and_then(|v| v.as_str()) {
+            let clean = p.trim().trim_matches('"').trim_matches('\'').trim();
+            if !clean.is_empty() && clean != "none" {
+                return Some(clean.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn get_scoop_config_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("SCOOP_CONFIG") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".config").join("scoop").join("config.json"),
+            home.join(".scoop").join("config.json"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("scoop").join("config.json");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("scoop").join("config.json");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_scoop_write_path() -> PathBuf {
+    if let Some(p) = get_scoop_config_path() {
+        return p;
+    }
+    if let Ok(path) = std::env::var("SCOOP_CONFIG") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("scoop").join("config.json");
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        return config_dir.join("scoop").join("config.json");
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        return PathBuf::from(appdata).join("scoop").join("config.json");
+    }
+    PathBuf::from("config.json")
+}
+
+pub fn get_scoop_proxy() -> Option<(String, PathBuf)> {
+    let p = get_scoop_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_scoop_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_bundler_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim == "---" {
+            continue;
+        }
+        let lower = trim.to_lowercase();
+        if lower.starts_with("bundle_http_proxy")
+            || lower.starts_with("bundle_https_proxy")
+            || lower.starts_with("http_proxy:")
+            || lower.starts_with("https_proxy:")
+        {
+            if let Some((_, v)) = trim.split_once(':') {
+                let clean = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !clean.is_empty()
+                    && (clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks")
+                        || clean.contains(':'))
+                {
+                    return Some(clean.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_bundler_config_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("BUNDLE_USER_CONFIG") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(home) = std::env::var("BUNDLE_USER_HOME") {
+        let p = PathBuf::from(home).join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".bundle").join("config"),
+            home.join(".config").join("bundle").join("config"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("bundle").join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_bundler_write_path() -> PathBuf {
+    if let Some(p) = get_bundler_config_path() {
+        return p;
+    }
+    if let Ok(path) = std::env::var("BUNDLE_USER_CONFIG") {
+        return PathBuf::from(path);
+    }
+    if let Ok(home) = std::env::var("BUNDLE_USER_HOME") {
+        return PathBuf::from(home).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".bundle").join("config");
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        return config_dir.join("bundle").join("config");
+    }
+    PathBuf::from("config")
+}
+
+pub fn get_bundler_proxy() -> Option<(String, PathBuf)> {
+    let p = get_bundler_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_bundler_proxy(&content)?;
+    Some((proxy, p))
+}
+
 pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
@@ -6193,6 +6351,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Scoop (Windows Package Manager) Proxy (~/.config/scoop/config.json)
+    if let Some((sproxy, spath)) = get_scoop_proxy() {
+        let ok = verify_proxy_url(&sproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Scoop proxy `{}` in {} is dead! (scoop install/update will fail)",
+                sproxy,
+                spath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Scoop",
+            "~/.config/scoop/config.json proxy",
+            sproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (scoop fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Scoop",
+            "~/.config/scoop/config.json proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Ruby (Bundler) Proxy (~/.bundle/config)
+    if let Some((bproxy, bpath)) = get_bundler_proxy() {
+        let ok = verify_proxy_url(&bproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Bundler proxy `{}` in {} is dead! (bundle install will fail)",
+                bproxy,
+                bpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Ruby (Bundler)",
+            "~/.bundle/config proxy",
+            bproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (bundle fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Ruby (Bundler)",
+            "~/.bundle/config proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -6388,6 +6610,9 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "FIRECRAWL_BASE_URL",
         "WEAVIATE_URL",
         "CHROMA_URL",
+        "ZILLIZ_BASE_URL",
+        "CURSOR_BASE_URL",
+        "LANCEDB_URL",
     ];
     let mut ai_found = false;
     for var in ai_vars {
@@ -6793,6 +7018,9 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("r.jina.ai", 443),
         ("api.firecrawl.dev", 443),
         ("api.weaviate.io", 443),
+        ("rubygems.org", 443),
+        ("api2.cursor.sh", 443),
+        ("api.lancedb.com", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -8509,5 +8737,56 @@ repositories:
         assert!(cleaned.contains("https://charts.bitnami.com/bitnami"));
         let remaining = parse_helm_repositories(&cleaned);
         assert_eq!(remaining, vec!["https://charts.bitnami.com/bitnami".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_scoop_proxy() {
+        let input_json = r#"{
+    "proxy": "http://127.0.0.1:7890",
+    "root_path": "C:\\Users\\user\\scoop"
+}"#;
+        assert_eq!(
+            parse_scoop_proxy(input_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_host_port = r#"{ "proxy": "127.0.0.1:1080" }"#;
+        assert_eq!(
+            parse_scoop_proxy(input_host_port),
+            Some("127.0.0.1:1080".to_string())
+        );
+
+        let input_none = r#"{ "proxy": "none" }"#;
+        assert_eq!(parse_scoop_proxy(input_none), None);
+
+        let input_empty = r#"{ "proxy": "" }"#;
+        assert_eq!(parse_scoop_proxy(input_empty), None);
+    }
+
+    #[test]
+    fn test_parse_bundler_proxy() {
+        let input_yaml = r#"---
+BUNDLE_HTTP_PROXY: "http://127.0.0.1:7890"
+BUNDLE_HTTPS_PROXY: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_bundler_proxy(input_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_unquoted = "BUNDLE_HTTP_PROXY: http://127.0.0.1:1080\n";
+        assert_eq!(
+            parse_bundler_proxy(input_unquoted),
+            Some("http://127.0.0.1:1080".to_string())
+        );
+
+        let input_lowercase = "http_proxy: \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(
+            parse_bundler_proxy(input_lowercase),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_commented = "# BUNDLE_HTTP_PROXY: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_bundler_proxy(input_commented), None);
     }
 }

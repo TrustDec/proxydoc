@@ -3761,6 +3761,163 @@ pub fn unset_rebar3_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_scoop_proxy(content: &str, proxy_url: &str) -> String {
+    let mut val: serde_json::Value = if content.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(content).unwrap_or_else(|_| serde_json::json!({}))
+    };
+
+    if !val.is_object() {
+        val = serde_json::json!({});
+    }
+
+    let obj = val.as_object_mut().unwrap();
+    obj.insert(
+        "proxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+
+    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n"
+}
+
+pub fn remove_scoop_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            if obj.remove("proxy").is_some() {
+                let new_content = serde_json::to_string_pretty(&val)
+                    .unwrap_or_else(|_| content.to_string())
+                    + "\n";
+                return (new_content, true);
+            }
+        }
+    }
+    (content.to_string(), false)
+}
+
+pub fn set_scoop_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_scoop_write_path();
+    if let Some(parent) = write_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_scoop_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_scoop_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_scoop_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, changed) = remove_scoop_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+            }
+            return Ok(changed);
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_bundler_proxy(content: &str, proxy_url: &str) -> String {
+    let mut out_lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let has_header = content.lines().any(|l| l.trim() == "---");
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_lowercase();
+        if lower.starts_with("bundle_http_proxy") || lower.starts_with("http_proxy:") {
+            out_lines.push(format!("BUNDLE_HTTP_PROXY: \"{}\"", proxy_url));
+            replaced_http = true;
+        } else if lower.starts_with("bundle_https_proxy") || lower.starts_with("https_proxy:") {
+            out_lines.push(format!("BUNDLE_HTTPS_PROXY: \"{}\"", proxy_url));
+            replaced_https = true;
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    if !replaced_http {
+        if out_lines.is_empty() && !has_header {
+            out_lines.push("---".to_string());
+        }
+        out_lines.push(format!("BUNDLE_HTTP_PROXY: \"{}\"", proxy_url));
+    }
+    if !replaced_https {
+        out_lines.push(format!("BUNDLE_HTTPS_PROXY: \"{}\"", proxy_url));
+    }
+
+    out_lines.join("\n") + "\n"
+}
+
+pub fn remove_bundler_proxy(content: &str) -> (String, bool) {
+    let mut out_lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_lowercase();
+        if lower.starts_with("bundle_http_proxy")
+            || lower.starts_with("bundle_https_proxy")
+            || lower.starts_with("http_proxy:")
+            || lower.starts_with("https_proxy:")
+        {
+            removed = true;
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    if removed {
+        let non_empty: Vec<&String> = out_lines
+            .iter()
+            .filter(|l| !l.trim().is_empty() && l.trim() != "---")
+            .collect();
+        if non_empty.is_empty() {
+            return (String::new(), true);
+        }
+        (out_lines.join("\n") + "\n", true)
+    } else {
+        (content.to_string(), false)
+    }
+}
+
+pub fn set_bundler_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_bundler_write_path();
+    if let Some(parent) = write_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_bundler_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_bundler_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_bundler_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, changed) = remove_bundler_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+            }
+            return Ok(changed);
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -3803,6 +3960,8 @@ pub async fn turn_on(
     luarocks: bool,
     nimble: bool,
     rebar3: bool,
+    scoop: bool,
+    bundle: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3844,6 +4003,8 @@ pub async fn turn_on(
     let set_luarocks = luarocks || all;
     let set_nimble = nimble || all;
     let set_rebar3 = rebar3 || all;
+    let set_scoop = scoop || all;
+    let set_bundle = bundle || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -4352,6 +4513,26 @@ pub async fn turn_on(
         }
     }
 
+    if set_scoop {
+        match set_scoop_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Scoop proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Scoop config.json: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_bundle {
+        match set_bundler_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Ruby Bundler proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Bundler config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -4407,6 +4588,8 @@ pub fn turn_off(
     luarocks: bool,
     nimble: bool,
     rebar3: bool,
+    scoop: bool,
+    bundle: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4448,6 +4631,8 @@ pub fn turn_off(
     let unset_luarocks = luarocks || all;
     let unset_nimble = nimble || all;
     let unset_rebar3 = rebar3 || all;
+    let unset_scoop = scoop || all;
+    let unset_bundle = bundle || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -4817,6 +5002,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Rebar3 proxy removed from rebar.config".green()),
             Ok(false) => eprintln!("{}", "○ Rebar3 proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Rebar3 proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_scoop {
+        match unset_scoop_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Scoop proxy removed from config.json".green()),
+            Ok(false) => eprintln!("{}", "○ Scoop proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Scoop proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_bundle {
+        match unset_bundler_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Ruby Bundler proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Ruby Bundler proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Ruby Bundler proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -5757,5 +5958,44 @@ contexts: []
         assert!(!cleaned.contains("http_proxy"));
         assert!(!cleaned.contains("https_proxy"));
         assert!(cleaned.contains("debug_info"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_scoop_proxy() {
+        let initial = r#"{ "root_path": "C:\\Users\\user\\scoop" }"#;
+        let with_proxy = apply_scoop_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("\"proxy\": \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("root_path"));
+
+        // Replace existing
+        let updated = apply_scoop_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("\"proxy\": \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_scoop_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("\"proxy\""));
+        assert!(cleaned.contains("root_path"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_bundler_proxy() {
+        let initial = "---\nBUNDLE_FROZEN: \"true\"\n";
+        let with_proxy = apply_bundler_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("BUNDLE_HTTP_PROXY: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("BUNDLE_HTTPS_PROXY: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("BUNDLE_FROZEN"));
+
+        // Replace existing
+        let updated = apply_bundler_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("BUNDLE_HTTP_PROXY: \"http://127.0.0.1:1080\""));
+        assert!(updated.contains("BUNDLE_HTTPS_PROXY: \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_bundler_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("BUNDLE_HTTP_PROXY"));
+        assert!(!cleaned.contains("BUNDLE_HTTPS_PROXY"));
+        assert!(cleaned.contains("BUNDLE_FROZEN"));
     }
 }
