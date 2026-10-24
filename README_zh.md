@@ -31,7 +31,8 @@
 - 🩺 **深度环境与根因体检 (`proxydoc doctor`)**：
   - **跨平台系统代理检测**：自动对比 **macOS** 系统代理（`scutil --proxy`）、**Windows** 注册表代理与 **Linux** 桌面（`gsettings`）与当前终端 Shell 状态，揪出“浏览器能上、终端上不了”的脱节问题；
   - 深度校验已配置端口是否真实存活，杜绝幽灵死代理；
-  - 全面体检 Git、SSH（`~/.ssh/config` ProxyCommand）、NPM、**Yarn**（`~/.yarnrc` / `~/.yarnrc.yml`）、**pnpm**（`~/.pnpmrc`）、**Bun**（`~/.bunfig.toml` `[install] proxy`）、Cargo（`[http] proxy`）、Pip（`global.proxy`）、**Conda**（`~/.condarc` `proxy_servers`）、cURL（`~/.curlrc`）、Wget（`~/.wgetrc`）、Docker（`~/.docker/config.json`）、**Gradle**（`~/.gradle/gradle.properties`）、**Maven**（`~/.m2/settings.xml`）及 **Go 模块**（`GOPROXY`）代理配置；
+  - 全面体检 Git、SSH（`~/.ssh/config` ProxyCommand）、**GitHub CLI**（`~/.config/gh/config.yml` `http_proxy`）、NPM、**Yarn**（`~/.yarnrc` / `~/.yarnrc.yml`）、**pnpm**（`~/.pnpmrc`）、**Bun**（`~/.bunfig.toml` `[install] proxy`）、Cargo（`[http] proxy`）、Pip（`global.proxy`）、**Conda**（`~/.condarc` `proxy_servers`）、cURL（`~/.curlrc`）、Wget（`~/.wgetrc`）、Docker（`~/.docker/config.json`）、**Gradle**（`~/.gradle/gradle.properties`）、**Maven**（`~/.m2/settings.xml`）及 **Go 模块**（`GOPROXY`）代理配置；
+  - 智能诊断 **JetBrains 与 Android Studio IDE 全家桶**（IntelliJ IDEA、PyCharm、WebStorm、Android Studio、CLion、RustRover、GoLand 的 `options/proxy.settings.xml`）：检测死代理端口与失效 PAC URL 导致的插件市场超时、AI 助手连接失败与 Gradle/SDK 同步故障；
   - 智能诊断 **VS Code、Cursor、Windsurf 与 VSCodium IDE 配置**（`settings.json` 的 `http.proxy`、`http.proxyStrictSSL`、`http.proxySupport`）：精准排查死代理端口与禁用严格 SSL 导致的 GitHub Copilot、Cursor AI 与插件市场连接超时或崩溃；
   - 智能诊断 **Git SSL 与证书完整性**：预警 `http.sslVerify false`（全局禁用证书验证的中间人攻击风险），检测 `http.sslCAInfo` 是否指向不存在的文件导致 Git 崩溃；
   - 智能诊断 **Node.js TLS 安全配置**（`NODE_TLS_REJECT_UNAUTHORIZED='0'`）与 CA 证书环境变量覆盖；
@@ -39,21 +40,21 @@
   - 智能诊断 **Python / Astral `uv` 镜像源**（`UV_INDEX_URL`、`UV_EXTRA_INDEX_URL`、`PIP_INDEX_URL`）连通性，防止包安装因镜像失效卡死；
   - 智能排查 **`/etc/hosts` 本地静态劫持与失效死 IP**：精准探测开发域名（`github.com`、`api.openai.com`、`huggingface.co` 等）是否被绑定到已下线死 IP 或误配置为 `0.0.0.0` 导致网络挂死；
   - 智能诊断 **环境变量大小写冲突**（`http_proxy != HTTP_PROXY`），杜绝因 cURL（仅支持小写）与 Go/Python 读取习惯不同导致的玄学报错；
-  - 诊断 **AI 开发者网关与镜像**（`OPENAI_BASE_URL`、`OPENAI_API_BASE`、`ANTHROPIC_BASE_URL`、`GEMINI_BASE_URL`、`GOOGLE_AI_BASE_URL`、`DEEPSEEK_BASE_URL`、`GROQ_BASE_URL`、`OPENROUTER_BASE_URL`、`MISTRAL_BASE_URL`、`OLLAMA_HOST`、`HF_ENDPOINT`）是否指向不可达的幽灵端口；
+  - 诊断 **AI 开发者网关与镜像**（`OPENAI_BASE_URL`、`OPENAI_API_BASE`、`ANTHROPIC_BASE_URL`、`GEMINI_BASE_URL`、`GOOGLE_AI_BASE_URL`、`DEEPSEEK_BASE_URL`、`GROQ_BASE_URL`、`OPENROUTER_BASE_URL`、`MISTRAL_BASE_URL`、`PERPLEXITY_BASE_URL`、`COHERE_BASE_URL`、`OLLAMA_HOST`、`HF_ENDPOINT`）是否指向不可达的幽灵端口；
   - 自动识别 **WSL2 Linux** 环境，定位 Windows 主机网关 IP，避免使用 `127.0.0.1` 导致的网络隔离死锁；
   - 检测 **SOCKS5 vs SOCKS5h DNS 泄漏风险**（`socks5h://` 走远端代理隧道解析 DNS，避免本地 DNS 污染与解析失败）；
   - 自动校验 `NO_PROXY` 本地回环绕行白名单，杜绝开启代理后本地开发服务（Vite、Next.js、Docker）卡死；
   - 检测 `github.com`、`raw.githubusercontent.com`、`api.openai.com`、`api.anthropic.com`、`api.deepseek.com`、`proxy.golang.org` 与 `registry.yarnpkg.com` 的本地 DNS 解析完整性；
   - 支持 `--json` 格式输出，方便集成 CI/CD、脚本与 IDE。
 - 🩹 **一键自动修复 (`proxydoc fix`)**：
-  - 自动清理 Git、Cargo（`~/.cargo/config.toml`）、NPM、**Yarn**（`~/.yarnrc` / `~/.yarnrc.yml`）、**pnpm**（`~/.pnpmrc`）、**Bun**（`~/.bunfig.toml`）、Pip、**Conda**（`~/.condarc`）、Docker（`~/.docker/config.json`）、Gradle（`~/.gradle/gradle.properties`）、Maven 及 **VS Code / Cursor IDE**（`settings.json`）残留的失效死代理；
+  - 自动清理 Git、**GitHub CLI**（`~/.config/gh/config.yml`）、Cargo（`~/.cargo/config.toml`）、NPM、**Yarn**（`~/.yarnrc` / `~/.yarnrc.yml`）、**pnpm**（`~/.pnpmrc`）、**Bun**（`~/.bunfig.toml`）、Pip、**Conda**（`~/.condarc`）、Docker（`~/.docker/config.json`）、Gradle（`~/.gradle/gradle.properties`）、Maven、**JetBrains / Android Studio**（`proxy.settings.xml`）及 **VS Code / Cursor IDE**（`settings.json`）残留的失效死代理；
   - 自动清理 Git 中指向不存在证书路径的失效 `http.sslCAInfo` 配置；
   - 自动备份（`.bak`）并注释禁用 **cURL**（`~/.curlrc`）与 **Wget**（`~/.wgetrc`）中的死代理配置；
   - 检测 SSH 配置中导致 `git clone git@...` 挂起的失效 ProxyCommand；
   - 将系统有效代理一键生成同步注入到终端，并自动配置标准 `NO_PROXY` 绕行；
   - 跨平台刷新本地 DNS 解析缓存（支持 **macOS**、**Windows**、**Linux**）。
 - ⚡ **AI 接口并发测速与双向对照 (`proxydoc test`)**：
-  - 全异步并发秒级测试对 DeepSeek、OpenAI、Anthropic、**Google Gemini**、**Ollama**、**OpenRouter**、**Groq**、GitHub、Google、Cloudflare、HuggingFace、**Docker Hub**、**crates.io**、**npm Registry**、**Yarn Registry** 与 **Go Proxy** 的真实延迟；
+  - 全异步并发秒级测试对 DeepSeek、OpenAI、Anthropic、**Google Gemini**、**Ollama**、**OpenRouter**、**Groq**、**Mistral API**、**Perplexity API**、**Cohere API**、GitHub、Google、Cloudflare、HuggingFace、**Docker Hub**、**crates.io**、**npm Registry**、**Yarn Registry** 与 **Go Proxy** 的真实延迟；
   - **TLS/SSL 拦截排查**：精准识别公司内网代理 MITM 证书劫持及自签名未授信根证书错误；
   - **直连与代理双向对照 (`proxydoc test --compare` / `-c`)**：同屏并发对比 Direct 与 Proxy 的延迟差与联通状态，直观看出代理加速倍率；
   - **自定义接口测速 (`proxydoc test -t <URL>`)**：一键测试自定义 API、自建网关或私有服务在代理环境下的连通与延迟；
@@ -64,7 +65,7 @@
 - 🔍 **本地代理客户端扫描 (`proxydoc scan`)**：智能探测 Shadowrocket、Clash、Sing-box、Surge、CPA 等端口（支持 `--json`）。
 - 🟢 **多 Shell 极简切换 (`proxydoc on` / `proxydoc off`)**：
   - 支持 **Bash/Zsh**、**Fish** 与 **PowerShell** 专属语法导出（`--shell fish`、`--shell pwsh`）；
-  - 支持 `--git`、`--cargo`、`--npm`、`--yarn`、`--pnpm`、`--bun`、`--pip`、`--conda`、`--docker`、`--gradle`、`--maven`、`--vscode` 或 `-a, --all` 一键联动包管理器、开发工具与容器并注入 `no_proxy`。
+  - 支持 `--git`、`--cargo`、`--npm`、`--yarn`、`--pnpm`、`--bun`、`--pip`、`--conda`、`--docker`、`--gradle`、`--maven`、`--vscode`、`--gh`、`--jetbrains` 或 `-a, --all` 一键联动包管理器、开发工具与容器并注入 `no_proxy`。
 
 ---
 

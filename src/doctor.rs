@@ -1386,6 +1386,204 @@ pub fn get_ide_proxies() -> Vec<IdeProxyConfig> {
     results
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JetBrainsProxyConfig {
+    pub ide_name: String,
+    pub path: PathBuf,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub is_socks: bool,
+    pub use_proxy: bool,
+    pub pac_url: Option<String>,
+    pub use_pac: bool,
+}
+
+pub fn parse_jetbrains_proxy_xml(
+    ide_name: &str,
+    path: &std::path::Path,
+    content: &str,
+) -> Option<JetBrainsProxyConfig> {
+    let clean = strip_xml_comments(content);
+    let mut use_proxy = false;
+    let mut use_pac = false;
+    let mut host = None;
+    let mut port = None;
+    let mut is_socks = false;
+    let mut pac_url = None;
+
+    let mut cursor = clean.as_str();
+    while let Some(idx) = cursor.find("<option") {
+        let rest = &cursor[idx + 7..];
+        let end_idx = match rest.find('>') {
+            Some(e) => e,
+            None => break,
+        };
+        let tag_content = &rest[..end_idx];
+        cursor = &rest[end_idx + 1..];
+
+        let extract_attr = |attr: &str| -> Option<String> {
+            let key = format!("{}=\"", attr);
+            if let Some(pos) = tag_content.find(&key) {
+                let v_rest = &tag_content[pos + key.len()..];
+                if let Some(q_end) = v_rest.find('"') {
+                    return Some(v_rest[..q_end].to_string());
+                }
+            }
+            None
+        };
+
+        if let (Some(name), Some(val)) = (extract_attr("name"), extract_attr("value")) {
+            match name.as_str() {
+                "USE_HTTP_PROXY" => {
+                    use_proxy = val.eq_ignore_ascii_case("true");
+                }
+                "USE_PROXY_PAC" => {
+                    use_pac = val.eq_ignore_ascii_case("true");
+                }
+                "PROXY_HOST" => {
+                    let trim = val.trim();
+                    if !trim.is_empty() {
+                        host = Some(trim.to_string());
+                    }
+                }
+                "PROXY_PORT" => {
+                    if let Ok(p) = val.trim().parse::<u16>() {
+                        port = Some(p);
+                    }
+                }
+                "PROXY_TYPE_NUM" => {
+                    if val.trim() == "2" {
+                        is_socks = true;
+                    }
+                }
+                "PAC_URL" => {
+                    let trim = val.trim();
+                    if !trim.is_empty() {
+                        pac_url = Some(trim.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if use_proxy || use_pac || host.is_some() || pac_url.is_some() {
+        Some(JetBrainsProxyConfig {
+            ide_name: ide_name.to_string(),
+            path: path.to_path_buf(),
+            host,
+            port,
+            is_socks,
+            use_proxy,
+            pac_url,
+            use_pac,
+        })
+    } else {
+        None
+    }
+}
+
+pub fn get_jetbrains_search_dirs() -> Vec<PathBuf> {
+    let mut dirs_to_check = Vec::new();
+    if let Some(config_dir) = dirs::config_dir() {
+        dirs_to_check.push(config_dir.join("JetBrains"));
+        dirs_to_check.push(config_dir.join("Google"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dot_config = home.join(".config");
+        dirs_to_check.push(dot_config.join("JetBrains"));
+        dirs_to_check.push(dot_config.join("Google"));
+        #[cfg(target_os = "macos")]
+        {
+            let app_sup = home.join("Library").join("Application Support");
+            dirs_to_check.push(app_sup.join("JetBrains"));
+            dirs_to_check.push(app_sup.join("Google"));
+        }
+    }
+    let mut unique = Vec::new();
+    for d in dirs_to_check {
+        if !unique.contains(&d) {
+            unique.push(d);
+        }
+    }
+    unique
+}
+
+pub fn get_jetbrains_proxies() -> Vec<JetBrainsProxyConfig> {
+    let mut results = Vec::new();
+    for base_dir in get_jetbrains_search_dirs() {
+        if let Ok(entries) = std::fs::read_dir(base_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    let settings_file = p.join("options").join("proxy.settings.xml");
+                    if settings_file.exists() && !results.iter().any(|r: &JetBrainsProxyConfig| r.path == settings_file) {
+                        if let Ok(content) = std::fs::read_to_string(&settings_file) {
+                            let ide_name = entry.file_name().to_string_lossy().to_string();
+                            if let Some(cfg) = parse_jetbrains_proxy_xml(&ide_name, &settings_file, &content) {
+                                results.push(cfg);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    results
+}
+
+pub fn parse_gh_config_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once(':') {
+            if k.trim() == "http_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_gh_config_path() -> PathBuf {
+    if let Ok(dir) = std::env::var("GH_CONFIG_DIR") {
+        let p = PathBuf::from(dir).join("config.yml");
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p1 = config_dir.join("gh").join("config.yml");
+        if p1.exists() {
+            return p1;
+        }
+        let p2 = config_dir.join("GitHub CLI").join("config.yml");
+        if p2.exists() {
+            return p2;
+        }
+        p1
+    } else if let Some(home) = dirs::home_dir() {
+        home.join(".config").join("gh").join("config.yml")
+    } else {
+        PathBuf::from(".config/gh/config.yml")
+    }
+}
+
+pub fn get_gh_proxy() -> Option<String> {
+    let path = get_gh_config_path();
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            return parse_gh_config_proxy(&content);
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -1711,6 +1909,34 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 ));
             }
         }
+    }
+
+    // GitHub CLI (gh) Config (~/.config/gh/config.yml)
+    if let Some(val) = get_gh_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!(
+                "GitHub CLI (gh) config points to dead proxy `{}`! (gh repo/pr, git operations & Copilot CLI will fail)",
+                val
+            ));
+        }
+        items.push(DiagItem::new(
+            "GitHub CLI",
+            "gh config (http_proxy)",
+            val,
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (gh repo/pr & Copilot fail)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "GitHub CLI",
+            "gh config (http_proxy)",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
     }
 
     // 4. NPM Config
@@ -2169,6 +2395,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "GROQ_BASE_URL",
         "OPENROUTER_BASE_URL",
         "MISTRAL_BASE_URL",
+        "PERPLEXITY_BASE_URL",
+        "COHERE_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -2201,7 +2429,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -2259,6 +2487,85 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     format!("{} strictSSL", ide.ide_name),
                     "false".yellow().to_string(),
                     "▲ DISABLED! (Security risk / Strict SSL off)".yellow().bold().to_string(),
+                ));
+            }
+        }
+    }
+
+    // JetBrains IDE Family Proxy (IntelliJ IDEA, PyCharm, Android Studio, WebStorm, CLion, RustRover)
+    let jb_configs = get_jetbrains_proxies();
+    if jb_configs.is_empty() {
+        items.push(DiagItem::new(
+            "JetBrains IDE",
+            "JetBrains / Android Studio proxy.settings.xml",
+            "(no JetBrains settings found)".dimmed().to_string(),
+            "○ Skipped (Direct or not installed)".dimmed().to_string(),
+        ));
+    } else {
+        for jb in jb_configs {
+            let label = format!("{} proxy.settings.xml", jb.ide_name);
+            if jb.use_proxy {
+                if let (Some(ref host), Some(port)) = (&jb.host, jb.port) {
+                    let reachable = scanner::check_host_port(host, port).await;
+                    let proto = if jb.is_socks { "socks5" } else { "http" };
+                    let proxy_str = format!("{}://{}:{}", proto, host, port);
+                    if !reachable {
+                        root_issues.push(format!(
+                            "JetBrains IDE ({}) proxy points to dead port `{}`! (Plugin marketplace, Copilot, Gradle & SDK sync will fail)",
+                            jb.ide_name, proxy_str
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "JetBrains IDE",
+                        &label,
+                        proxy_str,
+                        if reachable {
+                            "● Reachable Port".green().to_string()
+                        } else {
+                            "▲ DEAD PORT! (Plugins & AI fail)".red().bold().to_string()
+                        },
+                    ));
+                } else {
+                    items.push(DiagItem::new(
+                        "JetBrains IDE",
+                        &label,
+                        "enabled (no host/port)".yellow().to_string(),
+                        "▲ Missing Host/Port".yellow().to_string(),
+                    ));
+                }
+            } else if jb.use_pac {
+                if let Some(ref pac) = jb.pac_url {
+                    let reachable = verify_proxy_url(pac).await;
+                    if !reachable {
+                        root_issues.push(format!(
+                            "JetBrains IDE ({}) has unreachable PAC URL `{}`!",
+                            jb.ide_name, pac
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "JetBrains IDE",
+                        &label,
+                        format!("PAC: {}", pac),
+                        if reachable {
+                            "● Reachable PAC".green().to_string()
+                        } else {
+                            "▲ UNREACHABLE PAC!".red().bold().to_string()
+                        },
+                    ));
+                } else {
+                    items.push(DiagItem::new(
+                        "JetBrains IDE",
+                        &label,
+                        "PAC enabled (default/auto)".dimmed().to_string(),
+                        "○ Clean (Auto PAC)".dimmed().to_string(),
+                    ));
+                }
+            } else {
+                items.push(DiagItem::new(
+                    "JetBrains IDE",
+                    &label,
+                    "(proxy disabled)".dimmed().to_string(),
+                    "○ Direct connection".dimmed().to_string(),
                 ));
             }
         }
@@ -2344,6 +2651,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "registry.yarnpkg.com",
         "crates.io",
         "proxy.golang.org",
+        "api.perplexity.ai",
+        "api.mistral.ai",
     ];
 
     let mut hosts_overrides_found = false;
@@ -2410,6 +2719,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("pypi.org", 443),
         ("proxy.golang.org", 443),
         ("registry.yarnpkg.com", 443),
+        ("api.perplexity.ai", 443),
+        ("api.mistral.ai", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -3016,5 +3327,101 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
         assert_eq!(parsed.proxy.as_deref(), Some("http://127.0.0.1:7890"));
         assert_eq!(parsed.strict_ssl, Some(false));
         assert_eq!(parsed.proxy_support.as_deref(), Some("override"));
+    }
+
+    #[test]
+    fn test_parse_jetbrains_proxy_xml_http() {
+        let input = r#"<application>
+  <component name="HttpConfigurable">
+    <option name="PROXY_TYPE_NUM" value="1" />
+    <option name="USE_HTTP_PROXY" value="true" />
+    <option name="PROXY_HOST" value="127.0.0.1" />
+    <option name="PROXY_PORT" value="7890" />
+    <option name="USE_PROXY_PAC" value="false" />
+  </component>
+</application>"#;
+        let path = std::path::Path::new("/dummy/proxy.settings.xml");
+        let parsed = parse_jetbrains_proxy_xml("IntelliJIdea2024.1", path, input)
+            .expect("Should parse JetBrains HTTP proxy");
+        assert_eq!(parsed.ide_name, "IntelliJIdea2024.1");
+        assert!(parsed.use_proxy);
+        assert!(!parsed.is_socks);
+        assert_eq!(parsed.host.as_deref(), Some("127.0.0.1"));
+        assert_eq!(parsed.port, Some(7890));
+        assert!(!parsed.use_pac);
+    }
+
+    #[test]
+    fn test_parse_jetbrains_proxy_xml_socks() {
+        let input = r#"<application>
+  <component name="HttpConfigurable">
+    <option name="PROXY_TYPE_NUM" value="2" />
+    <option name="USE_HTTP_PROXY" value="true" />
+    <option name="PROXY_HOST" value="127.0.0.1" />
+    <option name="PROXY_PORT" value="1080" />
+  </component>
+</application>"#;
+        let path = std::path::Path::new("/dummy/proxy.settings.xml");
+        let parsed = parse_jetbrains_proxy_xml("PyCharm2024.2", path, input)
+            .expect("Should parse JetBrains SOCKS proxy");
+        assert_eq!(parsed.ide_name, "PyCharm2024.2");
+        assert!(parsed.use_proxy);
+        assert!(parsed.is_socks);
+        assert_eq!(parsed.host.as_deref(), Some("127.0.0.1"));
+        assert_eq!(parsed.port, Some(1080));
+    }
+
+    #[test]
+    fn test_parse_jetbrains_proxy_xml_pac() {
+        let input = r#"<application>
+  <component name="HttpConfigurable">
+    <option name="USE_HTTP_PROXY" value="false" />
+    <option name="USE_PROXY_PAC" value="true" />
+    <option name="PAC_URL" value="http://127.0.0.1:7890/pac" />
+  </component>
+</application>"#;
+        let path = std::path::Path::new("/dummy/proxy.settings.xml");
+        let parsed = parse_jetbrains_proxy_xml("AndroidStudio2026.1", path, input)
+            .expect("Should parse JetBrains PAC proxy");
+        assert!(!parsed.use_proxy);
+        assert!(parsed.use_pac);
+        assert_eq!(parsed.pac_url.as_deref(), Some("http://127.0.0.1:7890/pac"));
+    }
+
+    #[test]
+    fn test_parse_jetbrains_proxy_xml_disabled() {
+        let input = r#"<application>
+  <component name="HttpConfigurable">
+    <option name="USE_PROXY_PAC" value="true" />
+  </component>
+</application>"#;
+        let path = std::path::Path::new("/dummy/proxy.settings.xml");
+        let parsed = parse_jetbrains_proxy_xml("AndroidStudio2026.1", path, input)
+            .expect("Should parse disabled PAC proxy");
+        assert!(!parsed.use_proxy);
+        assert!(parsed.use_pac);
+        assert!(parsed.pac_url.is_none());
+    }
+
+    #[test]
+    fn test_parse_gh_config_proxy() {
+        let input = r#"# The current version of the config schema
+version: 1
+git_protocol: https
+# A proxy to use for HTTP requests
+http_proxy: http://127.0.0.1:7890
+"#;
+        let proxy = parse_gh_config_proxy(input).expect("Should find http_proxy");
+        assert_eq!(proxy, "http://127.0.0.1:7890");
+    }
+
+    #[test]
+    fn test_parse_gh_config_proxy_none() {
+        let input = r#"version: 1
+git_protocol: https
+# http_proxy: http://127.0.0.1:7890
+editor:
+"#;
+        assert!(parse_gh_config_proxy(input).is_none());
     }
 }

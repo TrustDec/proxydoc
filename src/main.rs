@@ -101,7 +101,13 @@ enum Commands {
         /// Also configure VS Code and Cursor IDE proxy (settings.json)
         #[arg(long)]
         vscode: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, and vscode proxy
+        /// Also configure GitHub CLI (gh) proxy (~/.config/gh/config.yml)
+        #[arg(long)]
+        gh: bool,
+        /// Also configure JetBrains & Android Studio IDE proxy (proxy.settings.xml)
+        #[arg(long)]
+        jetbrains: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, and jetbrains proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -146,7 +152,13 @@ enum Commands {
         /// Also unset VS Code and Cursor IDE proxy (settings.json)
         #[arg(long)]
         vscode: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, and vscode proxy
+        /// Also unset GitHub CLI (gh) proxy (~/.config/gh/config.yml)
+        #[arg(long)]
+        gh: bool,
+        /// Also unset JetBrains & Android Studio IDE proxy (proxy.settings.xml)
+        #[arg(long)]
+        jetbrains: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, and jetbrains proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -181,11 +193,11 @@ async fn main() -> Result<()> {
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, all, shell }) => {
-            manager::turn_on(&target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, all, shell.as_deref()).await?;
+        Some(Commands::On { target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, all, shell }) => {
+            manager::turn_on(&target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, all, shell }) => {
-            manager::turn_off(git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, all, shell.as_deref())?;
+        Some(Commands::Off { git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, all, shell }) => {
+            manager::turn_off(git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, all, shell.as_deref())?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());
@@ -485,6 +497,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { vscode, .. }) => {
                 assert!(vscode);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_gh() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--gh"]).unwrap();
+        match cli.command {
+            Some(Commands::On { gh, .. }) => {
+                assert!(gh);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_gh() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--gh"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { gh, .. }) => {
+                assert!(gh);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_jetbrains() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--jetbrains"]).unwrap();
+        match cli.command {
+            Some(Commands::On { jetbrains, .. }) => {
+                assert!(jetbrains);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_jetbrains() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--jetbrains"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { jetbrains, .. }) => {
+                assert!(jetbrains);
             }
             _ => panic!("Expected Off command"),
         }

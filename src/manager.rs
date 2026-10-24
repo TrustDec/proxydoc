@@ -1077,6 +1077,183 @@ pub fn unset_vscode_proxy() -> Result<Vec<String>> {
     Ok(removed)
 }
 
+pub fn apply_gh_config_proxy(content: &str, proxy_url: &str) -> String {
+    let mut replaced = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && trim.starts_with("http_proxy:") {
+            lines.push(format!("http_proxy: {}", proxy_url));
+            replaced = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !replaced {
+        lines.push(format!("http_proxy: {}", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_gh_config_proxy(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && trim.starts_with("http_proxy:") {
+            modified = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+    (lines.join("\n") + "\n", modified)
+}
+
+pub fn set_gh_proxy(proxy_url: &str) -> Result<()> {
+    let path = crate::doctor::get_gh_config_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_gh_config_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    let _ = Command::new("gh").args(["config", "set", "http_proxy", proxy_url]).output();
+    Ok(())
+}
+
+pub fn unset_gh_proxy() -> Result<bool> {
+    let path = crate::doctor::get_gh_config_path();
+    let mut removed = false;
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_c, m) = remove_gh_config_proxy(&content);
+            if m {
+                std::fs::write(&path, new_c)?;
+                removed = true;
+            }
+        }
+    }
+    let _ = Command::new("gh").args(["config", "set", "http_proxy", ""]).output();
+    Ok(removed)
+}
+
+pub fn apply_jetbrains_proxy_xml(content: &str, host: &str, port: u16, is_socks: bool) -> String {
+    let proxy_type_val = if is_socks { "2" } else { "1" };
+    let new_options = format!(
+        "    <option name=\"PROXY_TYPE_NUM\" value=\"{}\" />\n    <option name=\"USE_HTTP_PROXY\" value=\"true\" />\n    <option name=\"PROXY_HOST\" value=\"{}\" />\n    <option name=\"PROXY_PORT\" value=\"{}\" />\n    <option name=\"USE_PROXY_PAC\" value=\"false\" />",
+        proxy_type_val, host, port
+    );
+
+    if content.trim().is_empty() {
+        return format!(
+            "<application>\n  <component name=\"HttpConfigurable\">\n{}\n  </component>\n</application>\n",
+            new_options
+        );
+    }
+
+    let mut out_lines = Vec::new();
+    let mut in_component = false;
+    let mut inserted = false;
+
+    for line in content.lines() {
+        if line.contains("<component name=\"HttpConfigurable\"") {
+            in_component = true;
+            out_lines.push(line.to_string());
+            out_lines.push(new_options.clone());
+            inserted = true;
+            continue;
+        }
+        if in_component {
+            if line.contains("</component>") {
+                in_component = false;
+                out_lines.push(line.to_string());
+                continue;
+            }
+            let trim = line.trim();
+            if trim.contains("PROXY_TYPE_NUM")
+                || trim.contains("USE_HTTP_PROXY")
+                || trim.contains("PROXY_HOST")
+                || trim.contains("PROXY_PORT")
+                || trim.contains("USE_PROXY_PAC")
+                || trim.contains("PAC_URL")
+            {
+                continue;
+            }
+        }
+        out_lines.push(line.to_string());
+    }
+
+    if !inserted {
+        if let Some(pos) = content.rfind("</application>") {
+            let before = &content[..pos];
+            let after = &content[pos..];
+            return format!("{}  <component name=\"HttpConfigurable\">\n{}\n  </component>\n{}", before, new_options, after);
+        } else {
+            return format!(
+                "<application>\n  <component name=\"HttpConfigurable\">\n{}\n  </component>\n</application>\n",
+                new_options
+            );
+        }
+    }
+
+    out_lines.join("\n") + "\n"
+}
+
+pub fn deactivate_jetbrains_proxy_xml(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut out_lines = Vec::new();
+    for line in content.lines() {
+        if line.contains("name=\"USE_HTTP_PROXY\"") && line.contains("value=\"true\"") {
+            out_lines.push(line.replace("value=\"true\"", "value=\"false\""));
+            modified = true;
+        } else if line.contains("name=\"USE_PROXY_PAC\"") && line.contains("value=\"true\"") {
+            out_lines.push(line.replace("value=\"true\"", "value=\"false\""));
+            modified = true;
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+    (out_lines.join("\n") + "\n", modified)
+}
+
+pub fn set_jetbrains_proxy(proxy_url: &str) -> Result<Vec<String>> {
+    let (host, port) = extract_host_port(proxy_url);
+    let is_socks = proxy_url.to_ascii_lowercase().starts_with("socks");
+    let mut updated = Vec::new();
+
+    let configs = crate::doctor::get_jetbrains_proxies();
+    for cfg in configs {
+        let content = std::fs::read_to_string(&cfg.path).unwrap_or_default();
+        let new_c = apply_jetbrains_proxy_xml(&content, &host, port, is_socks);
+        if std::fs::write(&cfg.path, new_c).is_ok() {
+            updated.push(cfg.ide_name);
+        }
+    }
+    Ok(updated)
+}
+
+pub fn unset_jetbrains_proxy() -> Result<Vec<String>> {
+    let mut deactivated = Vec::new();
+    let configs = crate::doctor::get_jetbrains_proxies();
+    for cfg in configs {
+        if cfg.use_proxy || cfg.use_pac {
+            if let Ok(content) = std::fs::read_to_string(&cfg.path) {
+                let (new_c, m) = deactivate_jetbrains_proxy_xml(&content);
+                if m {
+                    let _ = std::fs::write(&cfg.path, new_c);
+                    deactivated.push(cfg.ide_name);
+                }
+            }
+        }
+    }
+    Ok(deactivated)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -1091,6 +1268,8 @@ pub async fn turn_on(
     gradle: bool,
     maven: bool,
     vscode: bool,
+    gh: bool,
+    jetbrains: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1106,6 +1285,8 @@ pub async fn turn_on(
     let set_gradle = gradle || all;
     let set_maven = maven || all;
     let set_vscode = vscode || all;
+    let set_gh = gh || all;
+    let set_jetbrains = jetbrains || all;
 
     // Resolve target proxy address
     let proxy_url = if target == "auto" {
@@ -1219,6 +1400,23 @@ pub async fn turn_on(
         }
     }
 
+    if set_gh {
+        match set_gh_proxy(&proxy_url) {
+            Ok(_) => eprintln!("{}", format!("✔ GitHub CLI (gh) proxy set to {}", proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update GitHub CLI config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_jetbrains {
+        match set_jetbrains_proxy(&proxy_url) {
+            Ok(ides) => {
+                let list = if ides.is_empty() { "No JetBrains IDE found".to_string() } else { ides.join(", ") };
+                eprintln!("{}", format!("✔ JetBrains IDE proxy ({}) set to {}", list, proxy_url).green());
+            }
+            Err(e) => eprintln!("{} Failed to update JetBrains IDE config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
     eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
 
@@ -1238,6 +1436,8 @@ pub fn turn_off(
     gradle: bool,
     maven: bool,
     vscode: bool,
+    gh: bool,
+    jetbrains: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1253,6 +1453,8 @@ pub fn turn_off(
     let unset_gradle = gradle || all;
     let unset_maven = maven || all;
     let unset_vscode = vscode || all;
+    let unset_gh = gh || all;
+    let unset_jetbrains = jetbrains || all;
 
     let target_shell = detect_shell(shell);
     for line in generate_shell_unset(target_shell) {
@@ -1345,6 +1547,22 @@ pub fn turn_off(
             Ok(ides) if !ides.is_empty() => eprintln!("{}", format!("✔ IDE proxy unset from {}", ides.join(", ")).green()),
             Ok(_) => eprintln!("{}", "○ IDE proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update VS Code / Cursor settings: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_gh {
+        match unset_gh_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Cleared GitHub CLI (gh) proxy".green()),
+            Ok(false) => eprintln!("{}", "○ GitHub CLI proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to clear GitHub CLI config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_jetbrains {
+        match unset_jetbrains_proxy() {
+            Ok(ides) if !ides.is_empty() => eprintln!("{}", format!("✔ JetBrains IDE proxy deactivated in {}", ides.join(", ")).green()),
+            Ok(_) => eprintln!("{}", "○ JetBrains IDE proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to deactivate JetBrains IDE proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -1666,5 +1884,54 @@ mod tests {
         assert!(root.get("http.proxy").is_none());
         assert!(root.get("http.proxySupport").is_none());
         assert_eq!(root["workbench.colorTheme"], "One Dark Pro");
+    }
+
+    #[test]
+    fn test_apply_and_remove_gh_config_proxy() {
+        let initial = "# gh configuration\ngit_protocol: https\neditor: vim\n";
+        let with_proxy = apply_gh_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("http_proxy: http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("git_protocol: https"));
+
+        // Replace existing
+        let updated = apply_gh_config_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("http_proxy: http://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_gh_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy:"));
+        assert!(cleaned.contains("git_protocol: https"));
+    }
+
+    #[test]
+    fn test_apply_and_deactivate_jetbrains_proxy_xml() {
+        let initial = r#"<application>
+  <component name="HttpConfigurable">
+    <option name="USE_PROXY_PAC" value="true" />
+  </component>
+</application>"#;
+        let configured = apply_jetbrains_proxy_xml(initial, "127.0.0.1", 7890, false);
+        assert!(configured.contains(r#"<option name="USE_HTTP_PROXY" value="true" />"#));
+        assert!(configured.contains(r#"<option name="PROXY_HOST" value="127.0.0.1" />"#));
+        assert!(configured.contains(r#"<option name="PROXY_PORT" value="7890" />"#));
+        assert!(configured.contains(r#"<option name="PROXY_TYPE_NUM" value="1" />"#));
+
+        let (deactivated, modified) = deactivate_jetbrains_proxy_xml(&configured);
+        assert!(modified);
+        assert!(deactivated.contains(r#"<option name="USE_HTTP_PROXY" value="false" />"#));
+
+        // Test SOCKS
+        let socks_cfg = apply_jetbrains_proxy_xml(initial, "127.0.0.1", 1080, true);
+        assert!(socks_cfg.contains(r#"<option name="PROXY_TYPE_NUM" value="2" />"#));
+    }
+
+    #[test]
+    fn test_apply_jetbrains_proxy_xml_new() {
+        let empty = "";
+        let configured = apply_jetbrains_proxy_xml(empty, "127.0.0.1", 7890, false);
+        assert!(configured.contains("<component name=\"HttpConfigurable\">"));
+        assert!(configured.contains(r#"<option name="USE_HTTP_PROXY" value="true" />"#));
+        assert!(configured.contains(r#"<option name="PROXY_PORT" value="7890" />"#));
     }
 }

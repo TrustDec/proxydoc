@@ -76,6 +76,9 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Ollama", "https://ollama.com"),
     ("OpenRouter API", "https://openrouter.ai/api/v1/models"),
     ("Groq API", "https://api.groq.com/openai/v1/models"),
+    ("Mistral API", "https://api.mistral.ai/v1/models"),
+    ("Perplexity API", "https://api.perplexity.ai/chat/completions"),
+    ("Cohere API", "https://api.cohere.com/v1/models"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -522,6 +525,9 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "OpenAI API"));
         assert!(standard.iter().any(|(name, _)| *name == "crates.io"));
         assert!(standard.iter().any(|(name, _)| *name == "npm Registry"));
+        assert!(standard.iter().any(|(name, _)| *name == "Mistral API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Perplexity API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Cohere API"));
         assert!(standard.iter().any(|(name, _)| *name == "Yarn Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "PyPI Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "Go Proxy"));
