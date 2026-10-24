@@ -31,7 +31,8 @@ Most developers suffer from network problems not because of complex networking, 
 - 🩺 **Deep Diagnostics (`proxydoc doctor`)**:
   - Compares macOS GUI System Proxy (`scutil --proxy`) vs Terminal Shell environment.
   - Verifies whether configured proxy ports are actually ALIVE or DEAD.
-  - Inspects Git, SSH (`~/.ssh/config` ProxyCommand), NPM, **Yarn** (`~/.yarnrc` / `~/.yarnrc.yml`), Cargo (`[http] proxy`), Pip (`global.proxy`), cURL (`~/.curlrc`), Wget (`~/.wgetrc`), Docker (`~/.docker/config.json`), **Gradle** (`~/.gradle/gradle.properties`), **Maven** (`~/.m2/settings.xml`), and **Go Modules** (`GOPROXY`).
+  - Inspects Git, SSH (`~/.ssh/config` ProxyCommand), NPM, **Yarn** (`~/.yarnrc` / `~/.yarnrc.yml`), Cargo (`[http] proxy`), Pip (`global.proxy`), **Conda** (`~/.condarc` `proxy_servers`), cURL (`~/.curlrc`), Wget (`~/.wgetrc`), Docker (`~/.docker/config.json`), **Gradle** (`~/.gradle/gradle.properties`), **Maven** (`~/.m2/settings.xml`), and **Go Modules** (`GOPROXY`).
+  - Diagnoses **`/etc/hosts` pinned overrides**: detects if developer domains (`github.com`, `api.openai.com`, `huggingface.co`, etc.) are mapped to dead/stale IPs or blocked to `0.0.0.0` overriding DNS.
   - Diagnoses **environment variable casing conflicts** (`http_proxy != HTTP_PROXY`) where tools like cURL (lowercase only) and Go/Python behave inconsistently.
   - Diagnoses **AI Developer Gateways & Mirrors** (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `DEEPSEEK_BASE_URL`, `OLLAMA_HOST`, `HF_ENDPOINT`) for dead or unreachable local endpoints.
   - Detects **WSL2 Linux** environment and resolves Windows Host gateway IP to prevent `127.0.0.1` routing traps.
@@ -40,13 +41,13 @@ Most developers suffer from network problems not because of complex networking, 
   - Detects DNS poisoning on `github.com`, `raw.githubusercontent.com`, `api.openai.com`, `api.anthropic.com`, `api.deepseek.com`, `proxy.golang.org`, and `registry.yarnpkg.com`.
   - Supports `--json` for machine-readable CI/CD and IDE diagnostics.
 - 🩹 **1-Click Auto-Repair (`proxydoc fix`)**:
-  - Clears dead Git, Cargo (`~/.cargo/config.toml`), NPM, **Yarn** (`~/.yarnrc` / `~/.yarnrc.yml`), Pip, Docker (`~/.docker/config.json`), **Gradle** (`~/.gradle/gradle.properties`), and **Maven** (`~/.m2/settings.xml`) global proxies.
+  - Clears dead Git, Cargo (`~/.cargo/config.toml`), NPM, **Yarn** (`~/.yarnrc` / `~/.yarnrc.yml`), Pip, **Conda** (`~/.condarc`), Docker (`~/.docker/config.json`), **Gradle** (`~/.gradle/gradle.properties`), and **Maven** (`~/.m2/settings.xml`) global proxies.
   - Automatically disables dead proxies in **cURL** (`~/.curlrc`) and **Wget** (`~/.wgetrc`) with automatic `.bak` backups.
   - Diagnoses dead SSH config ProxyCommand targets preventing Git SSH hangs.
   - Generates sync injection from system proxy to terminal with proper `NO_PROXY` bypass.
   - Flushes local DNS cache.
 - ⚡ **AI & Dev Latency Checker (`proxydoc test`)**:
-  - Fully concurrent testing to DeepSeek, OpenAI, Anthropic, GitHub, Google, Cloudflare, HuggingFace, **crates.io**, **npm Registry**, **Yarn Registry**, and **Go Proxy**.
+  - Fully concurrent testing to DeepSeek, OpenAI, Anthropic, GitHub, Google, Cloudflare, HuggingFace, **Docker Hub**, **crates.io**, **npm Registry**, **Yarn Registry**, and **Go Proxy**.
   - **Comparative Benchmark (`proxydoc test --compare` / `-c`)**: Tests Direct vs Proxy side-by-side, comparing latency, reachability, and egress IPs.
   - **Custom Target Benchmark (`proxydoc test -t <URL>`)**: Benchmarks custom API endpoints or internal corporate gateways.
   - **Configurable Timeout (`--timeout <SECS>`)**: Fine-tune probe deadlines for slow or satellite connections.
@@ -56,7 +57,7 @@ Most developers suffer from network problems not because of complex networking, 
 - 🔍 **Active Client Scanner (`proxydoc scan`)**: Detects Clash, Clash Verge, Shadowrocket, Sing-box, V2Ray, Surge, and CPA.
 - 🟢 **Multi-Shell Switcher (`proxydoc on` / `proxydoc off`)**:
   - Toggle proxies in current shell session with syntax tailored for **Bash/Zsh**, **Fish**, and **PowerShell** (`--shell fish`, `--shell pwsh`).
-  - Configure package managers & dev tools on demand: `--git`, `--cargo`, `--npm`, `--yarn`, `--pip`, `--docker`, `--gradle`, `--maven`, or `--all` (`-a`). Sets standard `no_proxy` bypass automatically.
+  - Configure package managers & dev tools on demand: `--git`, `--cargo`, `--npm`, `--yarn`, `--pip`, `--conda`, `--docker`, `--gradle`, `--maven`, or `--all` (`-a`). Sets standard `no_proxy` bypass automatically.
 
 ---
 

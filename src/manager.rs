@@ -694,6 +694,103 @@ pub fn unset_yarn_proxy() -> Result<bool> {
     Ok(removed)
 }
 
+pub fn apply_condarc_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_proxy_servers = false;
+    let mut proxy_section_inserted = false;
+
+    let proxy_block = format!("proxy_servers:\n  http: {}\n  https: {}", proxy_url, proxy_url);
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            if in_proxy_servers {
+                in_proxy_servers = false;
+            }
+            if trim.starts_with("proxy_servers:") {
+                in_proxy_servers = true;
+                lines.push(proxy_block.clone());
+                proxy_section_inserted = true;
+                continue;
+            }
+        } else if in_proxy_servers {
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if !proxy_section_inserted {
+        if !lines.is_empty() && !lines.last().map(|l| l.trim().is_empty()).unwrap_or(true) {
+            lines.push(String::new());
+        }
+        lines.push(proxy_block);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_condarc_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_proxy_servers = false;
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            if in_proxy_servers {
+                in_proxy_servers = false;
+            }
+            if trim.starts_with("proxy_servers:") {
+                in_proxy_servers = true;
+                removed = true;
+                continue;
+            }
+        } else if in_proxy_servers {
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn get_condarc_target_path() -> Result<std::path::PathBuf> {
+    if let Ok(condarc_env) = std::env::var("CONDARC") {
+        let p = std::path::PathBuf::from(condarc_env.trim());
+        return Ok(p);
+    }
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    Ok(home.join(".condarc"))
+}
+
+pub fn set_conda_proxy(proxy_url: &str) -> Result<()> {
+    let path = get_condarc_target_path()?;
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_condarc_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(())
+}
+
+pub fn unset_conda_proxy() -> Result<bool> {
+    let path = match get_condarc_target_path() {
+        Ok(p) => p,
+        Err(_) => return Ok(false),
+    };
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, removed) = remove_condarc_proxy(&content);
+    if removed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -701,6 +798,7 @@ pub async fn turn_on(
     npm: bool,
     yarn: bool,
     pip: bool,
+    conda: bool,
     docker: bool,
     gradle: bool,
     maven: bool,
@@ -712,6 +810,7 @@ pub async fn turn_on(
     let set_npm = npm || all;
     let set_yarn = yarn || all;
     let set_pip = pip || all;
+    let set_conda = conda || all;
     let set_docker = docker || all;
     let set_gradle = gradle || all;
     let set_maven = maven || all;
@@ -779,6 +878,13 @@ pub async fn turn_on(
         eprintln!("{}", format!("✔ Pip global proxy set to {}", proxy_url).green());
     }
 
+    if set_conda {
+        match set_conda_proxy(&proxy_url) {
+            Ok(_) => eprintln!("{}", format!("✔ Conda proxy (~/.condarc) set to {}", proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update Conda config: {}", "▲".yellow(), e),
+        }
+    }
+
     if set_docker {
         match set_docker_proxy(&proxy_url) {
             Ok(_) => eprintln!("{}", format!("✔ Docker client proxy (~/.docker/config.json) set to {}", proxy_url).green()),
@@ -812,6 +918,7 @@ pub fn turn_off(
     npm: bool,
     yarn: bool,
     pip: bool,
+    conda: bool,
     docker: bool,
     gradle: bool,
     maven: bool,
@@ -823,6 +930,7 @@ pub fn turn_off(
     let unset_npm = npm || all;
     let unset_yarn = yarn || all;
     let unset_pip = pip || all;
+    let unset_conda = conda || all;
     let unset_docker = docker || all;
     let unset_gradle = gradle || all;
     let unset_maven = maven || all;
@@ -863,6 +971,14 @@ pub fn turn_off(
     if unset_pip {
         let _ = Command::new("pip").args(["config", "unset", "global.proxy"]).status();
         eprintln!("{}", "✔ Pip global proxy unset".green());
+    }
+
+    if unset_conda {
+        match unset_conda_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Conda proxy unset from ~/.condarc".green()),
+            Ok(false) => eprintln!("{}", "○ Conda proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update Conda config: {}", "▲".yellow(), e),
+        }
     }
 
     if unset_docker {
@@ -1123,5 +1239,28 @@ mod tests {
         assert!(!cleaned.contains("httpProxy"));
         assert!(!cleaned.contains("httpsProxy"));
         assert!(cleaned.contains("nodeLinker: node-modules"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_condarc_proxy() {
+        let initial = "channels:\n  - defaults\nssl_verify: true\n";
+        let with_proxy = apply_condarc_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy_servers:"));
+        assert!(with_proxy.contains("http: http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("https: http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("channels:\n  - defaults"));
+        assert!(with_proxy.contains("ssl_verify: true"));
+
+        // Replace existing proxy
+        let updated = apply_condarc_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("http: http://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_condarc_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy_servers:"));
+        assert!(!cleaned.contains("1080"));
+        assert!(cleaned.contains("channels:\n  - defaults"));
+        assert!(cleaned.contains("ssl_verify: true"));
     }
 }

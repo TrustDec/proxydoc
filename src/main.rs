@@ -80,6 +80,9 @@ enum Commands {
         /// Also configure pip global proxy
         #[arg(long)]
         pip: bool,
+        /// Also configure Conda proxy (~/.condarc)
+        #[arg(long)]
+        conda: bool,
         /// Also configure Docker client proxy (~/.docker/config.json)
         #[arg(long)]
         docker: bool,
@@ -89,7 +92,7 @@ enum Commands {
         /// Also configure Maven global proxy (~/.m2/settings.xml)
         #[arg(long)]
         maven: bool,
-        /// Also configure git, cargo, npm, yarn, pip, docker, gradle, and maven proxy
+        /// Also configure git, cargo, npm, yarn, pip, conda, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -113,6 +116,9 @@ enum Commands {
         /// Also unset pip global proxy
         #[arg(long)]
         pip: bool,
+        /// Also unset Conda proxy (~/.condarc)
+        #[arg(long)]
+        conda: bool,
         /// Also unset Docker client proxy (~/.docker/config.json)
         #[arg(long)]
         docker: bool,
@@ -122,7 +128,7 @@ enum Commands {
         /// Also unset Maven global proxy (~/.m2/settings.xml)
         #[arg(long)]
         maven: bool,
-        /// Also unset git, cargo, npm, yarn, pip, docker, gradle, and maven proxy
+        /// Also unset git, cargo, npm, yarn, pip, conda, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -157,11 +163,11 @@ async fn main() -> Result<()> {
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, cargo, npm, yarn, pip, docker, gradle, maven, all, shell }) => {
-            manager::turn_on(&target, git, cargo, npm, yarn, pip, docker, gradle, maven, all, shell.as_deref()).await?;
+        Some(Commands::On { target, git, cargo, npm, yarn, pip, conda, docker, gradle, maven, all, shell }) => {
+            manager::turn_on(&target, git, cargo, npm, yarn, pip, conda, docker, gradle, maven, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, cargo, npm, yarn, pip, docker, gradle, maven, all, shell }) => {
-            manager::turn_off(git, cargo, npm, yarn, pip, docker, gradle, maven, all, shell.as_deref())?;
+        Some(Commands::Off { git, cargo, npm, yarn, pip, conda, docker, gradle, maven, all, shell }) => {
+            manager::turn_off(git, cargo, npm, yarn, pip, conda, docker, gradle, maven, all, shell.as_deref())?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());
@@ -373,6 +379,28 @@ mod tests {
         match cli.command {
             Some(Commands::Off { yarn, .. }) => {
                 assert!(yarn);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_conda() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--conda"]).unwrap();
+        match cli.command {
+            Some(Commands::On { conda, .. }) => {
+                assert!(conda);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_conda() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--conda"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { conda, .. }) => {
+                assert!(conda);
             }
             _ => panic!("Expected Off command"),
         }

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::process::Command;
 use tabled::{Table, Tabled};
 use tokio::net::lookup_host;
@@ -714,6 +715,137 @@ pub fn detect_wsl2() -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CondaProxyConfig {
+    pub http: Option<String>,
+    pub https: Option<String>,
+}
+
+pub fn parse_condarc_proxy(content: &str) -> Option<CondaProxyConfig> {
+    let mut in_proxy_servers = false;
+    let mut http = None;
+    let mut https = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.is_empty() {
+            continue;
+        }
+
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            if trim.starts_with("proxy_servers:") {
+                in_proxy_servers = true;
+                continue;
+            } else if in_proxy_servers {
+                break;
+            }
+        }
+
+        if in_proxy_servers {
+            if let Some((k, v)) = trim.split_once(':') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    if key == "https" {
+                        https = Some(val.to_string());
+                    } else if key == "http" {
+                        http = Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if http.is_some() || https.is_some() {
+        Some(CondaProxyConfig { http, https })
+    } else {
+        None
+    }
+}
+
+pub fn get_condarc_path() -> Option<PathBuf> {
+    if let Ok(condarc_env) = std::env::var("CONDARC") {
+        let p = PathBuf::from(condarc_env.trim());
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".condarc");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_conda_proxy() -> Option<CondaProxyConfig> {
+    if let Some(path) = get_condarc_path() {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            return parse_condarc_proxy(&content);
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostsEntry {
+    pub ip: String,
+    pub domain: String,
+}
+
+pub fn parse_hosts_file(content: &str) -> Vec<HostsEntry> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let mut clean = line;
+        if let Some(idx) = clean.find('#') {
+            clean = &clean[..idx];
+        }
+        let parts: Vec<&str> = clean.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let ip = parts[0];
+            if ip.parse::<std::net::IpAddr>().is_ok() {
+                for &domain in &parts[1..] {
+                    let d = domain.trim().to_ascii_lowercase();
+                    if !d.is_empty() {
+                        entries.push(HostsEntry {
+                            ip: ip.to_string(),
+                            domain: d,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    entries
+}
+
+pub fn get_hosts_file_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(sysroot) = std::env::var("SystemRoot") {
+            return PathBuf::from(sysroot)
+                .join("System32")
+                .join("drivers")
+                .join("etc")
+                .join("hosts");
+        }
+        PathBuf::from(r"C:\Windows\System32\drivers\etc\hosts")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        PathBuf::from("/etc/hosts")
+    }
+}
+
+pub fn get_hosts_entries() -> Vec<HostsEntry> {
+    let path = get_hosts_file_path();
+    if let Ok(content) = std::fs::read_to_string(path) {
+        return parse_hosts_file(&content);
+    }
+    Vec::new()
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -1262,7 +1394,52 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
-    // 13. AI Developer Endpoints (Base URLs)
+    // 13. Conda Config (~/.condarc)
+    if let Some(cfg) = get_conda_proxy() {
+        let mut any_dead = false;
+        let mut display_parts = Vec::new();
+
+        if let Some(ref http) = cfg.http {
+            let ok = verify_proxy_url(http).await;
+            if !ok {
+                root_issues.push(format!("Conda proxy (http) in ~/.condarc points to dead port `{}` (conda install will fail)", http));
+                any_dead = true;
+            }
+            display_parts.push(format!("http: {}", http));
+        }
+
+        if let Some(ref https) = cfg.https {
+            let ok = verify_proxy_url(https).await;
+            if !ok {
+                root_issues.push(format!("Conda proxy (https) in ~/.condarc points to dead port `{}` (conda install will fail)", https));
+                any_dead = true;
+            }
+            display_parts.push(format!("https: {}", https));
+        }
+
+        let val_str = display_parts.join(", ");
+        let status = if any_dead {
+            "▲ DEAD PORT! (conda install fails)".red().bold().to_string()
+        } else {
+            "● Reachable".green().to_string()
+        };
+
+        items.push(DiagItem::new(
+            "Conda",
+            "~/.condarc proxy_servers",
+            val_str,
+            status,
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Conda",
+            "~/.condarc proxy_servers",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
+    // 14. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
         "ANTHROPIC_BASE_URL",
@@ -1356,7 +1533,80 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         }
     }
 
-    // 15. DNS Poisoning & Resolution Check
+    // 15. Hosts File Pinned Overrides Inspection
+    let hosts_path = get_hosts_file_path();
+    let hosts_entries = get_hosts_entries();
+    let dev_domains = [
+        "github.com",
+        "raw.githubusercontent.com",
+        "api.github.com",
+        "gist.github.com",
+        "api.openai.com",
+        "api.anthropic.com",
+        "api.deepseek.com",
+        "huggingface.co",
+        "pypi.org",
+        "registry.npmjs.org",
+        "registry.yarnpkg.com",
+        "crates.io",
+        "proxy.golang.org",
+    ];
+
+    let mut hosts_overrides_found = false;
+    for entry in &hosts_entries {
+        if dev_domains.iter().any(|d| entry.domain.eq_ignore_ascii_case(d)) {
+            hosts_overrides_found = true;
+            let ip_str = &entry.ip;
+            let is_blocked = ip_str == "0.0.0.0" || ip_str == "127.0.0.1" || ip_str == "::1";
+            if is_blocked {
+                root_issues.push(format!(
+                    "Hosts file ({}) sinkholes/blocks `{}` to `{}`! Remove or comment out this line to allow connection.",
+                    hosts_path.display(),
+                    entry.domain,
+                    ip_str
+                ));
+                items.push(DiagItem::new(
+                    "Hosts File",
+                    format!("{} (in {})", entry.domain, hosts_path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts")),
+                    ip_str.clone(),
+                    "▲ SINKHOLED / BLOCKED!".red().bold().to_string(),
+                ));
+            } else {
+                let reachable = scanner::check_host_port(ip_str, 443).await;
+                if reachable {
+                    items.push(DiagItem::new(
+                        "Hosts File",
+                        format!("{} (in {})", entry.domain, hosts_path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts")),
+                        ip_str.clone(),
+                        "● Pinned IP Reachable (Port 443)".green().to_string(),
+                    ));
+                } else {
+                    root_issues.push(format!(
+                        "Hosts file ({}) pins `{}` to `{}` which is UNREACHABLE! Git clone or API calls will hang or timeout. Remove this stale entry from your hosts file.",
+                        hosts_path.display(),
+                        entry.domain,
+                        ip_str
+                    ));
+                    items.push(DiagItem::new(
+                        "Hosts File",
+                        format!("{} (in {})", entry.domain, hosts_path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts")),
+                        ip_str.clone(),
+                        "▲ STALE / DEAD PINNED IP! (Causes timeouts)".red().bold().to_string(),
+                    ));
+                }
+            }
+        }
+    }
+    if !hosts_overrides_found {
+        items.push(DiagItem::new(
+            "Hosts File",
+            format!("{} overrides", hosts_path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts")),
+            "(clean)".dimmed().to_string(),
+            "○ No developer domains hijacked".dimmed().to_string(),
+        ));
+    }
+
+    // 16. DNS Poisoning & Resolution Check
     let dns_targets = [
         ("github.com", 443),
         ("raw.githubusercontent.com", 443),
@@ -1798,5 +2048,42 @@ https-proxy="http://127.0.0.1:7890"
         assert!(!check_case_mismatch("http://127.0.0.1:7890", "http://127.0.0.1:7890"));
         assert!(!check_case_mismatch("http://127.0.0.1:7890/", "http://127.0.0.1:7890"));
         assert!(!check_case_mismatch("", "http://127.0.0.1:7890"));
+    }
+
+    #[test]
+    fn test_parse_condarc_proxy() {
+        let content = r#"
+channels:
+  - defaults
+proxy_servers:
+  http: http://127.0.0.1:7890
+  https: "http://127.0.0.1:7890"
+ssl_verify: true
+"#;
+        let cfg = parse_condarc_proxy(content).unwrap();
+        assert_eq!(cfg.http, Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(cfg.https, Some("http://127.0.0.1:7890".to_string()));
+
+        let empty = "channels:\n  - conda-forge\n";
+        assert_eq!(parse_condarc_proxy(empty), None);
+    }
+
+    #[test]
+    fn test_parse_hosts_file() {
+        let content = r#"
+# Loopback entries
+127.0.0.1 localhost
+::1 localhost
+
+# Pinned developer domains
+140.82.112.4 github.com api.github.com
+185.199.108.133 raw.githubusercontent.com
+0.0.0.0 telemetry.example.com
+"#;
+        let entries = parse_hosts_file(content);
+        assert!(entries.iter().any(|e| e.ip == "140.82.112.4" && e.domain == "github.com"));
+        assert!(entries.iter().any(|e| e.ip == "140.82.112.4" && e.domain == "api.github.com"));
+        assert!(entries.iter().any(|e| e.ip == "185.199.108.133" && e.domain == "raw.githubusercontent.com"));
+        assert!(entries.iter().any(|e| e.ip == "0.0.0.0" && e.domain == "telemetry.example.com"));
     }
 }

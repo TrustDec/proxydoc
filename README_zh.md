@@ -31,7 +31,8 @@
 - 🩺 **深度环境与根因体检 (`proxydoc doctor`)**：
   - 自动对比 macOS 系统代理（`scutil --proxy`）与当前终端 Shell 状态，揪出“浏览器能上、终端上不了”的脱节问题；
   - 深度校验已配置端口是否真实存活，杜绝幽灵死代理；
-  - 全面体检 Git、SSH（`~/.ssh/config` ProxyCommand）、NPM、**Yarn**（`~/.yarnrc` / `~/.yarnrc.yml`）、Cargo（`[http] proxy`）、Pip（`global.proxy`）、cURL（`~/.curlrc`）、Wget（`~/.wgetrc`）、Docker（`~/.docker/config.json`）、**Gradle**（`~/.gradle/gradle.properties`）、**Maven**（`~/.m2/settings.xml`）及 **Go 模块**（`GOPROXY`）代理配置；
+  - 全面体检 Git、SSH（`~/.ssh/config` ProxyCommand）、NPM、**Yarn**（`~/.yarnrc` / `~/.yarnrc.yml`）、Cargo（`[http] proxy`）、Pip（`global.proxy`）、**Conda**（`~/.condarc` `proxy_servers`）、cURL（`~/.curlrc`）、Wget（`~/.wgetrc`）、Docker（`~/.docker/config.json`）、**Gradle**（`~/.gradle/gradle.properties`）、**Maven**（`~/.m2/settings.xml`）及 **Go 模块**（`GOPROXY`）代理配置；
+  - 智能排查 **`/etc/hosts` 本地静态劫持与失效死 IP**：精准探测开发域名（`github.com`、`api.openai.com`、`huggingface.co` 等）是否被绑定到已下线死 IP 或误配置为 `0.0.0.0` 导致网络挂死；
   - 智能诊断 **环境变量大小写冲突**（`http_proxy != HTTP_PROXY`），杜绝因 cURL（仅支持小写）与 Go/Python 读取习惯不同导致的玄学报错；
   - 诊断 **AI 开发者网关与镜像**（`OPENAI_BASE_URL`、`ANTHROPIC_BASE_URL`、`DEEPSEEK_BASE_URL`、`OLLAMA_HOST`、`HF_ENDPOINT`）是否指向不可达的幽灵端口；
   - 自动识别 **WSL2 Linux** 环境，定位 Windows 主机网关 IP，避免使用 `127.0.0.1` 导致的网络隔离死锁；
@@ -40,13 +41,13 @@
   - 检测 `github.com`、`raw.githubusercontent.com`、`api.openai.com`、`api.anthropic.com`、`api.deepseek.com`、`proxy.golang.org` 与 `registry.yarnpkg.com` 的本地 DNS 解析完整性；
   - 支持 `--json` 格式输出，方便集成 CI/CD、脚本与 IDE。
 - 🩹 **一键自动修复 (`proxydoc fix`)**：
-  - 自动清理 Git、Cargo（`~/.cargo/config.toml`）、NPM、**Yarn**（`~/.yarnrc` / `~/.yarnrc.yml`）、Pip、Docker（`~/.docker/config.json`）、Gradle（`~/.gradle/gradle.properties`）及 Maven 残留的失效死代理；
+  - 自动清理 Git、Cargo（`~/.cargo/config.toml`）、NPM、**Yarn**（`~/.yarnrc` / `~/.yarnrc.yml`）、Pip、**Conda**（`~/.condarc`）、Docker（`~/.docker/config.json`）、Gradle（`~/.gradle/gradle.properties`）及 Maven 残留的失效死代理；
   - 自动备份（`.bak`）并注释禁用 **cURL**（`~/.curlrc`）与 **Wget**（`~/.wgetrc`）中的死代理配置；
   - 检测 SSH 配置中导致 `git clone git@...` 挂起的失效 ProxyCommand；
   - 将系统有效代理一键生成同步注入到终端，并自动配置标准 `NO_PROXY` 绕行；
   - 自动刷新本地 DNS 解析缓存。
 - ⚡ **AI 接口并发测速与双向对照 (`proxydoc test`)**：
-  - 全异步并发秒级测试对 DeepSeek、OpenAI、Anthropic、GitHub、Google、Cloudflare、HuggingFace、**crates.io**、**npm Registry**、**Yarn Registry** 与 **Go Proxy** 的真实延迟；
+  - 全异步并发秒级测试对 DeepSeek、OpenAI、Anthropic、GitHub、Google、Cloudflare、HuggingFace、**Docker Hub**、**crates.io**、**npm Registry**、**Yarn Registry** 与 **Go Proxy** 的真实延迟；
   - **直连与代理双向对照 (`proxydoc test --compare` / `-c`)**：同屏并发对比 Direct 与 Proxy 的延迟差与联通状态，直观看出代理加速倍率；
   - **自定义接口测速 (`proxydoc test -t <URL>`)**：一键测试自定义 API、自建网关或私有服务在代理环境下的连通与延迟；
   - **自定义超时时间 (`--timeout <SECS>`)**：弱网或卫星网络下灵活配置超时阈值；
@@ -56,7 +57,7 @@
 - 🔍 **本地代理客户端扫描 (`proxydoc scan`)**：智能探测 Shadowrocket、Clash、Sing-box、Surge、CPA 等端口（支持 `--json`）。
 - 🟢 **多 Shell 极简切换 (`proxydoc on` / `proxydoc off`)**：
   - 支持 **Bash/Zsh**、**Fish** 与 **PowerShell** 专属语法导出（`--shell fish`、`--shell pwsh`）；
-  - 支持 `--git`、`--cargo`、`--npm`、`--yarn`、`--pip`、`--docker`、`--gradle`、`--maven` 或 `-a, --all` 一键联动包管理器与容器并注入 `no_proxy`。
+  - 支持 `--git`、`--cargo`、`--npm`、`--yarn`、`--pip`、`--conda`、`--docker`、`--gradle`、`--maven` 或 `-a, --all` 一键联动包管理器与容器并注入 `no_proxy`。
 
 ---
 
