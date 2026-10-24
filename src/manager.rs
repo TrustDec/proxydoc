@@ -2776,6 +2776,134 @@ pub fn unset_julia_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_nix_config_proxy(content: &str, proxy_url: &str) -> String {
+    let mut replaced = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim() == "http-proxy" {
+                    lines.push(format!("http-proxy = {}", proxy_url));
+                    replaced = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+    if !replaced {
+        lines.push(format!("http-proxy = {}", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_nix_config_proxy(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim() == "http-proxy" {
+                    modified = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+    (lines.join("\n") + "\n", modified)
+}
+
+pub fn set_nix_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_nix_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_nix_config_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_nix_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_nix_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_nix_config_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_cabal_config_proxy(content: &str, proxy_url: &str) -> String {
+    let mut replaced = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with("--") && !trim.starts_with('#') && trim.starts_with("proxy:") {
+            lines.push(format!("proxy: {}", proxy_url));
+            replaced = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !replaced {
+        lines.push(format!("proxy: {}", proxy_url));
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_cabal_config_proxy(content: &str) -> (String, bool) {
+    let mut modified = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with("--") && !trim.starts_with('#') && trim.starts_with("proxy:") {
+            modified = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+    (lines.join("\n") + "\n", modified)
+}
+
+pub fn set_cabal_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_cabal_write_path();
+    if let Some(parent) = write_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_cabal_config_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_cabal_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_cabal_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let (new_content, changed) = remove_cabal_config_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -2807,6 +2935,8 @@ pub async fn turn_on(
     sbt: bool,
     kube: bool,
     julia: bool,
+    nix: bool,
+    cabal: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2837,6 +2967,8 @@ pub async fn turn_on(
     let set_sbt = sbt || all;
     let set_kube = kube || all;
     let set_julia = julia || all;
+    let set_nix = nix || all;
+    let set_cabal = cabal || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -3235,6 +3367,26 @@ pub async fn turn_on(
         }
     }
 
+    if set_nix {
+        match set_nix_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Nix package manager proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Nix nix.conf: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_cabal {
+        match set_cabal_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Haskell Cabal proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Cabal config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -3279,6 +3431,8 @@ pub fn turn_off(
     sbt: bool,
     kube: bool,
     julia: bool,
+    nix: bool,
+    cabal: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -3309,6 +3463,8 @@ pub fn turn_off(
     let unset_sbt = sbt || all;
     let unset_kube = kube || all;
     let unset_julia = julia || all;
+    let unset_nix = nix || all;
+    let unset_cabal = cabal || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -3590,6 +3746,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Julia startup proxy removed from startup.jl".green()),
             Ok(false) => eprintln!("{}", "○ Julia startup proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Julia startup proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_nix {
+        match unset_nix_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Nix http-proxy removed from nix.conf".green()),
+            Ok(false) => eprintln!("{}", "○ Nix http-proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Nix http-proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_cabal {
+        match unset_cabal_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Haskell Cabal proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Haskell Cabal proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Haskell Cabal proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -4311,5 +4483,41 @@ contexts: []
         assert!(!cleaned.contains("HTTP_PROXY"));
         assert!(!cleaned.contains("all_proxy"));
         assert!(cleaned.contains("using Pkg"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_nix_config_proxy() {
+        let initial = "substituters = https://cache.nixos.org\nmax-jobs = auto\n";
+        let with_proxy = apply_nix_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("http-proxy = http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("substituters = https://cache.nixos.org"));
+
+        // Replace existing
+        let updated = apply_nix_config_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("http-proxy = http://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_nix_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http-proxy"));
+        assert!(cleaned.contains("max-jobs = auto"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cabal_config_proxy() {
+        let initial = "-- Cabal config\nremote-repo-cache: ~/.cabal/packages\n";
+        let with_proxy = apply_cabal_config_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy: http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("remote-repo-cache:"));
+
+        // Replace existing
+        let updated = apply_cabal_config_proxy(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("proxy: http://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_cabal_config_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy:"));
+        assert!(cleaned.contains("remote-repo-cache:"));
     }
 }

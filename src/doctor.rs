@@ -2732,6 +2732,104 @@ pub fn get_nix_config_path() -> Option<PathBuf> {
     None
 }
 
+pub fn parse_nix_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            if k.trim() == "http-proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nix_write_path() -> PathBuf {
+    if let Some(p) = get_nix_config_path() {
+        if p.starts_with("/etc") {
+            if let Some(home) = dirs::home_dir() {
+                return home.join(".config").join("nix").join("nix.conf");
+            }
+        }
+        return p;
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        return config_dir.join("nix").join("nix.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("nix").join("nix.conf");
+    }
+    PathBuf::from("nix.conf")
+}
+
+pub fn get_nix_proxy() -> Option<(String, PathBuf)> {
+    let p = get_nix_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_nix_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn parse_cabal_config_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("--") || trim.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = trim.strip_prefix("proxy:") {
+            let val = rest.trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn get_cabal_config_path() -> Option<PathBuf> {
+    if let Ok(cabal_dir) = std::env::var("CABAL_DIR") {
+        let p = PathBuf::from(cabal_dir).join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".cabal").join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("cabal").join("config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_cabal_write_path() -> PathBuf {
+    if let Some(p) = get_cabal_config_path() {
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".cabal").join("config");
+    }
+    PathBuf::from("config")
+}
+
+pub fn get_cabal_proxy() -> Option<(String, PathBuf)> {
+    let p = get_cabal_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_cabal_config_proxy(&content)?;
+    Some((proxy, p))
+}
+
 pub fn get_swiftpm_mirrors_path() -> Option<PathBuf> {
     if let Some(home) = dirs::home_dir() {
         let p = home.join(".swiftpm").join("configuration").join("mirrors.json");
@@ -4247,7 +4345,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         }
     }
 
-    // Nix Package Substituters & Binary Caches (~/.config/nix/nix.conf)
+    // Nix Package Manager Proxy & Binary Caches (~/.config/nix/nix.conf)
+    if let Some((nproxy, npath)) = get_nix_proxy() {
+        let ok = verify_proxy_url(&nproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Nix package manager http-proxy `{}` in {} is dead! (nix-shell / nix build will stall or fail)",
+                nproxy,
+                npath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Nix (nix.conf)",
+            "nix.conf http-proxy",
+            nproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (nix build fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Nix (nix.conf)",
+            "nix.conf http-proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Direct or Shell".dimmed().to_string(),
+        ));
+    }
+
     if let Some(npath) = get_nix_config_path() {
         if let Ok(content) = std::fs::read_to_string(&npath) {
             let subs = parse_nix_substituters(&content);
@@ -4493,6 +4622,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Haskell Cabal Proxy (~/.cabal/config)
+    if let Some((cproxy, cpath)) = get_cabal_proxy() {
+        let ok = verify_proxy_url(&cproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Haskell Cabal proxy `{}` in {} is dead! (cabal update / cabal install will fail)",
+                cproxy,
+                cpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Haskell Cabal",
+            "~/.cabal/config proxy",
+            cproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (cabal fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Haskell Cabal",
+            "~/.cabal/config proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // 14. AI Developer Endpoints (Base URLs)
     let ai_vars = [
         "OPENAI_BASE_URL",
@@ -4544,6 +4705,13 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "AIMLAPI_BASE_URL",
         "CRUSOE_BASE_URL",
         "MODAL_BASE_URL",
+        "NVIDIA_BASE_URL",
+        "ARK_BASE_URL",
+        "VOLC_BASE_URL",
+        "RUNPOD_BASE_URL",
+        "FAL_BASE_URL",
+        "HELICONE_BASE_URL",
+        "CLAUDE_BASE_URL",
         "GLAB_PROXY",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
@@ -4577,7 +4745,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/NVIDIA/Doubao/RunPod/Fal/Helicone/Kling/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -6195,5 +6363,45 @@ trusted-users = root @wheel
 }"#;
         let mirrors = parse_swiftpm_mirrors(input);
         assert_eq!(mirrors, vec!["https://hub.fastgit.xyz/apple/swift-argument-parser.git".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_nix_proxy() {
+        let input = r#"
+# Nix configuration
+substituters = https://cache.nixos.org
+http-proxy = http://127.0.0.1:7890
+trusted-users = root
+"#;
+        assert_eq!(
+            parse_nix_proxy(input),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_quoted = "http-proxy = \"socks5h://127.0.0.1:1080\"\n";
+        assert_eq!(
+            parse_nix_proxy(input_quoted),
+            Some("socks5h://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = "# http-proxy = http://127.0.0.1:7890\nmax-jobs = auto\n";
+        assert_eq!(parse_nix_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_cabal_config_proxy() {
+        let input = r#"
+-- Cabal config
+-- proxy: http://example.com:8080
+proxy: http://127.0.0.1:7890
+remote-repo-cache: ~/.cabal/packages
+"#;
+        assert_eq!(
+            parse_cabal_config_proxy(input),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_none = "-- proxy: http://127.0.0.1:7890\n-- cabal comments\n";
+        assert_eq!(parse_cabal_config_proxy(input_none), None);
     }
 }

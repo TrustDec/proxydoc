@@ -150,6 +150,15 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "https://api.crusoecloud.com/v1/models",
     ),
     ("Modal", "https://modal.com"),
+    ("NVIDIA NIM API", "https://integrate.api.nvidia.com/v1/models"),
+    (
+        "ByteDance Doubao (Ark) API",
+        "https://ark.cn-beijing.volces.com/api/v3/models",
+    ),
+    ("Fal.ai", "https://queue.fal.run"),
+    ("RunPod API", "https://api.runpod.ai/v2"),
+    ("Helicone AI Gateway", "https://api.helicone.ai/v1/models"),
+    ("Kling AI API", "https://api.klingai.com/v1/models"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {

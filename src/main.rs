@@ -152,7 +152,13 @@ enum Commands {
         /// Also configure Julia proxy (~/.julia/config/startup.jl)
         #[arg(long)]
         julia: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, and julia proxy
+        /// Also configure Nix package manager proxy (~/.config/nix/nix.conf)
+        #[arg(long)]
+        nix: bool,
+        /// Also configure Haskell Cabal proxy (~/.cabal/config)
+        #[arg(long)]
+        cabal: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, and cabal proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -248,7 +254,13 @@ enum Commands {
         /// Also unset Julia proxy (~/.julia/config/startup.jl)
         #[arg(long)]
         julia: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, and julia proxy
+        /// Also unset Nix package manager proxy (~/.config/nix/nix.conf)
+        #[arg(long)]
+        nix: bool,
+        /// Also unset Haskell Cabal proxy (~/.cabal/config)
+        #[arg(long)]
+        cabal: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, and cabal proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -321,6 +333,8 @@ async fn main() -> Result<()> {
             sbt,
             kube,
             julia,
+            nix,
+            cabal,
             all,
             shell,
         }) => {
@@ -355,6 +369,8 @@ async fn main() -> Result<()> {
                 sbt,
                 kube,
                 julia,
+                nix,
+                cabal,
                 all,
                 shell.as_deref(),
             )
@@ -390,6 +406,8 @@ async fn main() -> Result<()> {
             sbt,
             kube,
             julia,
+            nix,
+            cabal,
             all,
             shell,
         }) => {
@@ -423,6 +441,8 @@ async fn main() -> Result<()> {
                 sbt,
                 kube,
                 julia,
+                nix,
+                cabal,
                 all,
                 shell.as_deref(),
             )?;
@@ -1131,6 +1151,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { julia, .. }) => {
                 assert!(julia);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_nix() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--nix"]).unwrap();
+        match cli.command {
+            Some(Commands::On { nix, .. }) => {
+                assert!(nix);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_nix() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--nix"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { nix, .. }) => {
+                assert!(nix);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_cabal() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--cabal"]).unwrap();
+        match cli.command {
+            Some(Commands::On { cabal, .. }) => {
+                assert!(cabal);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_cabal() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--cabal"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { cabal, .. }) => {
+                assert!(cabal);
             }
             _ => panic!("Expected Off command"),
         }
