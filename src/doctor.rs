@@ -873,6 +873,40 @@ pub fn parse_yarnrc_yml_proxy(content: &str) -> Option<String> {
     None
 }
 
+pub fn parse_yarnrc_registry(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.is_empty() {
+            continue;
+        }
+        if trim.starts_with("registry ") {
+            let val = trim["registry ".len()..].trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn parse_yarnrc_yml_registry(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.is_empty() {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once(':') {
+            if k.trim() == "npmRegistryServer" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn get_yarn_proxy() -> Option<YarnProxyConfig> {
     if let Some(home) = dirs::home_dir() {
         let yml_path = home.join(".yarnrc.yml");
@@ -1772,6 +1806,128 @@ pub fn get_svn_proxy() -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NpmRegistryConfig {
+    pub source: String,
+    pub path: Option<PathBuf>,
+    pub url: String,
+}
+
+pub fn get_npm_registries() -> Vec<NpmRegistryConfig> {
+    let mut list = Vec::new();
+
+    if let Ok(val) = std::env::var("NPM_CONFIG_REGISTRY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            list.push(NpmRegistryConfig {
+                source: "NPM_CONFIG_REGISTRY env".to_string(),
+                path: None,
+                url: trim.to_string(),
+            });
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let npmrc = home.join(".npmrc");
+        if let Ok(content) = std::fs::read_to_string(&npmrc) {
+            if let Some(url) = parse_npmrc_proxy(&content, "registry") {
+                list.push(NpmRegistryConfig {
+                    source: "~/.npmrc registry".to_string(),
+                    path: Some(npmrc),
+                    url,
+                });
+            }
+        }
+
+        let pnpmrc = home.join(".pnpmrc");
+        if let Ok(content) = std::fs::read_to_string(&pnpmrc) {
+            if let Some(url) = parse_pnpmrc_proxy(&content, "registry") {
+                list.push(NpmRegistryConfig {
+                    source: "~/.pnpmrc registry".to_string(),
+                    path: Some(pnpmrc),
+                    url,
+                });
+            }
+        }
+
+        let yarnrc = home.join(".yarnrc");
+        if let Ok(content) = std::fs::read_to_string(&yarnrc) {
+            if let Some(url) = parse_yarnrc_registry(&content) {
+                list.push(NpmRegistryConfig {
+                    source: "~/.yarnrc registry".to_string(),
+                    path: Some(yarnrc),
+                    url,
+                });
+            }
+        }
+
+        let yarnrc_yml = home.join(".yarnrc.yml");
+        if let Ok(content) = std::fs::read_to_string(&yarnrc_yml) {
+            if let Some(url) = parse_yarnrc_yml_registry(&content) {
+                list.push(NpmRegistryConfig {
+                    source: "~/.yarnrc.yml registry".to_string(),
+                    path: Some(yarnrc_yml),
+                    url,
+                });
+            }
+        }
+    }
+
+    list
+}
+
+pub fn parse_hgrc_proxy(content: &str) -> Option<String> {
+    let mut in_http_proxy = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = &trim[1..trim.len() - 1].trim();
+            in_http_proxy = section.eq_ignore_ascii_case("http_proxy");
+            continue;
+        }
+        if in_http_proxy {
+            if let Some((k, v)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if key == "host" && !val.is_empty() {
+                    if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks5://") {
+                        return Some(val.to_string());
+                    } else {
+                        return Some(format!("http://{}", val));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_hgrc_path() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(home) = dirs::home_dir() {
+        let ini = home.join("Mercurial.ini");
+        if ini.exists() {
+            return ini;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".hgrc");
+    }
+    PathBuf::from(".hgrc")
+}
+
+pub fn get_hg_proxy() -> Option<String> {
+    let path = get_hgrc_path();
+    if let Ok(content) = std::fs::read_to_string(path) {
+        return parse_hgrc_proxy(&content);
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
@@ -2234,6 +2390,42 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Node / JS Ecosystem Registry Mirrors (~/.npmrc, ~/.yarnrc, ~/.pnpmrc, NPM_CONFIG_REGISTRY)
+    let node_registries = get_npm_registries();
+    for reg in node_registries {
+        let is_deprecated_taobao = reg.url.contains("registry.npm.taobao.org");
+        if is_deprecated_taobao {
+            root_issues.push(format!(
+                "{} is using DEPRECATED & OFFLINE domain 'registry.npm.taobao.org'! Run `proxydoc fix` to migrate to 'https://registry.npmmirror.com'.",
+                reg.source
+            ));
+            items.push(DiagItem::new(
+                "Node Registry",
+                &reg.source,
+                reg.url,
+                "▲ DEPRECATED & OFFLINE! (SSL/fetch fails)".red().bold().to_string(),
+            ));
+        } else {
+            let ok = verify_proxy_url(&reg.url).await;
+            if !ok {
+                root_issues.push(format!(
+                    "{} mirror `{}` is unreachable! (npm/yarn/pnpm install will fail with network timeout)",
+                    reg.source, reg.url
+                ));
+            }
+            items.push(DiagItem::new(
+                "Node Registry",
+                &reg.source,
+                reg.url,
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR!".red().bold().to_string()
+                },
+            ));
+        }
+    }
+
     // 8. Cargo Config
     if let Some(val) = get_cargo_proxy() {
         let ok = verify_proxy_url(&val).await;
@@ -2597,6 +2789,31 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Mercurial (Hg) Config (~/.hgrc / Mercurial.ini)
+    if let Some(val) = get_hg_proxy() {
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!("Mercurial config (~/.hgrc) points to dead proxy `{}` (hg clone/pull will fail)", val));
+        }
+        items.push(DiagItem::new(
+            "Mercurial",
+            "~/.hgrc [http_proxy]",
+            val,
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (hg operations fail)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Mercurial",
+            "~/.hgrc [http_proxy]",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
+    }
+
     // 12. Go Proxy (GOPROXY)
     if let Some(gp) = get_goproxy() {
         let mirrors = parse_goproxy(&gp);
@@ -2683,6 +2900,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "GEMINI_BASE_URL",
         "GOOGLE_AI_BASE_URL",
         "DEEPSEEK_BASE_URL",
+        "DEEPSEEK_API_BASE",
         "GROQ_BASE_URL",
         "OPENROUTER_BASE_URL",
         "MISTRAL_BASE_URL",
@@ -2694,6 +2912,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "MOONSHOT_BASE_URL",
         "DASHSCOPE_BASE_URL",
         "DEEPINFRA_BASE_URL",
+        "CEREBRAS_BASE_URL",
+        "FIREWORKS_BASE_URL",
+        "ZHIPU_BASE_URL",
+        "MINIMAX_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -2869,16 +3091,32 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     }
 
     // 13. Homebrew Environment & Mirrors
-    let brew_vars = ["HOMEBREW_BOTTLE_DOMAIN", "HOMEBREW_API_DOMAIN", "HOMEBREW_BREW_GIT_REMOTE"];
+    let brew_vars = [
+        "HOMEBREW_BOTTLE_DOMAIN",
+        "HOMEBREW_API_DOMAIN",
+        "HOMEBREW_BREW_GIT_REMOTE",
+        "HOMEBREW_CORE_GIT_REMOTE",
+    ];
     for var in brew_vars {
         if let Ok(val) = std::env::var(var) {
             let trim = val.trim();
             if !trim.is_empty() {
+                let ok = verify_proxy_url(trim).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Homebrew mirror variable `{}` points to unreachable mirror `{}`! (brew install / update will fail)",
+                        var, trim
+                    ));
+                }
                 items.push(DiagItem::new(
                     "Homebrew",
                     var,
                     trim.to_string(),
-                    "● Configured Mirror".cyan().to_string(),
+                    if ok {
+                        "● Reachable Mirror".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE MIRROR! (brew hangs)".red().bold().to_string()
+                    },
                 ));
             }
         }
@@ -3811,5 +4049,57 @@ http-proxy-host = 10.0.0.1
 # http-proxy-host = 127.0.0.1
 "#;
         assert_eq!(parse_svn_servers_proxy(ini3), None);
+    }
+
+    #[test]
+    fn test_parse_hgrc_proxy() {
+        let ini1 = r#"
+[ui]
+username = Alice
+
+[http_proxy]
+host = 127.0.0.1:7890
+no = localhost, 127.0.0.1
+"#;
+        assert_eq!(parse_hgrc_proxy(ini1), Some("http://127.0.0.1:7890".to_string()));
+
+        let ini2 = r#"
+[http_proxy]
+host = "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(parse_hgrc_proxy(ini2), Some("socks5://127.0.0.1:1080".to_string()));
+
+        let ini3 = r#"
+[ui]
+username = Bob
+# [http_proxy]
+# host = 127.0.0.1:7890
+"#;
+        assert_eq!(parse_hgrc_proxy(ini3), None);
+    }
+
+    #[test]
+    fn test_parse_yarnrc_registry() {
+        let content = r#"
+# yarn lockfile v1
+registry "https://registry.npmmirror.com/"
+lastUpdateCheck 1590000000000
+"#;
+        assert_eq!(parse_yarnrc_registry(content), Some("https://registry.npmmirror.com/".to_string()));
+
+        let empty = "# only comments\n";
+        assert_eq!(parse_yarnrc_registry(empty), None);
+    }
+
+    #[test]
+    fn test_parse_yarnrc_yml_registry() {
+        let yaml = r#"
+npmRegistryServer: "https://registry.npmjs.org"
+yarnPath: ".yarn/releases/yarn-4.0.0.cjs"
+"#;
+        assert_eq!(parse_yarnrc_yml_registry(yaml), Some("https://registry.npmjs.org".to_string()));
+
+        let empty = "plugins: []\n";
+        assert_eq!(parse_yarnrc_yml_registry(empty), None);
     }
 }

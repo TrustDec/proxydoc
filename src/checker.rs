@@ -72,6 +72,10 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Moonshot (Kimi) API", "https://api.moonshot.cn/v1/models"),
     ("Aliyun DashScope (Qwen)", "https://dashscope.aliyuncs.com/compatible-mode/v1/models"),
     ("DeepInfra API", "https://api.deepinfra.com/v1/openai/models"),
+    ("Cerebras API", "https://api.cerebras.ai/v1/models"),
+    ("Fireworks AI API", "https://api.fireworks.ai/inference/v1/models"),
+    ("Zhipu AI (GLM) API", "https://open.bigmodel.cn/api/paas/v4/models"),
+    ("MiniMax API", "https://api.minimax.chat/v1/models"),
     ("HuggingFace", "https://huggingface.co/api/status"),
     ("crates.io", "https://crates.io/api/v1/summary"),
     ("npm Registry", "https://registry.npmjs.org"),
@@ -534,6 +538,10 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Moonshot (Kimi) API"));
         assert!(standard.iter().any(|(name, _)| *name == "Aliyun DashScope (Qwen)"));
         assert!(standard.iter().any(|(name, _)| *name == "DeepInfra API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Cerebras API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Fireworks AI API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Zhipu AI (GLM) API"));
+        assert!(standard.iter().any(|(name, _)| *name == "MiniMax API"));
         assert!(standard.iter().any(|(name, _)| *name == "OpenAI API"));
         assert!(standard.iter().any(|(name, _)| *name == "crates.io"));
         assert!(standard.iter().any(|(name, _)| *name == "npm Registry"));

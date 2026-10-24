@@ -1759,6 +1759,111 @@ pub fn unset_svn_proxy() -> Result<bool> {
     Ok(changed)
 }
 
+pub fn apply_hgrc_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_http_proxy = false;
+    let mut section_found = false;
+    let mut host_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = &trim[1..trim.len() - 1].trim();
+            if in_http_proxy && !host_set {
+                lines.push(format!("host = {}", proxy_url));
+                host_set = true;
+            }
+            in_http_proxy = section.eq_ignore_ascii_case("http_proxy");
+            if in_http_proxy {
+                section_found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_http_proxy {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "host" {
+                    lines.push(format!("host = {}", proxy_url));
+                    host_set = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if in_http_proxy && !host_set {
+        lines.push(format!("host = {}", proxy_url));
+    } else if !section_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[http_proxy]".to_string());
+        lines.push(format!("host = {}", proxy_url));
+        lines.push("no = localhost, 127.0.0.1".to_string());
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_hgrc_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_http_proxy = false;
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = &trim[1..trim.len() - 1].trim();
+            in_http_proxy = section.eq_ignore_ascii_case("http_proxy");
+            lines.push(line.to_string());
+            continue;
+        }
+        if in_http_proxy && !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "host" || key == "no" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+    let res = lines.join("\n") + if lines.is_empty() { "" } else { "\n" };
+    (res, changed)
+}
+
+pub fn set_hg_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_hgrc_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_hgrc_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_hg_proxy() -> Result<bool> {
+    let path = crate::doctor::get_hgrc_path();
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, changed) = remove_hgrc_proxy(&content);
+    if changed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(changed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -1780,6 +1885,7 @@ pub async fn turn_on(
     wget: bool,
     gem: bool,
     svn: bool,
+    hg: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1800,6 +1906,7 @@ pub async fn turn_on(
     let set_nuget = nuget || all;
     let set_gem = gem || all;
     let set_svn = svn || all;
+    let set_hg = hg || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -1967,6 +2074,13 @@ pub async fn turn_on(
         }
     }
 
+    if set_hg {
+        match set_hg_proxy(&proxy_url) {
+            Ok(p) => eprintln!("{}", format!("✔ Mercurial (Hg) proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update Mercurial config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
     eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
 
@@ -1993,6 +2107,7 @@ pub fn turn_off(
     wget: bool,
     gem: bool,
     svn: bool,
+    hg: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2013,6 +2128,7 @@ pub fn turn_off(
     let unset_nuget = nuget || all;
     let unset_gem = gem || all;
     let unset_svn = svn || all;
+    let unset_hg = hg || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -2163,6 +2279,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Subversion proxy removed from servers config".green()),
             Ok(false) => eprintln!("{}", "○ Subversion proxy was not set in servers config".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Subversion proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_hg {
+        match unset_hg_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Mercurial (Hg) proxy removed from ~/.hgrc".green()),
+            Ok(false) => eprintln!("{}", "○ Mercurial (Hg) proxy was not set in ~/.hgrc".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Mercurial proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -2631,5 +2755,26 @@ mod tests {
         assert!(!cleaned.contains("http-proxy-host"));
         assert!(!cleaned.contains("http-proxy-port"));
         assert!(cleaned.contains("[groups]"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_hgrc_proxy() {
+        let initial = "[ui]\nusername = Bob\n";
+        let configured = apply_hgrc_proxy(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("[http_proxy]"));
+        assert!(configured.contains("host = http://127.0.0.1:7890"));
+        assert!(configured.contains("no = localhost, 127.0.0.1"));
+
+        // Replace existing
+        let updated = apply_hgrc_proxy(&configured, "http://127.0.0.1:1082");
+        assert!(updated.contains("host = http://127.0.0.1:1082"));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_hgrc_proxy(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("host = "));
+        assert!(cleaned.contains("[ui]"));
+        assert!(cleaned.contains("username = Bob"));
     }
 }
