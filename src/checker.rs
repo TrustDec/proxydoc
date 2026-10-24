@@ -64,17 +64,32 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Cloudflare", "https://1.1.1.1/cdn-cgi/trace"),
     ("OpenAI API", "https://api.openai.com/v1/models"),
     ("Anthropic API", "https://api.anthropic.com/v1/messages"),
-    ("Google Gemini", "https://generativelanguage.googleapis.com/v1beta/models"),
+    (
+        "Google Gemini",
+        "https://generativelanguage.googleapis.com/v1beta/models",
+    ),
     ("DeepSeek API", "https://api.deepseek.com/models"),
     ("xAI (Grok) API", "https://api.x.ai/v1/models"),
     ("SiliconFlow API", "https://api.siliconflow.cn/v1/models"),
     ("Together AI API", "https://api.together.xyz/v1/models"),
     ("Moonshot (Kimi) API", "https://api.moonshot.cn/v1/models"),
-    ("Aliyun DashScope (Qwen)", "https://dashscope.aliyuncs.com/compatible-mode/v1/models"),
-    ("DeepInfra API", "https://api.deepinfra.com/v1/openai/models"),
+    (
+        "Aliyun DashScope (Qwen)",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+    ),
+    (
+        "DeepInfra API",
+        "https://api.deepinfra.com/v1/openai/models",
+    ),
     ("Cerebras API", "https://api.cerebras.ai/v1/models"),
-    ("Fireworks AI API", "https://api.fireworks.ai/inference/v1/models"),
-    ("Zhipu AI (GLM) API", "https://open.bigmodel.cn/api/paas/v4/models"),
+    (
+        "Fireworks AI API",
+        "https://api.fireworks.ai/inference/v1/models",
+    ),
+    (
+        "Zhipu AI (GLM) API",
+        "https://open.bigmodel.cn/api/paas/v4/models",
+    ),
     ("MiniMax API", "https://api.minimax.chat/v1/models"),
     ("HuggingFace", "https://huggingface.co/api/status"),
     ("crates.io", "https://crates.io/api/v1/summary"),
@@ -87,8 +102,19 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("OpenRouter API", "https://openrouter.ai/api/v1/models"),
     ("Groq API", "https://api.groq.com/openai/v1/models"),
     ("Mistral API", "https://api.mistral.ai/v1/models"),
-    ("Perplexity API", "https://api.perplexity.ai/chat/completions"),
+    (
+        "Perplexity API",
+        "https://api.perplexity.ai/chat/completions",
+    ),
     ("Cohere API", "https://api.cohere.com/v1/models"),
+    ("GitHub Copilot API", "https://api.githubcopilot.com"),
+    ("SambaNova API", "https://api.sambanova.ai/v1/models"),
+    ("Replicate API", "https://api.replicate.com/v1/models"),
+    (
+        "Baidu Qianfan (ERNIE)",
+        "https://qianfan.baidubce.com/v2/models",
+    ),
+    ("DeepL API", "https://api-free.deepl.com/v2/usage"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -163,7 +189,8 @@ pub async fn test_endpoints(
                     }
 
                     // 401/403/404/405 for API endpoints like OpenAI/Anthropic/DeepSeek without key means connection succeeded!
-                    let is_ok = code < 400 || code == 401 || code == 403 || code == 404 || code == 405;
+                    let is_ok =
+                        code < 400 || code == 401 || code == 403 || code == 404 || code == 405;
                     let code_str = if is_ok {
                         format!("● OK ({})", code).green().bold().to_string()
                     } else {
@@ -177,7 +204,13 @@ pub async fn test_endpoints(
                         format!("Timeout ({}s)", timeout_secs)
                     } else {
                         let s = e.to_string().to_lowercase();
-                        if s.contains("cert") || s.contains("certificate") || s.contains("tls") || s.contains("ssl") || s.contains("handshake") || s.contains("self-signed") {
+                        if s.contains("cert")
+                            || s.contains("certificate")
+                            || s.contains("tls")
+                            || s.contains("ssl")
+                            || s.contains("handshake")
+                            || s.contains("self-signed")
+                        {
                             "TLS / Cert Untrusted".to_string()
                         } else if e.is_connect() {
                             "Connect Failed".to_string()
@@ -185,7 +218,12 @@ pub async fn test_endpoints(
                             "Error".to_string()
                         }
                     };
-                    (format!("✕ {}", err_desc).red().bold().to_string(), None, "-".dimmed().to_string(), false)
+                    (
+                        format!("✕ {}", err_desc).red().bold().to_string(),
+                        None,
+                        "-".dimmed().to_string(),
+                        false,
+                    )
                 }
             };
 
@@ -270,7 +308,9 @@ pub async fn run(
     };
 
     let proxy_display = if direct {
-        "Direct (Forced --direct, ignoring any proxy)".yellow().to_string()
+        "Direct (Forced --direct, ignoring any proxy)"
+            .yellow()
+            .to_string()
     } else {
         match &active_proxy_str {
             Some(p) => format!("Proxy: {}", p.yellow()),
@@ -340,7 +380,11 @@ pub async fn run(
     }
 
     if let Some(ref eg) = egress {
-        let warp_badge = if eg.warp { " (WARP Enabled)".cyan() } else { "".clear() };
+        let warp_badge = if eg.warp {
+            " (WARP Enabled)".cyan()
+        } else {
+            "".clear()
+        };
         println!(
             "{} {} {} (Country: {}, Datacenter: {}){}\n",
             "🌐".cyan(),
@@ -377,7 +421,10 @@ async fn run_compare(
 
     if !json_output {
         println!("\n⚡ ================= BENCHMARK: DIRECT VS PROXY =============== ⚡");
-        println!("   Comparing performance against proxy: {}\n", proxy_target.cyan().bold());
+        println!(
+            "   Comparing performance against proxy: {}\n",
+            proxy_target.cyan().bold()
+        );
     }
 
     let direct_client = reqwest::Client::builder()
@@ -413,11 +460,10 @@ async fn run_compare(
 
     let targets = build_target_list(custom_target.as_deref());
     // Run both test sets concurrently
-    let ((direct_results, direct_egress), (proxy_results, proxy_egress)) =
-        tokio::join!(
-            test_endpoints(&direct_client, &targets, timeout_secs),
-            test_endpoints(&proxy_client, &targets, timeout_secs)
-        );
+    let ((direct_results, direct_egress), (proxy_results, proxy_egress)) = tokio::join!(
+        test_endpoints(&direct_client, &targets, timeout_secs),
+        test_endpoints(&proxy_client, &targets, timeout_secs)
+    );
 
     if let Some(bar) = pb {
         bar.finish_and_clear();
@@ -464,7 +510,11 @@ async fn run_compare(
     }
 
     if let Some(ref p_eg) = proxy_egress {
-        let warp_badge = if p_eg.warp { " (WARP Enabled)".cyan() } else { "".clear() };
+        let warp_badge = if p_eg.warp {
+            " (WARP Enabled)".cyan()
+        } else {
+            "".clear()
+        };
         println!(
             "  Proxy:   {} (Country: {}, Datacenter: {}){}",
             p_eg.ip.green().bold(),
@@ -535,12 +585,18 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "xAI (Grok) API"));
         assert!(standard.iter().any(|(name, _)| *name == "SiliconFlow API"));
         assert!(standard.iter().any(|(name, _)| *name == "Together AI API"));
-        assert!(standard.iter().any(|(name, _)| *name == "Moonshot (Kimi) API"));
-        assert!(standard.iter().any(|(name, _)| *name == "Aliyun DashScope (Qwen)"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Moonshot (Kimi) API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Aliyun DashScope (Qwen)"));
         assert!(standard.iter().any(|(name, _)| *name == "DeepInfra API"));
         assert!(standard.iter().any(|(name, _)| *name == "Cerebras API"));
         assert!(standard.iter().any(|(name, _)| *name == "Fireworks AI API"));
-        assert!(standard.iter().any(|(name, _)| *name == "Zhipu AI (GLM) API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Zhipu AI (GLM) API"));
         assert!(standard.iter().any(|(name, _)| *name == "MiniMax API"));
         assert!(standard.iter().any(|(name, _)| *name == "OpenAI API"));
         assert!(standard.iter().any(|(name, _)| *name == "crates.io"));
@@ -548,6 +604,15 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Mistral API"));
         assert!(standard.iter().any(|(name, _)| *name == "Perplexity API"));
         assert!(standard.iter().any(|(name, _)| *name == "Cohere API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GitHub Copilot API"));
+        assert!(standard.iter().any(|(name, _)| *name == "SambaNova API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Replicate API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Baidu Qianfan (ERNIE)"));
+        assert!(standard.iter().any(|(name, _)| *name == "DeepL API"));
         assert!(standard.iter().any(|(name, _)| *name == "Yarn Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "PyPI Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "Go Proxy"));
@@ -558,6 +623,8 @@ mod tests {
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
-        assert!(with_custom.iter().any(|(name, url)| *name == "Custom Target" && *url == "https://api.example.com"));
+        assert!(with_custom
+            .iter()
+            .any(|(name, url)| *name == "Custom Target" && *url == "https://api.example.com"));
     }
 }

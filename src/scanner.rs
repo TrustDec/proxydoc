@@ -89,7 +89,12 @@ pub async fn find_first_active_proxy() -> Option<DetectedProxy> {
 
 pub async fn run(json_output: bool) -> anyhow::Result<()> {
     if !json_output {
-        println!("{}", "🔍 Scanning common local proxy ports (127.0.0.1)...".cyan().bold());
+        println!(
+            "{}",
+            "🔍 Scanning common local proxy ports (127.0.0.1)..."
+                .cyan()
+                .bold()
+        );
     }
 
     let mut rows = Vec::new();
@@ -127,9 +132,12 @@ pub async fn run(json_output: bool) -> anyhow::Result<()> {
     if found_count > 0 {
         println!(
             "{}",
-            format!("✅ Found {} active local proxy port(s) ready to use.", found_count)
-                .green()
-                .bold()
+            format!(
+                "✅ Found {} active local proxy port(s) ready to use.",
+                found_count
+            )
+            .green()
+            .bold()
         );
     } else {
         println!(

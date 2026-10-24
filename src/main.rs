@@ -125,7 +125,13 @@ enum Commands {
         /// Also configure Mercurial (Hg) proxy (~/.hgrc)
         #[arg(long)]
         hg: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, and hg proxy
+        /// Also configure Astral uv proxy (~/.config/uv/uv.toml)
+        #[arg(long)]
+        uv: bool,
+        /// Also configure Go modules proxy (go/env & GOPROXY)
+        #[arg(long)]
+        go: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, and go proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -194,7 +200,13 @@ enum Commands {
         /// Also unset Mercurial (Hg) proxy (~/.hgrc)
         #[arg(long)]
         hg: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, and hg proxy
+        /// Also unset Astral uv proxy (~/.config/uv/uv.toml)
+        #[arg(long)]
+        uv: bool,
+        /// Also unset Go modules proxy (go/env & GOPROXY)
+        #[arg(long)]
+        go: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, gem, svn, hg, uv, and go proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -223,17 +235,127 @@ async fn main() -> Result<()> {
         Some(Commands::Fix) => {
             fixer::run().await?;
         }
-        Some(Commands::Test { proxy, direct, compare, json, target, timeout }) => {
+        Some(Commands::Test {
+            proxy,
+            direct,
+            compare,
+            json,
+            target,
+            timeout,
+        }) => {
             checker::run(proxy, direct, compare, json, target, timeout).await?;
         }
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, curl, wget, gem, svn, hg, all, shell }) => {
-            manager::turn_on(&target, git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, curl, wget, gem, svn, hg, all, shell.as_deref()).await?;
+        Some(Commands::On {
+            target,
+            git,
+            cargo,
+            npm,
+            yarn,
+            pnpm,
+            bun,
+            pip,
+            conda,
+            docker,
+            gradle,
+            maven,
+            vscode,
+            gh,
+            jetbrains,
+            nuget,
+            curl,
+            wget,
+            gem,
+            svn,
+            hg,
+            uv,
+            go,
+            all,
+            shell,
+        }) => {
+            manager::turn_on(
+                &target,
+                git,
+                cargo,
+                npm,
+                yarn,
+                pnpm,
+                bun,
+                pip,
+                conda,
+                docker,
+                gradle,
+                maven,
+                vscode,
+                gh,
+                jetbrains,
+                nuget,
+                curl,
+                wget,
+                gem,
+                svn,
+                hg,
+                uv,
+                go,
+                all,
+                shell.as_deref(),
+            )
+            .await?;
         }
-        Some(Commands::Off { git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, curl, wget, gem, svn, hg, all, shell }) => {
-            manager::turn_off(git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, jetbrains, nuget, curl, wget, gem, svn, hg, all, shell.as_deref())?;
+        Some(Commands::Off {
+            git,
+            cargo,
+            npm,
+            yarn,
+            pnpm,
+            bun,
+            pip,
+            conda,
+            docker,
+            gradle,
+            maven,
+            vscode,
+            gh,
+            jetbrains,
+            nuget,
+            curl,
+            wget,
+            gem,
+            svn,
+            hg,
+            uv,
+            go,
+            all,
+            shell,
+        }) => {
+            manager::turn_off(
+                git,
+                cargo,
+                npm,
+                yarn,
+                pnpm,
+                bun,
+                pip,
+                conda,
+                docker,
+                gradle,
+                maven,
+                vscode,
+                gh,
+                jetbrains,
+                nuget,
+                curl,
+                wget,
+                gem,
+                svn,
+                hg,
+                uv,
+                go,
+                all,
+                shell.as_deref(),
+            )?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());
@@ -261,9 +383,22 @@ mod tests {
 
     #[test]
     fn test_cli_parse_test_options() {
-        let cli = Cli::try_parse_from(["proxydoc", "test", "--proxy", "http://127.0.0.1:7890", "--json"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "proxydoc",
+            "test",
+            "--proxy",
+            "http://127.0.0.1:7890",
+            "--json",
+        ])
+        .unwrap();
         match cli.command {
-            Some(Commands::Test { proxy, direct, compare, json, .. }) => {
+            Some(Commands::Test {
+                proxy,
+                direct,
+                compare,
+                json,
+                ..
+            }) => {
                 assert_eq!(proxy, Some("http://127.0.0.1:7890".to_string()));
                 assert!(!direct);
                 assert!(!compare);
@@ -277,7 +412,9 @@ mod tests {
     fn test_cli_parse_test_compare() {
         let cli = Cli::try_parse_from(["proxydoc", "test", "--compare"]).unwrap();
         match cli.command {
-            Some(Commands::Test { compare, direct, .. }) => {
+            Some(Commands::Test {
+                compare, direct, ..
+            }) => {
                 assert!(compare);
                 assert!(!direct);
             }
@@ -289,7 +426,9 @@ mod tests {
     fn test_cli_parse_test_direct() {
         let cli = Cli::try_parse_from(["proxydoc", "test", "-d"]).unwrap();
         match cli.command {
-            Some(Commands::Test { direct, compare, .. }) => {
+            Some(Commands::Test {
+                direct, compare, ..
+            }) => {
                 assert!(direct);
                 assert!(!compare);
             }
@@ -301,7 +440,9 @@ mod tests {
     fn test_cli_parse_on_all() {
         let cli = Cli::try_parse_from(["proxydoc", "on", "7890", "--all"]).unwrap();
         match cli.command {
-            Some(Commands::On { target, all, pip, .. }) => {
+            Some(Commands::On {
+                target, all, pip, ..
+            }) => {
                 assert_eq!(target, "7890");
                 assert!(all);
                 assert!(!pip);
@@ -324,11 +465,18 @@ mod tests {
     #[test]
     fn test_cli_parse_test_target_and_timeout() {
         let cli = Cli::try_parse_from([
-            "proxydoc", "test", "-t", "https://api.deepseek.com/models", "--timeout", "10",
+            "proxydoc",
+            "test",
+            "-t",
+            "https://api.deepseek.com/models",
+            "--timeout",
+            "10",
         ])
         .unwrap();
         match cli.command {
-            Some(Commands::Test { target, timeout, .. }) => {
+            Some(Commands::Test {
+                target, timeout, ..
+            }) => {
                 assert_eq!(target, Some("https://api.deepseek.com/models".to_string()));
                 assert_eq!(timeout, 10);
             }
@@ -338,9 +486,15 @@ mod tests {
 
     #[test]
     fn test_cli_parse_on_docker_and_shell() {
-        let cli = Cli::try_parse_from(["proxydoc", "on", "7897", "--docker", "--shell", "fish"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["proxydoc", "on", "7897", "--docker", "--shell", "fish"]).unwrap();
         match cli.command {
-            Some(Commands::On { target, docker, shell, .. }) => {
+            Some(Commands::On {
+                target,
+                docker,
+                shell,
+                ..
+            }) => {
                 assert_eq!(target, "7897");
                 assert!(docker);
                 assert_eq!(shell, Some("fish".to_string()));
@@ -709,6 +863,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { hg, .. }) => {
                 assert!(hg);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_uv() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--uv"]).unwrap();
+        match cli.command {
+            Some(Commands::On { uv, .. }) => {
+                assert!(uv);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_uv() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--uv"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { uv, .. }) => {
+                assert!(uv);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_go() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--go"]).unwrap();
+        match cli.command {
+            Some(Commands::On { go, .. }) => {
+                assert!(go);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_go() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--go"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { go, .. }) => {
+                assert!(go);
             }
             _ => panic!("Expected Off command"),
         }

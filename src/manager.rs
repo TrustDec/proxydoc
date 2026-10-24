@@ -32,7 +32,14 @@ pub fn detect_shell(explicit: Option<&str>) -> ShellType {
 
 pub fn generate_shell_export(proxy_url: &str, shell: ShellType) -> Vec<String> {
     let bypass = "localhost,127.0.0.1,::1,localaddress,.local";
-    let vars = ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"];
+    let vars = [
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ];
     let no_proxy_vars = ["no_proxy", "NO_PROXY"];
 
     match shell {
@@ -71,8 +78,14 @@ pub fn generate_shell_export(proxy_url: &str, shell: ShellType) -> Vec<String> {
 
 pub fn generate_shell_unset(shell: ShellType) -> Vec<String> {
     let vars = [
-        "http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-        "no_proxy", "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "no_proxy",
+        "NO_PROXY",
     ];
 
     match shell {
@@ -106,8 +119,14 @@ pub fn apply_docker_proxy_json(root: &mut serde_json::Value, proxy_url: &str) {
     }
 
     let default_map = default_entry.as_object_mut().unwrap();
-    default_map.insert("httpProxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
-    default_map.insert("httpsProxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    default_map.insert(
+        "httpProxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+    default_map.insert(
+        "httpsProxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
     default_map.insert(
         "noProxy".to_string(),
         serde_json::Value::String("localhost,127.0.0.1,::1".to_string()),
@@ -307,7 +326,9 @@ pub fn extract_host_port(url_str: &str) -> (String, u16) {
         let host = if h.is_empty() || h == "localhost" {
             "127.0.0.1".to_string()
         } else {
-            h.trim_start_matches("http://").trim_start_matches("https://").to_string()
+            h.trim_start_matches("http://")
+                .trim_start_matches("https://")
+                .to_string()
         };
         let port = p.parse().unwrap_or(7890);
         return (host, port);
@@ -345,7 +366,9 @@ pub fn apply_gradle_proxy_properties(content: &str, host: &str, port: u16) -> St
                     updated_keys.insert("https.proxyPort");
                 }
                 "systemProp.http.nonProxyHosts" => {
-                    lines.push("systemProp.http.nonProxyHosts=localhost|127.0.0.1|*.local".to_string());
+                    lines.push(
+                        "systemProp.http.nonProxyHosts=localhost|127.0.0.1|*.local".to_string(),
+                    );
                     updated_keys.insert("http.nonProxyHosts");
                 }
                 _ => lines.push(line.to_string()),
@@ -484,7 +507,10 @@ pub fn apply_maven_proxy_xml(content: &str, host: &str, port: u16) -> String {
         return res;
     }
 
-    format!("<settings>\n  <proxies>\n{}\n  </proxies>\n{}\n</settings>\n", proxy_snippet, content)
+    format!(
+        "<settings>\n  <proxies>\n{}\n  </proxies>\n{}\n</settings>\n",
+        proxy_snippet, content
+    )
 }
 
 pub fn remove_maven_proxy_xml(content: &str) -> (String, bool) {
@@ -495,7 +521,11 @@ pub fn remove_maven_proxy_xml(content: &str) -> (String, bool) {
         if let Some(p_start) = res[..doc_idx].rfind("<proxy>") {
             if let Some(p_end) = res[doc_idx..].find("</proxy>") {
                 let end_pos = doc_idx + p_end + 8;
-                res = format!("{}{}", &res[..p_start], res[end_pos..].trim_start_matches('\n'));
+                res = format!(
+                    "{}{}",
+                    &res[..p_start],
+                    res[end_pos..].trim_start_matches('\n')
+                );
                 modified = true;
             }
         }
@@ -660,8 +690,12 @@ pub fn set_yarn_proxy(proxy_url: &str) -> Result<()> {
         let new_content = apply_yarn_proxy_yarnrc(&content, proxy_url);
         std::fs::write(&rc_path, new_content)?;
     }
-    let _ = Command::new("yarn").args(["config", "set", "proxy", proxy_url]).output();
-    let _ = Command::new("yarn").args(["config", "set", "https-proxy", proxy_url]).output();
+    let _ = Command::new("yarn")
+        .args(["config", "set", "proxy", proxy_url])
+        .output();
+    let _ = Command::new("yarn")
+        .args(["config", "set", "https-proxy", proxy_url])
+        .output();
     Ok(())
 }
 
@@ -690,8 +724,12 @@ pub fn unset_yarn_proxy() -> Result<bool> {
             }
         }
     }
-    let _ = Command::new("yarn").args(["config", "delete", "proxy"]).output();
-    let _ = Command::new("yarn").args(["config", "delete", "https-proxy"]).output();
+    let _ = Command::new("yarn")
+        .args(["config", "delete", "proxy"])
+        .output();
+    let _ = Command::new("yarn")
+        .args(["config", "delete", "https-proxy"])
+        .output();
     Ok(removed)
 }
 
@@ -700,7 +738,10 @@ pub fn apply_condarc_proxy(content: &str, proxy_url: &str) -> String {
     let mut in_proxy_servers = false;
     let mut proxy_section_inserted = false;
 
-    let proxy_block = format!("proxy_servers:\n  http: {}\n  https: {}", proxy_url, proxy_url);
+    let proxy_block = format!(
+        "proxy_servers:\n  http: {}\n  https: {}",
+        proxy_url, proxy_url
+    );
 
     for line in content.lines() {
         let trim = line.trim();
@@ -862,8 +903,12 @@ pub fn set_pnpm_proxy(proxy_url: &str) -> Result<()> {
     let new_content = apply_pnpmrc_proxy(&content, proxy_url);
     std::fs::write(&pnpmrc_path, new_content)?;
 
-    let _ = Command::new("pnpm").args(["config", "set", "proxy", proxy_url]).output();
-    let _ = Command::new("pnpm").args(["config", "set", "https-proxy", proxy_url]).output();
+    let _ = Command::new("pnpm")
+        .args(["config", "set", "proxy", proxy_url])
+        .output();
+    let _ = Command::new("pnpm")
+        .args(["config", "set", "https-proxy", proxy_url])
+        .output();
 
     Ok(())
 }
@@ -882,8 +927,12 @@ pub fn unset_pnpm_proxy() -> Result<bool> {
             }
         }
     }
-    let _ = Command::new("pnpm").args(["config", "delete", "proxy"]).output();
-    let _ = Command::new("pnpm").args(["config", "delete", "https-proxy"]).output();
+    let _ = Command::new("pnpm")
+        .args(["config", "delete", "proxy"])
+        .output();
+    let _ = Command::new("pnpm")
+        .args(["config", "delete", "https-proxy"])
+        .output();
     Ok(removed)
 }
 
@@ -944,7 +993,10 @@ pub fn remove_bun_proxy_toml(content: &str) -> (String, bool) {
     let mut lines = Vec::new();
     let mut in_install = false;
     let mut removed = false;
-    let has_install = content.lines().any(|l| l.trim().starts_with('[') && l.trim().trim_matches(|c| c == '[' || c == ']').trim() == "install");
+    let has_install = content.lines().any(|l| {
+        l.trim().starts_with('[')
+            && l.trim().trim_matches(|c| c == '[' || c == ']').trim() == "install"
+    });
 
     for line in content.lines() {
         let trim = line.trim();
@@ -1005,8 +1057,14 @@ pub fn apply_vscode_proxy_json(root: &mut serde_json::Value, proxy_url: &str) {
         *root = serde_json::json!({});
     }
     let map = root.as_object_mut().unwrap();
-    map.insert("http.proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
-    map.insert("http.proxySupport".to_string(), serde_json::Value::String("override".to_string()));
+    map.insert(
+        "http.proxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+    map.insert(
+        "http.proxySupport".to_string(),
+        serde_json::Value::String("override".to_string()),
+    );
 }
 
 pub fn remove_vscode_proxy_json(root: &mut serde_json::Value) -> bool {
@@ -1032,7 +1090,8 @@ pub fn set_vscode_proxy(proxy_url: &str) -> Result<Vec<String>> {
             found_existing = true;
             let content = std::fs::read_to_string(path).unwrap_or_else(|_| "{}".to_string());
             let cleaned = crate::doctor::clean_jsonc(&content);
-            let mut root: serde_json::Value = serde_json::from_str(&cleaned).unwrap_or_else(|_| serde_json::json!({}));
+            let mut root: serde_json::Value =
+                serde_json::from_str(&cleaned).unwrap_or_else(|_| serde_json::json!({}));
             apply_vscode_proxy_json(&mut root, proxy_url);
             let out = serde_json::to_string_pretty(&root)?;
             std::fs::write(path, out)?;
@@ -1123,7 +1182,9 @@ pub fn set_gh_proxy(proxy_url: &str) -> Result<()> {
     let new_content = apply_gh_config_proxy(&content, proxy_url);
     std::fs::write(&path, new_content)?;
 
-    let _ = Command::new("gh").args(["config", "set", "http_proxy", proxy_url]).output();
+    let _ = Command::new("gh")
+        .args(["config", "set", "http_proxy", proxy_url])
+        .output();
     Ok(())
 }
 
@@ -1139,7 +1200,9 @@ pub fn unset_gh_proxy() -> Result<bool> {
             }
         }
     }
-    let _ = Command::new("gh").args(["config", "set", "http_proxy", ""]).output();
+    let _ = Command::new("gh")
+        .args(["config", "set", "http_proxy", ""])
+        .output();
     Ok(removed)
 }
 
@@ -1193,7 +1256,10 @@ pub fn apply_jetbrains_proxy_xml(content: &str, host: &str, port: u16, is_socks:
         if let Some(pos) = content.rfind("</application>") {
             let before = &content[..pos];
             let after = &content[pos..];
-            return format!("{}  <component name=\"HttpConfigurable\">\n{}\n  </component>\n{}", before, new_options, after);
+            return format!(
+                "{}  <component name=\"HttpConfigurable\">\n{}\n  </component>\n{}",
+                before, new_options, after
+            );
         } else {
             return format!(
                 "<application>\n  <component name=\"HttpConfigurable\">\n{}\n  </component>\n</application>\n",
@@ -1281,8 +1347,15 @@ pub fn apply_nuget_proxy_xml(content: &str, proxy_url: &str) -> String {
         {
             if !replaced {
                 let leading_ws = line.len() - line.trim_start().len();
-                let indent = if leading_ws > 0 { &line[..leading_ws] } else { "    " };
-                out_lines.push(format!("{}<add key=\"http_proxy\" value=\"{}\" />", indent, proxy_url));
+                let indent = if leading_ws > 0 {
+                    &line[..leading_ws]
+                } else {
+                    "    "
+                };
+                out_lines.push(format!(
+                    "{}<add key=\"http_proxy\" value=\"{}\" />",
+                    indent, proxy_url
+                ));
                 replaced = true;
             }
         } else {
@@ -1535,7 +1608,9 @@ pub fn remove_wgetrc_lines(content: &str) -> (String, bool) {
         let trim = line.trim();
         let lower = trim.to_ascii_lowercase();
         if !trim.starts_with('#')
-            && (lower.starts_with("http_proxy") || lower.starts_with("https_proxy") || lower.starts_with("use_proxy"))
+            && (lower.starts_with("http_proxy")
+                || lower.starts_with("https_proxy")
+                || lower.starts_with("use_proxy"))
         {
             changed = true;
         } else {
@@ -1579,7 +1654,9 @@ pub fn apply_gemrc_lines(content: &str, proxy_url: &str) -> String {
 
     for line in content.lines() {
         let trim = line.trim();
-        if !trim.starts_with('#') && (trim.starts_with("http_proxy:") || trim.starts_with(":http_proxy:")) {
+        if !trim.starts_with('#')
+            && (trim.starts_with("http_proxy:") || trim.starts_with(":http_proxy:"))
+        {
             if !replaced {
                 lines.push(format!("http_proxy: {}", proxy_url));
                 replaced = true;
@@ -1600,7 +1677,9 @@ pub fn remove_gemrc_lines(content: &str) -> (String, bool) {
 
     for line in content.lines() {
         let trim = line.trim();
-        if !trim.starts_with('#') && (trim.starts_with("http_proxy:") || trim.starts_with(":http_proxy:")) {
+        if !trim.starts_with('#')
+            && (trim.starts_with("http_proxy:") || trim.starts_with(":http_proxy:"))
+        {
             changed = true;
         } else {
             lines.push(line.to_string());
@@ -1864,6 +1943,182 @@ pub fn unset_hg_proxy() -> Result<bool> {
     Ok(changed)
 }
 
+pub fn apply_uv_proxy_toml(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut updated = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http-proxy" || key == "proxy" {
+                    lines.push(format!("http-proxy = \"{}\"", proxy_url));
+                    updated = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !updated {
+        let mut inserted = false;
+        let mut final_lines = Vec::new();
+        for line in &lines {
+            if !inserted && line.trim().starts_with('[') {
+                final_lines.push(format!("http-proxy = \"{}\"", proxy_url));
+                final_lines.push(String::new());
+                inserted = true;
+            }
+            final_lines.push(line.clone());
+        }
+        if !inserted {
+            final_lines.push(format!("http-proxy = \"{}\"", proxy_url));
+        }
+        return final_lines.join("\n") + "\n";
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_uv_proxy_toml(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http-proxy" || key == "proxy" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (
+        lines.join("\n") + if lines.is_empty() { "" } else { "\n" },
+        changed,
+    )
+}
+
+pub fn set_uv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_uv_config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_uv_proxy_toml(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_uv_proxy() -> Result<bool> {
+    let path = crate::doctor::get_uv_config_path();
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let (new_content, changed) = remove_uv_proxy_toml(&content);
+    if changed {
+        std::fs::write(&path, new_content)?;
+    }
+    Ok(changed)
+}
+
+pub fn apply_go_env_content(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut updated = false;
+    let proxy_val = format!("{},direct", proxy_url);
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim() == "GOPROXY" {
+                    lines.push(format!("GOPROXY={}", proxy_val));
+                    updated = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !updated {
+        lines.push(format!("GOPROXY={}", proxy_val));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_go_env_content(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim() == "GOPROXY" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (
+        lines.join("\n") + if lines.is_empty() { "" } else { "\n" },
+        changed,
+    )
+}
+
+pub fn set_go_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_go_env_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_go_env_content(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    let proxy_val = format!("{},direct", proxy_url);
+    let _ = Command::new("go")
+        .args(["env", "-w", &format!("GOPROXY={}", proxy_val)])
+        .status();
+
+    Ok(path)
+}
+
+pub fn unset_go_proxy() -> Result<bool> {
+    let path = crate::doctor::get_go_env_path();
+    let mut changed = false;
+    if path.exists() {
+        let content = std::fs::read_to_string(&path)?;
+        let (new_content, c) = remove_go_env_content(&content);
+        if c {
+            std::fs::write(&path, new_content)?;
+            changed = true;
+        }
+    }
+    let _ = Command::new("go").args(["env", "-u", "GOPROXY"]).status();
+    Ok(changed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -1886,6 +2141,8 @@ pub async fn turn_on(
     gem: bool,
     svn: bool,
     hg: bool,
+    uv: bool,
+    go: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -1907,6 +2164,8 @@ pub async fn turn_on(
     let set_gem = gem || all;
     let set_svn = svn || all;
     let set_hg = hg || all;
+    let set_uv = uv || all;
+    let set_go = go || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -1915,7 +2174,10 @@ pub async fn turn_on(
         // 1. Try system proxy from OS
         if let Some(sys_info) = get_system_proxy() {
             if sys_info.state.http_enabled && sys_info.state.http_port > 0 {
-                format!("http://{}:{}", sys_info.state.http_host, sys_info.state.http_port)
+                format!(
+                    "http://{}:{}",
+                    sys_info.state.http_host, sys_info.state.http_port
+                )
             } else if let Some(p) = scanner::find_first_active_proxy().await {
                 format!("http://127.0.0.1:{}", p.port)
             } else {
@@ -1940,74 +2202,134 @@ pub async fn turn_on(
     }
 
     if set_git {
-        let _ = Command::new("git").args(["config", "--global", "http.proxy", &proxy_url]).status();
-        let _ = Command::new("git").args(["config", "--global", "https.proxy", &proxy_url]).status();
-        eprintln!("{}", format!("✔ Git global proxy set to {}", proxy_url).green());
+        let _ = Command::new("git")
+            .args(["config", "--global", "http.proxy", &proxy_url])
+            .status();
+        let _ = Command::new("git")
+            .args(["config", "--global", "https.proxy", &proxy_url])
+            .status();
+        eprintln!(
+            "{}",
+            format!("✔ Git global proxy set to {}", proxy_url).green()
+        );
     }
 
     if set_cargo {
         match set_cargo_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ Cargo [http] proxy (~/.cargo/config.toml) set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Cargo [http] proxy (~/.cargo/config.toml) set to {}",
+                    proxy_url
+                )
+                .green()
+            ),
             Err(e) => eprintln!("{} Failed to update Cargo config: {}", "▲".yellow(), e),
         }
     }
 
     if set_npm {
-        let _ = Command::new("npm").args(["config", "set", "proxy", &proxy_url]).status();
-        let _ = Command::new("npm").args(["config", "set", "https-proxy", &proxy_url]).status();
+        let _ = Command::new("npm")
+            .args(["config", "set", "proxy", &proxy_url])
+            .status();
+        let _ = Command::new("npm")
+            .args(["config", "set", "https-proxy", &proxy_url])
+            .status();
         eprintln!("{}", format!("✔ NPM proxy set to {}", proxy_url).green());
     }
 
     if set_yarn {
         match set_yarn_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ Yarn proxy (~/.yarnrc / ~/.yarnrc.yml) set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Yarn proxy (~/.yarnrc / ~/.yarnrc.yml) set to {}",
+                    proxy_url
+                )
+                .green()
+            ),
             Err(e) => eprintln!("{} Failed to update Yarn config: {}", "▲".yellow(), e),
         }
     }
 
     if set_pnpm {
         match set_pnpm_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ pnpm proxy (~/.pnpmrc) set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!("✔ pnpm proxy (~/.pnpmrc) set to {}", proxy_url).green()
+            ),
             Err(e) => eprintln!("{} Failed to update pnpm config: {}", "▲".yellow(), e),
         }
     }
 
     if set_bun {
         match set_bun_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ Bun proxy (~/.bunfig.toml) set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!("✔ Bun proxy (~/.bunfig.toml) set to {}", proxy_url).green()
+            ),
             Err(e) => eprintln!("{} Failed to update Bun config: {}", "▲".yellow(), e),
         }
     }
 
     if set_pip {
-        let _ = Command::new("pip").args(["config", "set", "global.proxy", &proxy_url]).status();
-        eprintln!("{}", format!("✔ Pip global proxy set to {}", proxy_url).green());
+        let _ = Command::new("pip")
+            .args(["config", "set", "global.proxy", &proxy_url])
+            .status();
+        eprintln!(
+            "{}",
+            format!("✔ Pip global proxy set to {}", proxy_url).green()
+        );
     }
 
     if set_conda {
         match set_conda_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ Conda proxy (~/.condarc) set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!("✔ Conda proxy (~/.condarc) set to {}", proxy_url).green()
+            ),
             Err(e) => eprintln!("{} Failed to update Conda config: {}", "▲".yellow(), e),
         }
     }
 
     if set_docker {
         match set_docker_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ Docker client proxy (~/.docker/config.json) set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Docker client proxy (~/.docker/config.json) set to {}",
+                    proxy_url
+                )
+                .green()
+            ),
             Err(e) => eprintln!("{} Failed to update Docker config: {}", "▲".yellow(), e),
         }
     }
 
     if set_gradle {
         match set_gradle_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ Gradle global proxy (~/.gradle/gradle.properties) set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Gradle global proxy (~/.gradle/gradle.properties) set to {}",
+                    proxy_url
+                )
+                .green()
+            ),
             Err(e) => eprintln!("{} Failed to update Gradle config: {}", "▲".yellow(), e),
         }
     }
 
     if set_maven {
         match set_maven_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ Maven global proxy (~/.m2/settings.xml) set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Maven global proxy (~/.m2/settings.xml) set to {}",
+                    proxy_url
+                )
+                .green()
+            ),
             Err(e) => eprintln!("{} Failed to update Maven config: {}", "▲".yellow(), e),
         }
     }
@@ -2015,16 +2337,30 @@ pub async fn turn_on(
     if set_vscode {
         match set_vscode_proxy(&proxy_url) {
             Ok(ides) => {
-                let list = if ides.is_empty() { "VS Code".to_string() } else { ides.join(", ") };
-                eprintln!("{}", format!("✔ IDE proxy ({}) set to {}", list, proxy_url).green());
+                let list = if ides.is_empty() {
+                    "VS Code".to_string()
+                } else {
+                    ides.join(", ")
+                };
+                eprintln!(
+                    "{}",
+                    format!("✔ IDE proxy ({}) set to {}", list, proxy_url).green()
+                );
             }
-            Err(e) => eprintln!("{} Failed to update VS Code / Cursor IDE settings: {}", "▲".yellow(), e),
+            Err(e) => eprintln!(
+                "{} Failed to update VS Code / Cursor IDE settings: {}",
+                "▲".yellow(),
+                e
+            ),
         }
     }
 
     if set_gh {
         match set_gh_proxy(&proxy_url) {
-            Ok(_) => eprintln!("{}", format!("✔ GitHub CLI (gh) proxy set to {}", proxy_url).green()),
+            Ok(_) => eprintln!(
+                "{}",
+                format!("✔ GitHub CLI (gh) proxy set to {}", proxy_url).green()
+            ),
             Err(e) => eprintln!("{} Failed to update GitHub CLI config: {}", "▲".yellow(), e),
         }
     }
@@ -2032,57 +2368,128 @@ pub async fn turn_on(
     if set_jetbrains {
         match set_jetbrains_proxy(&proxy_url) {
             Ok(ides) => {
-                let list = if ides.is_empty() { "No JetBrains IDE found".to_string() } else { ides.join(", ") };
-                eprintln!("{}", format!("✔ JetBrains IDE proxy ({}) set to {}", list, proxy_url).green());
+                let list = if ides.is_empty() {
+                    "No JetBrains IDE found".to_string()
+                } else {
+                    ides.join(", ")
+                };
+                eprintln!(
+                    "{}",
+                    format!("✔ JetBrains IDE proxy ({}) set to {}", list, proxy_url).green()
+                );
             }
-            Err(e) => eprintln!("{} Failed to update JetBrains IDE config: {}", "▲".yellow(), e),
+            Err(e) => eprintln!(
+                "{} Failed to update JetBrains IDE config: {}",
+                "▲".yellow(),
+                e
+            ),
         }
     }
 
     if set_nuget {
         match set_nuget_proxy(&proxy_url) {
-            Ok(p) => eprintln!("{}", format!("✔ NuGet (.NET) proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ NuGet (.NET) proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
             Err(e) => eprintln!("{} Failed to update NuGet config: {}", "▲".yellow(), e),
         }
     }
 
     if set_curl {
         match apply_curlrc_proxy(&proxy_url) {
-            Ok(p) => eprintln!("{}", format!("✔ cURL proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ cURL proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
             Err(e) => eprintln!("{} Failed to update ~/.curlrc: {}", "▲".yellow(), e),
         }
     }
 
     if set_wget {
         match apply_wgetrc_proxy(&proxy_url) {
-            Ok(p) => eprintln!("{}", format!("✔ Wget proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Wget proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
             Err(e) => eprintln!("{} Failed to update ~/.wgetrc: {}", "▲".yellow(), e),
         }
     }
 
     if set_gem {
         match set_gem_proxy(&proxy_url) {
-            Ok(p) => eprintln!("{}", format!("✔ Gem (Ruby) proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Gem (Ruby) proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
             Err(e) => eprintln!("{} Failed to update ~/.gemrc: {}", "▲".yellow(), e),
         }
     }
 
     if set_svn {
         match set_svn_proxy(&proxy_url) {
-            Ok(p) => eprintln!("{}", format!("✔ Subversion proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Subversion proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
             Err(e) => eprintln!("{} Failed to update Subversion config: {}", "▲".yellow(), e),
         }
     }
 
     if set_hg {
         match set_hg_proxy(&proxy_url) {
-            Ok(p) => eprintln!("{}", format!("✔ Mercurial (Hg) proxy ({}) set to {}", p.display(), proxy_url).green()),
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Mercurial (Hg) proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
             Err(e) => eprintln!("{} Failed to update Mercurial config: {}", "▲".yellow(), e),
         }
     }
 
-    eprintln!("{}", format!("🟢 Proxy enabled! Target: {}", proxy_url).green().bold());
-    eprintln!("{}", "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed());
+    if set_uv {
+        match set_uv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Astral uv proxy ({}) set to {}", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Astral uv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_go {
+        match set_go_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!("✔ Go GOPROXY ({}) set to {},direct", p.display(), proxy_url).green()
+            ),
+            Err(e) => eprintln!(
+                "{} Failed to update Go environment config: {}",
+                "▲".yellow(),
+                e
+            ),
+        }
+    }
+
+    eprintln!(
+        "{}",
+        format!("🟢 Proxy enabled! Target: {}", proxy_url)
+            .green()
+            .bold()
+    );
+    eprintln!(
+        "{}",
+        "Tip: To apply directly to current terminal, run: eval $(proxydoc on)".dimmed()
+    );
 
     Ok(())
 }
@@ -2108,6 +2515,8 @@ pub fn turn_off(
     gem: bool,
     svn: bool,
     hg: bool,
+    uv: bool,
+    go: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -2129,6 +2538,8 @@ pub fn turn_off(
     let unset_gem = gem || all;
     let unset_svn = svn || all;
     let unset_hg = hg || all;
+    let unset_uv = uv || all;
+    let unset_go = go || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -2138,28 +2549,42 @@ pub fn turn_off(
     }
 
     if unset_git {
-        let _ = Command::new("git").args(["config", "--global", "--unset", "http.proxy"]).status();
-        let _ = Command::new("git").args(["config", "--global", "--unset", "https.proxy"]).status();
+        let _ = Command::new("git")
+            .args(["config", "--global", "--unset", "http.proxy"])
+            .status();
+        let _ = Command::new("git")
+            .args(["config", "--global", "--unset", "https.proxy"])
+            .status();
         eprintln!("{}", "✔ Git global proxy unset".green());
     }
 
     if unset_cargo {
         match unset_cargo_proxy() {
-            Ok(true) => eprintln!("{}", "✔ Cargo proxy unset from ~/.cargo/config.toml".green()),
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ Cargo proxy unset from ~/.cargo/config.toml".green()
+            ),
             Ok(false) => eprintln!("{}", "○ Cargo proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update Cargo config: {}", "▲".yellow(), e),
         }
     }
 
     if unset_npm {
-        let _ = Command::new("npm").args(["config", "delete", "proxy"]).status();
-        let _ = Command::new("npm").args(["config", "delete", "https-proxy"]).status();
+        let _ = Command::new("npm")
+            .args(["config", "delete", "proxy"])
+            .status();
+        let _ = Command::new("npm")
+            .args(["config", "delete", "https-proxy"])
+            .status();
         eprintln!("{}", "✔ NPM proxy unset".green());
     }
 
     if unset_yarn {
         match unset_yarn_proxy() {
-            Ok(true) => eprintln!("{}", "✔ Cleared Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)".green()),
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ Cleared Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)".green()
+            ),
             Ok(false) => eprintln!("{}", "○ Yarn proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to clear Yarn config: {}", "▲".yellow(), e),
         }
@@ -2182,7 +2607,9 @@ pub fn turn_off(
     }
 
     if unset_pip {
-        let _ = Command::new("pip").args(["config", "unset", "global.proxy"]).status();
+        let _ = Command::new("pip")
+            .args(["config", "unset", "global.proxy"])
+            .status();
         eprintln!("{}", "✔ Pip global proxy unset".green());
     }
 
@@ -2196,7 +2623,10 @@ pub fn turn_off(
 
     if unset_docker {
         match unset_docker_proxy() {
-            Ok(true) => eprintln!("{}", "✔ Docker client proxy unset from ~/.docker/config.json".green()),
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ Docker client proxy unset from ~/.docker/config.json".green()
+            ),
             Ok(false) => eprintln!("{}", "○ Docker client proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update Docker config: {}", "▲".yellow(), e),
         }
@@ -2204,7 +2634,10 @@ pub fn turn_off(
 
     if unset_gradle {
         match unset_gradle_proxy() {
-            Ok(true) => eprintln!("{}", "✔ Gradle global proxy unset from ~/.gradle/gradle.properties".green()),
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ Gradle global proxy unset from ~/.gradle/gradle.properties".green()
+            ),
             Ok(false) => eprintln!("{}", "○ Gradle global proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update Gradle config: {}", "▲".yellow(), e),
         }
@@ -2212,7 +2645,10 @@ pub fn turn_off(
 
     if unset_maven {
         match unset_maven_proxy() {
-            Ok(true) => eprintln!("{}", "✔ Maven global proxy unset from ~/.m2/settings.xml".green()),
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ Maven global proxy unset from ~/.m2/settings.xml".green()
+            ),
             Ok(false) => eprintln!("{}", "○ Maven global proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to update Maven config: {}", "▲".yellow(), e),
         }
@@ -2220,9 +2656,16 @@ pub fn turn_off(
 
     if unset_vscode {
         match unset_vscode_proxy() {
-            Ok(ides) if !ides.is_empty() => eprintln!("{}", format!("✔ IDE proxy unset from {}", ides.join(", ")).green()),
+            Ok(ides) if !ides.is_empty() => eprintln!(
+                "{}",
+                format!("✔ IDE proxy unset from {}", ides.join(", ")).green()
+            ),
             Ok(_) => eprintln!("{}", "○ IDE proxy was not set".dimmed()),
-            Err(e) => eprintln!("{} Failed to update VS Code / Cursor settings: {}", "▲".yellow(), e),
+            Err(e) => eprintln!(
+                "{} Failed to update VS Code / Cursor settings: {}",
+                "▲".yellow(),
+                e
+            ),
         }
     }
 
@@ -2236,15 +2679,25 @@ pub fn turn_off(
 
     if unset_jetbrains {
         match unset_jetbrains_proxy() {
-            Ok(ides) if !ides.is_empty() => eprintln!("{}", format!("✔ JetBrains IDE proxy deactivated in {}", ides.join(", ")).green()),
+            Ok(ides) if !ides.is_empty() => eprintln!(
+                "{}",
+                format!("✔ JetBrains IDE proxy deactivated in {}", ides.join(", ")).green()
+            ),
             Ok(_) => eprintln!("{}", "○ JetBrains IDE proxy was not set".dimmed()),
-            Err(e) => eprintln!("{} Failed to deactivate JetBrains IDE proxy: {}", "▲".yellow(), e),
+            Err(e) => eprintln!(
+                "{} Failed to deactivate JetBrains IDE proxy: {}",
+                "▲".yellow(),
+                e
+            ),
         }
     }
 
     if unset_nuget {
         match unset_nuget_proxy() {
-            Ok(true) => eprintln!("{}", "✔ NuGet global proxy removed from NuGet.Config".green()),
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ NuGet global proxy removed from NuGet.Config".green()
+            ),
             Ok(false) => eprintln!("{}", "○ NuGet global proxy was not configured".dimmed()),
             Err(e) => eprintln!("{} Failed to unset NuGet proxy: {}", "▲".yellow(), e),
         }
@@ -2276,8 +2729,14 @@ pub fn turn_off(
 
     if unset_svn {
         match unset_svn_proxy() {
-            Ok(true) => eprintln!("{}", "✔ Subversion proxy removed from servers config".green()),
-            Ok(false) => eprintln!("{}", "○ Subversion proxy was not set in servers config".dimmed()),
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ Subversion proxy removed from servers config".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ Subversion proxy was not set in servers config".dimmed()
+            ),
             Err(e) => eprintln!("{} Failed to unset Subversion proxy: {}", "▲".yellow(), e),
         }
     }
@@ -2285,12 +2744,34 @@ pub fn turn_off(
     if unset_hg {
         match unset_hg_proxy() {
             Ok(true) => eprintln!("{}", "✔ Mercurial (Hg) proxy removed from ~/.hgrc".green()),
-            Ok(false) => eprintln!("{}", "○ Mercurial (Hg) proxy was not set in ~/.hgrc".dimmed()),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ Mercurial (Hg) proxy was not set in ~/.hgrc".dimmed()
+            ),
             Err(e) => eprintln!("{} Failed to unset Mercurial proxy: {}", "▲".yellow(), e),
         }
     }
 
-    eprintln!("{}", "🔴 Proxy disabled across terminal session!".yellow().bold());
+    if unset_uv {
+        match unset_uv_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Astral uv proxy unset from uv.toml".green()),
+            Ok(false) => eprintln!("{}", "○ Astral uv proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update Astral uv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_go {
+        match unset_go_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Go GOPROXY unset / reset to default".green()),
+            Ok(false) => eprintln!("{}", "○ Go GOPROXY was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to update Go config: {}", "▲".yellow(), e),
+        }
+    }
+
+    eprintln!(
+        "{}",
+        "🔴 Proxy disabled across terminal session!".yellow().bold()
+    );
 
     Ok(())
 }
@@ -2299,7 +2780,8 @@ pub fn print_init_script(shell: Option<&str>) {
     let target_shell = detect_shell(shell);
     match target_shell {
         ShellType::Fish => {
-            println!(r#"# proxydoc shell integration for fish
+            println!(
+                r#"# proxydoc shell integration for fish
 function pon
     set -l target $argv[1]
     test -z "$target"; and set target "auto"
@@ -2314,10 +2796,12 @@ alias pdoc="proxydoc doctor"
 alias pfix="proxydoc fix"
 alias ptest="proxydoc test"
 alias pcomp="proxydoc test --compare"
-"#);
+"#
+            );
         }
         ShellType::PowerShell => {
-            println!(r#"# proxydoc shell integration for PowerShell
+            println!(
+                r#"# proxydoc shell integration for PowerShell
 function Set-ProxyDocOn {{
     param([string]$target = "auto")
     Invoke-Expression (& proxydoc on $target --shell pwsh | Out-String)
@@ -2333,10 +2817,12 @@ Set-Alias pdoc "proxydoc doctor"
 Set-Alias pfix "proxydoc fix"
 Set-Alias ptest "proxydoc test"
 Set-Alias pcomp "proxydoc test --compare"
-"#);
+"#
+            );
         }
         ShellType::Bash => {
-            println!(r#"# proxydoc shell integration for bash/zsh
+            println!(
+                r#"# proxydoc shell integration for bash/zsh
 proxydoc-on() {{
     local target="${{1:-auto}}"
     eval "$(proxydoc on "$target")"
@@ -2352,7 +2838,8 @@ alias pdoc="proxydoc doctor"
 alias pfix="proxydoc fix"
 alias ptest="proxydoc test"
 alias pcomp="proxydoc test --compare"
-"#);
+"#
+            );
         }
     }
 }
@@ -2374,14 +2861,18 @@ mod tests {
     fn test_generate_shell_export_bash() {
         let lines = generate_shell_export("http://127.0.0.1:7890", ShellType::Bash);
         assert!(lines.contains(&"export http_proxy=\"http://127.0.0.1:7890\"".to_string()));
-        assert!(lines.contains(&"export no_proxy=\"localhost,127.0.0.1,::1,localaddress,.local\"".to_string()));
+        assert!(lines.contains(
+            &"export no_proxy=\"localhost,127.0.0.1,::1,localaddress,.local\"".to_string()
+        ));
     }
 
     #[test]
     fn test_generate_shell_export_fish() {
         let lines = generate_shell_export("http://127.0.0.1:7890", ShellType::Fish);
         assert!(lines.contains(&"set -gx http_proxy \"http://127.0.0.1:7890\";".to_string()));
-        assert!(lines.contains(&"set -gx no_proxy \"localhost,127.0.0.1,::1,localaddress,.local\";".to_string()));
+        assert!(lines.contains(
+            &"set -gx no_proxy \"localhost,127.0.0.1,::1,localaddress,.local\";".to_string()
+        ));
     }
 
     #[test]
@@ -2412,7 +2903,10 @@ mod tests {
 
         apply_docker_proxy_json(&mut root, "http://127.0.0.1:7890");
         assert_eq!(
-            root.pointer("/proxies/default/httpProxy").unwrap().as_str().unwrap(),
+            root.pointer("/proxies/default/httpProxy")
+                .unwrap()
+                .as_str()
+                .unwrap(),
             "http://127.0.0.1:7890"
         );
         // Preserved original keys
@@ -2426,8 +2920,14 @@ mod tests {
 
     #[test]
     fn test_extract_host_port() {
-        assert_eq!(extract_host_port("http://127.0.0.1:7890"), ("127.0.0.1".to_string(), 7890));
-        assert_eq!(extract_host_port("127.0.0.1:1082"), ("127.0.0.1".to_string(), 1082));
+        assert_eq!(
+            extract_host_port("http://127.0.0.1:7890"),
+            ("127.0.0.1".to_string(), 7890)
+        );
+        assert_eq!(
+            extract_host_port("127.0.0.1:1082"),
+            ("127.0.0.1".to_string(), 1082)
+        );
         assert_eq!(extract_host_port("7897"), ("127.0.0.1".to_string(), 7890));
     }
 
@@ -2776,5 +3276,43 @@ mod tests {
         assert!(!cleaned.contains("host = "));
         assert!(cleaned.contains("[ui]"));
         assert!(cleaned.contains("username = Bob"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_uv_proxy_toml() {
+        let initial = "[tool.uv]\ncache-dir = \"~/.cache/uv\"\n";
+        let configured = apply_uv_proxy_toml(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("http-proxy = \"http://127.0.0.1:7890\""));
+        assert!(configured.contains("[tool.uv]"));
+
+        // Replace existing
+        let updated = apply_uv_proxy_toml(&configured, "http://127.0.0.1:1080");
+        assert!(updated.contains("http-proxy = \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_uv_proxy_toml(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("http-proxy"));
+        assert!(cleaned.contains("[tool.uv]"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_go_env_content() {
+        let initial = "GOPRIVATE=*.corp.example.com\n";
+        let configured = apply_go_env_content(initial, "http://127.0.0.1:7890");
+        assert!(configured.contains("GOPROXY=http://127.0.0.1:7890,direct"));
+        assert!(configured.contains("GOPRIVATE="));
+
+        // Replace existing
+        let updated = apply_go_env_content(&configured, "http://127.0.0.1:1080");
+        assert!(updated.contains("GOPROXY=http://127.0.0.1:1080,direct"));
+        assert!(!updated.contains("7890"));
+
+        // Remove
+        let (cleaned, changed) = remove_go_env_content(&updated);
+        assert!(changed);
+        assert!(!cleaned.contains("GOPROXY"));
+        assert!(cleaned.contains("GOPRIVATE"));
     }
 }

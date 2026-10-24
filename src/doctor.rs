@@ -21,7 +21,12 @@ pub struct DiagItem {
 }
 
 impl DiagItem {
-    pub fn new(category: &str, target: impl Into<String>, value: impl Into<String>, status: impl Into<String>) -> Self {
+    pub fn new(
+        category: &str,
+        target: impl Into<String>,
+        value: impl Into<String>,
+        status: impl Into<String>,
+    ) -> Self {
         Self {
             category: category.to_string(),
             target: target.into(),
@@ -84,13 +89,19 @@ pub fn parse_scutil_proxy(s: &str) -> Option<SystemProxyState> {
     let socks_enabled = extract_bool("SOCKSEnable");
 
     let http_host = extract_field("HTTPProxy").unwrap_or_else(|| "127.0.0.1".to_string());
-    let http_port = extract_field("HTTPPort").and_then(|p| p.parse().ok()).unwrap_or(0);
+    let http_port = extract_field("HTTPPort")
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0);
 
     let https_host = extract_field("HTTPSProxy").unwrap_or_else(|| "127.0.0.1".to_string());
-    let https_port = extract_field("HTTPSPort").and_then(|p| p.parse().ok()).unwrap_or(0);
+    let https_port = extract_field("HTTPSPort")
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0);
 
     let socks_host = extract_field("SOCKSProxy").unwrap_or_else(|| "127.0.0.1".to_string());
-    let socks_port = extract_field("SOCKSPort").and_then(|p| p.parse().ok()).unwrap_or(0);
+    let socks_port = extract_field("SOCKSPort")
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0);
 
     Some(SystemProxyState {
         http_enabled,
@@ -163,7 +174,11 @@ pub fn parse_windows_reg_proxy(enable_out: &str, server_out: &str) -> Option<Sys
             .trim_start_matches("socks://")
             .trim_start_matches("socks5://");
         if let Some((h, p)) = clean.rsplit_once(':') {
-            let host = if h.is_empty() || h == "localhost" { "127.0.0.1".to_string() } else { h.to_string() };
+            let host = if h.is_empty() || h == "localhost" {
+                "127.0.0.1".to_string()
+            } else {
+                h.to_string()
+            };
             let port = p.parse().unwrap_or(0);
             (host, port)
         } else {
@@ -239,13 +254,25 @@ pub fn parse_gnome_proxy(
 
     Some(SystemProxyState {
         http_enabled: is_manual && h_port > 0,
-        http_host: if h_host.is_empty() { "127.0.0.1".to_string() } else { h_host },
+        http_host: if h_host.is_empty() {
+            "127.0.0.1".to_string()
+        } else {
+            h_host
+        },
         http_port: h_port,
         https_enabled: is_manual && hs_port > 0,
-        https_host: if hs_host.is_empty() { "127.0.0.1".to_string() } else { hs_host },
+        https_host: if hs_host.is_empty() {
+            "127.0.0.1".to_string()
+        } else {
+            hs_host
+        },
         https_port: hs_port,
         socks_enabled: is_manual && s_port > 0,
-        socks_host: if s_host.is_empty() { "127.0.0.1".to_string() } else { s_host },
+        socks_host: if s_host.is_empty() {
+            "127.0.0.1".to_string()
+        } else {
+            s_host
+        },
         socks_port: s_port,
     })
 }
@@ -294,7 +321,9 @@ pub fn get_linux_system_proxy() -> Option<SystemProxyState> {
             let s_host = run_gsettings("org.gnome.system.proxy.socks", "host");
             let s_port = run_gsettings("org.gnome.system.proxy.socks", "port");
 
-            return parse_gnome_proxy(&mode, &h_host, &h_port, &hs_host, &hs_port, &s_host, &s_port);
+            return parse_gnome_proxy(
+                &mode, &h_host, &h_port, &hs_host, &hs_port, &s_host, &s_port,
+            );
         }
     }
     #[allow(unreachable_code)]
@@ -487,7 +516,10 @@ pub fn get_pip_proxy() -> Option<String> {
             return Some(val.trim().to_string());
         }
     }
-    if let Ok(out) = Command::new("pip").args(["config", "get", "global.proxy"]).output() {
+    if let Ok(out) = Command::new("pip")
+        .args(["config", "get", "global.proxy"])
+        .output()
+    {
         if out.status.success() {
             let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !val.is_empty() && val != "null" && val != "undefined" {
@@ -518,13 +550,19 @@ pub fn check_socks5_dns_leak(val: &str) -> bool {
 
 pub fn parse_docker_config_proxy(content: &str) -> Option<String> {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
-        if let Some(http) = v.pointer("/proxies/default/httpProxy").and_then(|s| s.as_str()) {
+        if let Some(http) = v
+            .pointer("/proxies/default/httpProxy")
+            .and_then(|s| s.as_str())
+        {
             let trim = http.trim();
             if !trim.is_empty() {
                 return Some(trim.to_string());
             }
         }
-        if let Some(https) = v.pointer("/proxies/default/httpsProxy").and_then(|s| s.as_str()) {
+        if let Some(https) = v
+            .pointer("/proxies/default/httpsProxy")
+            .and_then(|s| s.as_str())
+        {
             let trim = https.trim();
             if !trim.is_empty() {
                 return Some(trim.to_string());
@@ -717,11 +755,54 @@ pub fn parse_goproxy(val: &str) -> Vec<String> {
         .collect()
 }
 
+pub fn parse_go_env_content(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            if k.trim() == "GOPROXY" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_go_env_path() -> PathBuf {
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("go").join("env");
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".config").join("go").join("env");
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        return config_dir.join("go").join("env");
+    }
+    PathBuf::from("go/env")
+}
+
 pub fn get_goproxy() -> Option<String> {
     if let Ok(val) = std::env::var("GOPROXY") {
         let trim = val.trim();
         if !trim.is_empty() {
             return Some(trim.to_string());
+        }
+    }
+    let go_env_path = get_go_env_path();
+    if let Ok(content) = std::fs::read_to_string(&go_env_path) {
+        if let Some(val) = parse_go_env_content(&content) {
+            return Some(val);
         }
     }
     if let Ok(out) = Command::new("go").args(["env", "GOPROXY"]).output() {
@@ -743,7 +824,9 @@ pub fn parse_wgetrc_proxy(content: &str) -> Option<String> {
         if let Some((k, v)) = trim.split_once('=') {
             let key = k.trim();
             let val = v.trim().trim_matches('"').trim_matches('\'').trim();
-            if (key.eq_ignore_ascii_case("http_proxy") || key.eq_ignore_ascii_case("https_proxy")) && !val.is_empty() {
+            if (key.eq_ignore_ascii_case("http_proxy") || key.eq_ignore_ascii_case("https_proxy"))
+                && !val.is_empty()
+            {
                 return Some(val.to_string());
             }
         }
@@ -880,7 +963,11 @@ pub fn parse_yarnrc_registry(content: &str) -> Option<String> {
             continue;
         }
         if trim.starts_with("registry ") {
-            let val = trim["registry ".len()..].trim().trim_matches('"').trim_matches('\'').trim();
+            let val = trim["registry ".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .trim();
             if !val.is_empty() {
                 return Some(val.to_string());
             }
@@ -1162,7 +1249,10 @@ pub fn parse_pnpmrc_proxy(content: &str, key: &str) -> Option<String> {
 }
 
 pub fn get_pnpm_proxy() -> Option<String> {
-    if let Ok(out) = Command::new("pnpm").args(["config", "get", "proxy"]).output() {
+    if let Ok(out) = Command::new("pnpm")
+        .args(["config", "get", "proxy"])
+        .output()
+    {
         if out.status.success() {
             let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !val.is_empty() && val != "null" && val != "undefined" {
@@ -1170,7 +1260,10 @@ pub fn get_pnpm_proxy() -> Option<String> {
             }
         }
     }
-    if let Ok(out) = Command::new("pnpm").args(["config", "get", "https-proxy"]).output() {
+    if let Ok(out) = Command::new("pnpm")
+        .args(["config", "get", "https-proxy"])
+        .output()
+    {
         if out.status.success() {
             let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !val.is_empty() && val != "null" && val != "undefined" {
@@ -1212,7 +1305,10 @@ pub fn parse_cargo_registry_replacements(content: &str) -> Vec<CargoRegistryRepl
             continue;
         }
         if trim.starts_with('[') && trim.ends_with(']') {
-            current_section = trim.trim_matches(|c| c == '[' || c == ']').trim().to_string();
+            current_section = trim
+                .trim_matches(|c| c == '[' || c == ']')
+                .trim()
+                .to_string();
             continue;
         }
         if let Some((k, v)) = trim.split_once('=') {
@@ -1368,7 +1464,11 @@ pub const KNOWN_IDES: &[(&str, &str)] = &[
     ("VSCodium", "VSCodium"),
 ];
 
-pub fn parse_ide_settings(ide_name: &str, path: &std::path::Path, content: &str) -> Option<IdeProxyConfig> {
+pub fn parse_ide_settings(
+    ide_name: &str,
+    path: &std::path::Path,
+    content: &str,
+) -> Option<IdeProxyConfig> {
     let cleaned = clean_jsonc(content);
     let val: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
     let obj = val.as_object()?;
@@ -1551,10 +1651,16 @@ pub fn get_jetbrains_proxies() -> Vec<JetBrainsProxyConfig> {
                 let p = entry.path();
                 if p.is_dir() {
                     let settings_file = p.join("options").join("proxy.settings.xml");
-                    if settings_file.exists() && !results.iter().any(|r: &JetBrainsProxyConfig| r.path == settings_file) {
+                    if settings_file.exists()
+                        && !results
+                            .iter()
+                            .any(|r: &JetBrainsProxyConfig| r.path == settings_file)
+                    {
                         if let Ok(content) = std::fs::read_to_string(&settings_file) {
                             let ide_name = entry.file_name().to_string_lossy().to_string();
-                            if let Some(cfg) = parse_jetbrains_proxy_xml(&ide_name, &settings_file, &content) {
+                            if let Some(cfg) =
+                                parse_jetbrains_proxy_xml(&ide_name, &settings_file, &content)
+                            {
                                 results.push(cfg);
                             }
                         }
@@ -1894,7 +2000,10 @@ pub fn parse_hgrc_proxy(content: &str) -> Option<String> {
                 let key = k.trim().to_ascii_lowercase();
                 let val = v.trim().trim_matches('"').trim_matches('\'').trim();
                 if key == "host" && !val.is_empty() {
-                    if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks5://") {
+                    if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks5://")
+                    {
                         return Some(val.to_string());
                     } else {
                         return Some(format!("http://{}", val));
@@ -1928,10 +2037,148 @@ pub fn get_hg_proxy() -> Option<String> {
     None
 }
 
+pub fn parse_uv_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http-proxy" || key == "http_proxy" || key == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_uv_config_path() -> PathBuf {
+    if let Some(home) = dirs::home_dir() {
+        let xdg_p = home.join(".config").join("uv").join("uv.toml");
+        if xdg_p.exists() {
+            return xdg_p;
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("uv").join("uv.toml");
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dot_uv = home.join(".uv").join("uv.toml");
+        if dot_uv.exists() {
+            return dot_uv;
+        }
+        return home.join(".config").join("uv").join("uv.toml");
+    }
+    PathBuf::from("uv.toml")
+}
+
+pub fn get_uv_proxy() -> Option<String> {
+    let path = get_uv_config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Some(p) = parse_uv_proxy(&content) {
+            return Some(p);
+        }
+    }
+    if let Ok(content) = std::fs::read_to_string("uv.toml") {
+        if let Some(p) = parse_uv_proxy(&content) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn parse_composer_packagist_repo(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(url) = val
+            .get("repositories")
+            .and_then(|r| r.get("packagist"))
+            .and_then(|p| p.get("url"))
+            .and_then(|u| u.as_str())
+        {
+            let trim = url.trim();
+            if !trim.is_empty() {
+                return Some(trim.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn get_composer_config_path() -> Option<PathBuf> {
+    if let Some(home) = dirs::home_dir() {
+        let p1 = home.join(".composer").join("config.json");
+        if p1.exists() {
+            return Some(p1);
+        }
+        let p2 = home.join(".config").join("composer").join("config.json");
+        if p2.exists() {
+            return Some(p2);
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p3 = config_dir.join("composer").join("config.json");
+        if p3.exists() {
+            return Some(p3);
+        }
+    }
+    None
+}
+
+pub fn parse_bazelrc_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some(pos) = trim.find("--action_env=") {
+            let part = &trim[pos + "--action_env=".len()..];
+            if let Some((k, v)) = part.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_bazelrc_path() -> Option<PathBuf> {
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".bazelrc");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let local = PathBuf::from(".bazelrc");
+    if local.exists() {
+        return Some(local);
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
-        println!("\n{}", "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺".bold().cyan());
-        println!("{}", "   Running comprehensive root-cause network & environment diagnostics...\n".dimmed());
+        println!(
+            "\n{}",
+            "🩺 ==================== DEEP PROXY DOCTOR ==================== 🩺"
+                .bold()
+                .cyan()
+        );
+        println!(
+            "{}",
+            "   Running comprehensive root-cause network & environment diagnostics...\n".dimmed()
+        );
     }
 
     let mut items = Vec::new();
@@ -1950,13 +2197,21 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 if active {
                     "● ACTIVE in OS (Port Open)".green().to_string()
                 } else {
-                    root_issues.push(format!("System proxy is pointing to dead port {}", sys.http_port));
-                    "▲ OS Proxy enabled, but port is DEAD!".red().bold().to_string()
+                    root_issues.push(format!(
+                        "System proxy is pointing to dead port {}",
+                        sys.http_port
+                    ));
+                    "▲ OS Proxy enabled, but port is DEAD!"
+                        .red()
+                        .bold()
+                        .to_string()
                 },
             ));
 
             // Check if terminal inherited this
-            let term_set = std::env::var("http_proxy").or_else(|_| std::env::var("HTTP_PROXY")).is_ok();
+            let term_set = std::env::var("http_proxy")
+                .or_else(|_| std::env::var("HTTP_PROXY"))
+                .is_ok();
             if !term_set {
                 root_issues.push(format!(
                     "{} is active ({}:{}), but your Terminal is DIRECT! Run `proxydoc fix` to sync.",
@@ -1966,7 +2221,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "Sync Conflict",
                     "Terminal vs OS",
                     "OS=ON | Terminal=OFF".yellow().to_string(),
-                    "▲ Out of sync! (Browser works, Terminal hangs)".yellow().bold().to_string(),
+                    "▲ Out of sync! (Browser works, Terminal hangs)"
+                        .yellow()
+                        .bold()
+                        .to_string(),
                 ));
             }
         } else {
@@ -1980,7 +2238,14 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     }
 
     // 2. Terminal Shell Env Vars
-    let env_vars = ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"];
+    let env_vars = [
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ];
     let mut shell_proxy_set = false;
     for var in env_vars {
         if let Ok(val) = std::env::var(var) {
@@ -1989,7 +2254,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             let dns_leak = check_socks5_dns_leak(&val);
 
             if !healthy {
-                root_issues.push(format!("Terminal env `{}` points to an unreachable port `{}`", var, val));
+                root_issues.push(format!(
+                    "Terminal env `{}` points to an unreachable port `{}`",
+                    var, val
+                ));
             } else if dns_leak {
                 root_issues.push(format!(
                     "Terminal env `{}` uses socks5:// instead of socks5h://! DNS queries will resolve locally and may leak or be poisoned.",
@@ -1998,19 +2266,19 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             }
 
             let status = if !healthy {
-                "▲ DEAD PROXY PORT (Causes curl error 7)".red().bold().to_string()
+                "▲ DEAD PROXY PORT (Causes curl error 7)"
+                    .red()
+                    .bold()
+                    .to_string()
             } else if dns_leak {
-                "▲ Reachable, but socks5:// leaks local DNS (use socks5h://)".yellow().to_string()
+                "▲ Reachable, but socks5:// leaks local DNS (use socks5h://)"
+                    .yellow()
+                    .to_string()
             } else {
                 "● Reachable Port".green().to_string()
             };
 
-            items.push(DiagItem::new(
-                "Shell Env",
-                var,
-                val.clone(),
-                status,
-            ));
+            items.push(DiagItem::new("Shell Env", var, val.clone(), status));
         }
     }
 
@@ -2023,10 +2291,13 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     } else {
         // Inspect no_proxy / NO_PROXY to guarantee localhost / 127.0.0.1 bypass
-        let no_proxy = std::env::var("no_proxy").or_else(|_| std::env::var("NO_PROXY")).ok();
+        let no_proxy = std::env::var("no_proxy")
+            .or_else(|_| std::env::var("NO_PROXY"))
+            .ok();
         match no_proxy {
             Some(ref val) => {
-                let has_localhost = val.contains("localhost") && (val.contains("127.0.0.1") || val.contains("::1"));
+                let has_localhost =
+                    val.contains("localhost") && (val.contains("127.0.0.1") || val.contains("::1"));
                 if !has_localhost {
                     root_issues.push(format!(
                         "NO_PROXY is set (`{}`) but misses `localhost` or `127.0.0.1` (local dev servers like Vite/Docker will route to proxy and fail)",
@@ -2053,7 +2324,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "Shell Env",
                     "no_proxy / NO_PROXY",
                     "(not set)".yellow().to_string(),
-                    "▲ Missing (Local servers might hang)".yellow().bold().to_string(),
+                    "▲ Missing (Local servers might hang)"
+                        .yellow()
+                        .bold()
+                        .to_string(),
                 ));
             }
         }
@@ -2066,7 +2340,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("all_proxy", "ALL_PROXY"),
     ];
     for (lower_var, upper_var) in case_pairs {
-        if let (Ok(lower_val), Ok(upper_val)) = (std::env::var(lower_var), std::env::var(upper_var)) {
+        if let (Ok(lower_val), Ok(upper_val)) = (std::env::var(lower_var), std::env::var(upper_var))
+        {
             if check_case_mismatch(&lower_val, &upper_val) {
                 root_issues.push(format!(
                     "Proxy environment casing conflict! `{}` (`{}`) != `{}` (`{}`). Tools like cURL, Go, and Python will behave inconsistently.",
@@ -2076,7 +2351,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "Env Conflict",
                     format!("{} vs {}", lower_var, upper_var),
                     format!("{} != {}", lower_val, upper_val),
-                    "▲ Inconsistent Values! (Dev tools disagree)".yellow().bold().to_string(),
+                    "▲ Inconsistent Values! (Dev tools disagree)"
+                        .yellow()
+                        .bold()
+                        .to_string(),
                 ));
             }
         }
@@ -2084,7 +2362,9 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
 
     // WSL2 Environment Check
     if let Some(host_ip) = detect_wsl2() {
-        let term_proxy = std::env::var("http_proxy").or_else(|_| std::env::var("all_proxy")).unwrap_or_default();
+        let term_proxy = std::env::var("http_proxy")
+            .or_else(|_| std::env::var("all_proxy"))
+            .unwrap_or_default();
         if term_proxy.contains("127.0.0.1") || term_proxy.contains("localhost") {
             root_issues.push(format!(
                 "WSL2 detected! `127.0.0.1` routes inside Linux VM. Use Windows host IP `{}` or mirrored networking mode.",
@@ -2094,7 +2374,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 "WSL2 Host",
                 "WSL2 Windows Gateway",
                 host_ip,
-                "▲ 127.0.0.1 routes inside VM (use Host IP)".yellow().bold().to_string(),
+                "▲ 127.0.0.1 routes inside VM (use Host IP)"
+                    .yellow()
+                    .bold()
+                    .to_string(),
             ));
         } else {
             items.push(DiagItem::new(
@@ -2120,25 +2403,42 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         if let Some(val) = git_http {
             let ok = verify_proxy_url(&val).await;
             if !ok {
-                root_issues.push(format!("git config --global http.proxy is pointing to dead port `{}`", val));
+                root_issues.push(format!(
+                    "git config --global http.proxy is pointing to dead port `{}`",
+                    val
+                ));
             }
             items.push(DiagItem::new(
                 "Git",
                 "http.proxy",
                 val,
-                if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (Git clone will fail)".red().bold().to_string() },
+                if ok {
+                    "● Reachable".green().to_string()
+                } else {
+                    "▲ DEAD PORT! (Git clone will fail)"
+                        .red()
+                        .bold()
+                        .to_string()
+                },
             ));
         }
         if let Some(val) = git_https {
             let ok = verify_proxy_url(&val).await;
             if !ok {
-                root_issues.push(format!("git config --global https.proxy is pointing to dead port `{}`", val));
+                root_issues.push(format!(
+                    "git config --global https.proxy is pointing to dead port `{}`",
+                    val
+                ));
             }
             items.push(DiagItem::new(
                 "Git",
                 "https.proxy",
                 val,
-                if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT!".red().bold().to_string() },
+                if ok {
+                    "● Reachable".green().to_string()
+                } else {
+                    "▲ DEAD PORT!".red().bold().to_string()
+                },
             ));
         }
     }
@@ -2151,7 +2451,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 "Git SSL",
                 "http.sslVerify",
                 "false".yellow().to_string(),
-                "▲ DISABLED! (Security risk / MITM vulnerable)".yellow().bold().to_string(),
+                "▲ DISABLED! (Security risk / MITM vulnerable)"
+                    .yellow()
+                    .bold()
+                    .to_string(),
             ));
         } else {
             items.push(DiagItem::new(
@@ -2181,7 +2484,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 "Git SSL",
                 "http.sslCAInfo",
                 val,
-                "▲ MISSING FILE! (Git network operations will fail)".red().bold().to_string(),
+                "▲ MISSING FILE! (Git network operations will fail)"
+                    .red()
+                    .bold()
+                    .to_string(),
             ));
         }
     }
@@ -2271,7 +2577,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             if ok {
                 "● Reachable".green().to_string()
             } else {
-                "▲ DEAD PORT! (gh repo/pr & Copilot fail)".red().bold().to_string()
+                "▲ DEAD PORT! (gh repo/pr & Copilot fail)"
+                    .red()
+                    .bold()
+                    .to_string()
             },
         ));
     } else {
@@ -2297,25 +2606,42 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         if let Some(val) = npm_http {
             let ok = verify_proxy_url(&val).await;
             if !ok {
-                root_issues.push(format!("npm config proxy points to dead port `{}` (npm install will fail)", val));
+                root_issues.push(format!(
+                    "npm config proxy points to dead port `{}` (npm install will fail)",
+                    val
+                ));
             }
             items.push(DiagItem::new(
                 "NPM",
                 "proxy",
                 val,
-                if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (npm install will fail)".red().bold().to_string() },
+                if ok {
+                    "● Reachable".green().to_string()
+                } else {
+                    "▲ DEAD PORT! (npm install will fail)"
+                        .red()
+                        .bold()
+                        .to_string()
+                },
             ));
         }
         if let Some(val) = npm_https {
             let ok = verify_proxy_url(&val).await;
             if !ok {
-                root_issues.push(format!("npm config https-proxy points to dead port `{}`", val));
+                root_issues.push(format!(
+                    "npm config https-proxy points to dead port `{}`",
+                    val
+                ));
             }
             items.push(DiagItem::new(
                 "NPM",
                 "https-proxy",
                 val,
-                if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT!".red().bold().to_string() },
+                if ok {
+                    "● Reachable".green().to_string()
+                } else {
+                    "▲ DEAD PORT!".red().bold().to_string()
+                },
             ));
         }
     }
@@ -2352,13 +2678,20 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if let Some(val) = get_pnpm_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
-            root_issues.push(format!("pnpm proxy points to dead port `{}` (pnpm install will fail)", val));
+            root_issues.push(format!(
+                "pnpm proxy points to dead port `{}` (pnpm install will fail)",
+                val
+            ));
         }
         items.push(DiagItem::new(
             "pnpm",
             "~/.pnpmrc proxy",
             val,
-            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (pnpm install fails)".red().bold().to_string() },
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (pnpm install fails)".red().bold().to_string()
+            },
         ));
     } else {
         items.push(DiagItem::new(
@@ -2373,13 +2706,20 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if let Some(val) = get_bun_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
-            root_issues.push(format!("Bun proxy in ~/.bunfig.toml points to dead port `{}` (bun install will fail)", val));
+            root_issues.push(format!(
+                "Bun proxy in ~/.bunfig.toml points to dead port `{}` (bun install will fail)",
+                val
+            ));
         }
         items.push(DiagItem::new(
             "Bun",
             "~/.bunfig.toml [install] proxy",
             val,
-            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (bun install fails)".red().bold().to_string() },
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (bun install fails)".red().bold().to_string()
+            },
         ));
     } else {
         items.push(DiagItem::new(
@@ -2403,7 +2743,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 "Node Registry",
                 &reg.source,
                 reg.url,
-                "▲ DEPRECATED & OFFLINE! (SSL/fetch fails)".red().bold().to_string(),
+                "▲ DEPRECATED & OFFLINE! (SSL/fetch fails)"
+                    .red()
+                    .bold()
+                    .to_string(),
             ));
         } else {
             let ok = verify_proxy_url(&reg.url).await;
@@ -2430,13 +2773,20 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if let Some(val) = get_cargo_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
-            root_issues.push(format!("Cargo [http] proxy points to dead port `{}` (cargo fetch will fail)", val));
+            root_issues.push(format!(
+                "Cargo [http] proxy points to dead port `{}` (cargo fetch will fail)",
+                val
+            ));
         }
         items.push(DiagItem::new(
             "Cargo",
             "cargo config [http] proxy",
             val,
-            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (cargo will fail)".red().bold().to_string() },
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (cargo will fail)".red().bold().to_string()
+            },
         ));
     } else {
         items.push(DiagItem::new(
@@ -2464,7 +2814,11 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "Cargo Mirror",
                     format!("{} replace-with {}", cm.source, cm.replace_with),
                     reg.clone(),
-                    if ok { "● Reachable Registry Mirror".green().to_string() } else { "▲ DEAD CRATES.IO MIRROR!".red().bold().to_string() },
+                    if ok {
+                        "● Reachable Registry Mirror".green().to_string()
+                    } else {
+                        "▲ DEAD CRATES.IO MIRROR!".red().bold().to_string()
+                    },
                 ));
             } else {
                 items.push(DiagItem::new(
@@ -2511,13 +2865,23 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if let Some(val) = get_pip_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
-            root_issues.push(format!("Pip proxy points to dead port `{}` (pip install will fail)", val));
+            root_issues.push(format!(
+                "Pip proxy points to dead port `{}` (pip install will fail)",
+                val
+            ));
         }
         items.push(DiagItem::new(
             "Pip",
             "pip global.proxy",
             val,
-            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (pip install will fail)".red().bold().to_string() },
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (pip install will fail)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
         ));
     } else {
         items.push(DiagItem::new(
@@ -2553,17 +2917,22 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     if ok {
                         "● Reachable Index".green().to_string()
                     } else {
-                        "▲ UNREACHABLE INDEX! (Downloads fail)".red().bold().to_string()
+                        "▲ UNREACHABLE INDEX! (Downloads fail)"
+                            .red()
+                            .bold()
+                            .to_string()
                     },
                 ));
             }
         }
     }
 
-    // Astral uv Proxy (UV_HTTP_PROXY)
+    // Astral uv Proxy (UV_HTTP_PROXY & ~/.config/uv/uv.toml)
+    let mut uv_configured = false;
     if let Ok(val) = std::env::var("UV_HTTP_PROXY") {
         let trim = val.trim();
         if !trim.is_empty() {
+            uv_configured = true;
             let ok = verify_proxy_url(trim).await;
             if !ok {
                 root_issues.push(format!(
@@ -2578,23 +2947,64 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 if ok {
                     "● Reachable Proxy".green().to_string()
                 } else {
-                    "▲ DEAD PROXY PORT! (uv sync & pip fail)".red().bold().to_string()
+                    "▲ DEAD PROXY PORT! (uv sync & pip fail)"
+                        .red()
+                        .bold()
+                        .to_string()
                 },
             ));
         }
+    }
+    if let Some(val) = get_uv_proxy() {
+        uv_configured = true;
+        let ok = verify_proxy_url(&val).await;
+        if !ok {
+            root_issues.push(format!(
+                "Astral uv config `uv.toml` http-proxy points to dead port `{}`! (uv sync / pip will fail)",
+                val
+            ));
+        }
+        items.push(DiagItem::new(
+            "Astral uv",
+            "uv.toml [http-proxy]",
+            val,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (uv sync fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    }
+    if !uv_configured {
+        items.push(DiagItem::new(
+            "Astral uv",
+            "uv.toml / UV_HTTP_PROXY",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
     }
 
     // 7. cURL Config (~/.curlrc)
     if let Some(val) = get_curlrc_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
-            root_issues.push(format!("~/.curlrc points to dead proxy `{}` (curl commands & bash installers will fail)", val));
+            root_issues.push(format!(
+                "~/.curlrc points to dead proxy `{}` (curl commands & bash installers will fail)",
+                val
+            ));
         }
         items.push(DiagItem::new(
             "cURL",
             "~/.curlrc proxy",
             val,
-            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (curl commands fail)".red().bold().to_string() },
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (curl commands fail)".red().bold().to_string()
+            },
         ));
     } else {
         items.push(DiagItem::new(
@@ -2609,13 +3019,20 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if let Some(val) = get_wgetrc_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
-            root_issues.push(format!("~/.wgetrc points to dead proxy `{}` (wget commands will fail)", val));
+            root_issues.push(format!(
+                "~/.wgetrc points to dead proxy `{}` (wget commands will fail)",
+                val
+            ));
         }
         items.push(DiagItem::new(
             "Wget",
             "~/.wgetrc proxy",
             val,
-            if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT! (wget will fail)".red().bold().to_string() },
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (wget will fail)".red().bold().to_string()
+            },
         ));
     } else {
         items.push(DiagItem::new(
@@ -2642,7 +3059,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             if ok {
                 "● Reachable".green().to_string()
             } else {
-                "▲ DEAD PORT! (docker build/pull will fail)".red().bold().to_string()
+                "▲ DEAD PORT! (docker build/pull will fail)"
+                    .red()
+                    .bold()
+                    .to_string()
             },
         ));
     } else {
@@ -2727,7 +3147,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             if ok {
                 "● Reachable".green().to_string()
             } else {
-                "▲ DEAD PORT! (dotnet restore fails)".red().bold().to_string()
+                "▲ DEAD PORT! (dotnet restore fails)"
+                    .red()
+                    .bold()
+                    .to_string()
             },
         ));
     } else {
@@ -2777,7 +3200,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             if ok {
                 "● Reachable".green().to_string()
             } else {
-                "▲ DEAD PORT! (svn operations fail)".red().bold().to_string()
+                "▲ DEAD PORT! (svn operations fail)"
+                    .red()
+                    .bold()
+                    .to_string()
             },
         ));
     } else {
@@ -2793,7 +3219,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if let Some(val) = get_hg_proxy() {
         let ok = verify_proxy_url(&val).await;
         if !ok {
-            root_issues.push(format!("Mercurial config (~/.hgrc) points to dead proxy `{}` (hg clone/pull will fail)", val));
+            root_issues.push(format!(
+                "Mercurial config (~/.hgrc) points to dead proxy `{}` (hg clone/pull will fail)",
+                val
+            ));
         }
         items.push(DiagItem::new(
             "Mercurial",
@@ -2821,23 +3250,24 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         for mirror in &mirrors {
             let ok = verify_proxy_url(mirror).await;
             if !ok {
-                root_issues.push(format!("GOPROXY mirror `{}` is unreachable! (go get / go build will fail)", mirror));
+                root_issues.push(format!(
+                    "GOPROXY mirror `{}` is unreachable! (go get / go build will fail)",
+                    mirror
+                ));
                 any_dead = true;
             }
         }
         let status = if mirrors.is_empty() {
             "○ Direct (direct / off)".dimmed().to_string()
         } else if any_dead {
-            "▲ DEAD GOPROXY MIRROR! (go get fails)".red().bold().to_string()
+            "▲ DEAD GOPROXY MIRROR! (go get fails)"
+                .red()
+                .bold()
+                .to_string()
         } else {
             "● Reachable GOPROXY".green().to_string()
         };
-        items.push(DiagItem::new(
-            "Go Modules",
-            "GOPROXY",
-            gp,
-            status,
-        ));
+        items.push(DiagItem::new("Go Modules", "GOPROXY", gp, status));
     } else {
         items.push(DiagItem::new(
             "Go Modules",
@@ -2872,7 +3302,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
 
         let val_str = display_parts.join(", ");
         let status = if any_dead {
-            "▲ DEAD PORT! (conda install fails)".red().bold().to_string()
+            "▲ DEAD PORT! (conda install fails)"
+                .red()
+                .bold()
+                .to_string()
         } else {
             "● Reachable".green().to_string()
         };
@@ -2890,6 +3323,62 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             "(not set)".dimmed().to_string(),
             "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
         ));
+    }
+
+    // PHP Composer Packagist Mirror
+    if let Some(comp_path) = get_composer_config_path() {
+        if let Ok(content) = std::fs::read_to_string(&comp_path) {
+            if let Some(mirror_url) = parse_composer_packagist_repo(&content) {
+                let ok = verify_proxy_url(&mirror_url).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "PHP Composer packagist mirror `{}` in {} is unreachable! (composer install will fail)",
+                        mirror_url, comp_path.display()
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "PHP Composer",
+                    "Packagist Mirror",
+                    mirror_url,
+                    if ok {
+                        "● Reachable Mirror".green().to_string()
+                    } else {
+                        "▲ UNREACHABLE MIRROR! (composer install fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            }
+        }
+    }
+
+    // Bazel Proxy Configuration (~/.bazelrc)
+    if let Some(bpath) = get_bazelrc_path() {
+        if let Ok(content) = std::fs::read_to_string(&bpath) {
+            if let Some(bproxy) = parse_bazelrc_proxy(&content) {
+                let ok = verify_proxy_url(&bproxy).await;
+                if !ok {
+                    root_issues.push(format!(
+                        "Bazel ~/.bazelrc action_env proxy `{}` is dead! (Bazel external repo downloads will fail)",
+                        bproxy
+                    ));
+                }
+                items.push(DiagItem::new(
+                    "Bazel",
+                    "~/.bazelrc action_env",
+                    bproxy,
+                    if ok {
+                        "● Reachable Proxy".green().to_string()
+                    } else {
+                        "▲ DEAD PROXY PORT! (Bazel build fails)"
+                            .red()
+                            .bold()
+                            .to_string()
+                    },
+                ));
+            }
+        }
     }
 
     // 14. AI Developer Endpoints (Base URLs)
@@ -2916,6 +3405,11 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "FIREWORKS_BASE_URL",
         "ZHIPU_BASE_URL",
         "MINIMAX_BASE_URL",
+        "COPILOT_PROXY",
+        "SAMBANOVA_BASE_URL",
+        "REPLICATE_API_BASE",
+        "QIANFAN_BASE_URL",
+        "DEEPL_BASE_URL",
         "OLLAMA_HOST",
         "HF_ENDPOINT",
     ];
@@ -2948,7 +3442,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Ollama/HuggingFace)",
+            "AI Base URLs (OpenAI/Anthropic/Gemini/DeepSeek/Groq/OpenRouter/Mistral/Perplexity/Cohere/xAI/SiliconFlow/Together/Moonshot/DashScope/DeepInfra/Cerebras/Fireworks/Zhipu/MiniMax/Copilot/SambaNova/Replicate/Qianfan/DeepL/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -2982,7 +3476,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                         if ok {
                             "● Reachable".green().to_string()
                         } else {
-                            "▲ DEAD PORT! (Copilot & extensions fail)".red().bold().to_string()
+                            "▲ DEAD PORT! (Copilot & extensions fail)"
+                                .red()
+                                .bold()
+                                .to_string()
                         },
                     ));
                 }
@@ -3005,7 +3502,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "IDE SSL",
                     format!("{} strictSSL", ide.ide_name),
                     "false".yellow().to_string(),
-                    "▲ DISABLED! (Security risk / Strict SSL off)".yellow().bold().to_string(),
+                    "▲ DISABLED! (Security risk / Strict SSL off)"
+                        .yellow()
+                        .bold()
+                        .to_string(),
                 ));
             }
         }
@@ -3115,7 +3615,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     if ok {
                         "● Reachable Mirror".green().to_string()
                     } else {
-                        "▲ UNREACHABLE MIRROR! (brew hangs)".red().bold().to_string()
+                        "▲ UNREACHABLE MIRROR! (brew hangs)"
+                            .red()
+                            .bold()
+                            .to_string()
                     },
                 ));
             }
@@ -3164,7 +3667,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 "TLS Security",
                 "NODE_TLS_REJECT_UNAUTHORIZED",
                 "0".yellow().to_string(),
-                "▲ DISABLED! (Node TLS security disabled)".yellow().bold().to_string(),
+                "▲ DISABLED! (Node TLS security disabled)"
+                    .yellow()
+                    .bold()
+                    .to_string(),
             ));
         }
     }
@@ -3192,7 +3698,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
 
     let mut hosts_overrides_found = false;
     for entry in &hosts_entries {
-        if dev_domains.iter().any(|d| entry.domain.eq_ignore_ascii_case(d)) {
+        if dev_domains
+            .iter()
+            .any(|d| entry.domain.eq_ignore_ascii_case(d))
+        {
             hosts_overrides_found = true;
             let ip_str = &entry.ip;
             let is_blocked = ip_str == "0.0.0.0" || ip_str == "127.0.0.1" || ip_str == "::1";
@@ -3205,7 +3714,14 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 ));
                 items.push(DiagItem::new(
                     "Hosts File",
-                    format!("{} (in {})", entry.domain, hosts_path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts")),
+                    format!(
+                        "{} (in {})",
+                        entry.domain,
+                        hosts_path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("hosts")
+                    ),
                     ip_str.clone(),
                     "▲ SINKHOLED / BLOCKED!".red().bold().to_string(),
                 ));
@@ -3214,7 +3730,14 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 if reachable {
                     items.push(DiagItem::new(
                         "Hosts File",
-                        format!("{} (in {})", entry.domain, hosts_path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts")),
+                        format!(
+                            "{} (in {})",
+                            entry.domain,
+                            hosts_path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("hosts")
+                        ),
                         ip_str.clone(),
                         "● Pinned IP Reachable (Port 443)".green().to_string(),
                     ));
@@ -3227,9 +3750,19 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     ));
                     items.push(DiagItem::new(
                         "Hosts File",
-                        format!("{} (in {})", entry.domain, hosts_path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts")),
+                        format!(
+                            "{} (in {})",
+                            entry.domain,
+                            hosts_path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("hosts")
+                        ),
                         ip_str.clone(),
-                        "▲ STALE / DEAD PINNED IP! (Causes timeouts)".red().bold().to_string(),
+                        "▲ STALE / DEAD PINNED IP! (Causes timeouts)"
+                            .red()
+                            .bold()
+                            .to_string(),
                     ));
                 }
             }
@@ -3238,7 +3771,13 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !hosts_overrides_found {
         items.push(DiagItem::new(
             "Hosts File",
-            format!("{} overrides", hosts_path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts")),
+            format!(
+                "{} overrides",
+                hosts_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("hosts")
+            ),
             "(clean)".dimmed().to_string(),
             "○ No developer domains hijacked".dimmed().to_string(),
         ));
@@ -3267,9 +3806,13 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             Ok(mut addrs) => {
                 if let Some(first) = addrs.next() {
                     let ip = first.ip();
-                    let is_poisoned = ip.is_loopback() || ip.is_unspecified() || ip.to_string() == "0.0.0.0";
+                    let is_poisoned =
+                        ip.is_loopback() || ip.is_unspecified() || ip.to_string() == "0.0.0.0";
                     if is_poisoned {
-                        root_issues.push(format!("DNS for {} is poisoned/blocked (Resolved to {})", domain, ip));
+                        root_issues.push(format!(
+                            "DNS for {} is poisoned/blocked (Resolved to {})",
+                            domain, ip
+                        ));
                         items.push(DiagItem::new(
                             "DNS / Hosts",
                             domain,
@@ -3345,7 +3888,12 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 .bold()
         );
     } else {
-        println!("{}", "✨ All configurations healthy and aligned! No dead ports detected.".green().bold());
+        println!(
+            "{}",
+            "✨ All configurations healthy and aligned! No dead ports detected."
+                .green()
+                .bold()
+        );
     }
 
     println!();
@@ -3353,7 +3901,10 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
 }
 
 pub fn get_git_config(key: &str) -> Option<String> {
-    let out = Command::new("git").args(["config", "--global", "--get", key]).output().ok()?;
+    let out = Command::new("git")
+        .args(["config", "--global", "--get", key])
+        .output()
+        .ok()?;
     if out.status.success() {
         let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !val.is_empty() {
@@ -3375,12 +3926,18 @@ pub async fn verify_proxy_url(val: &str) -> bool {
     }
     if let Some(idx) = val.rfind(':') {
         let host_part = &val[..idx];
-        let port_part: String = val[idx + 1..].chars().take_while(|c| c.is_ascii_digit()).collect();
+        let port_part: String = val[idx + 1..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         if let Ok(p) = port_part.parse::<u16>() {
             let host = if host_part.is_empty() || host_part == "localhost" {
                 "127.0.0.1"
             } else {
-                host_part.trim_start_matches("http://").trim_start_matches("https://").trim_start_matches("socks5://")
+                host_part
+                    .trim_start_matches("http://")
+                    .trim_start_matches("https://")
+                    .trim_start_matches("socks5://")
             };
             return scanner::check_host_port(host, p).await;
         }
@@ -3434,7 +3991,10 @@ proxy = "http://127.0.0.1:7890"
 [build]
 jobs = 8
 "#;
-        assert_eq!(parse_cargo_proxy_toml(content), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_cargo_proxy_toml(content),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let empty = r#"
 [build]
@@ -3446,13 +4006,19 @@ jobs = 4
     #[test]
     fn test_parse_curlrc_proxy() {
         let c1 = "proxy = \"http://127.0.0.1:7890\"\n";
-        assert_eq!(parse_curlrc_proxy(c1), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_curlrc_proxy(c1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let c2 = "# some comment\n-x 127.0.0.1:1080\n";
         assert_eq!(parse_curlrc_proxy(c2), Some("127.0.0.1:1080".to_string()));
 
         let c3 = "--proxy socks5://127.0.0.1:1082\n";
-        assert_eq!(parse_curlrc_proxy(c3), Some("socks5://127.0.0.1:1082".to_string()));
+        assert_eq!(
+            parse_curlrc_proxy(c3),
+            Some("socks5://127.0.0.1:1082".to_string())
+        );
 
         let c4 = "# no proxy here\nsilent\n";
         assert_eq!(parse_curlrc_proxy(c4), None);
@@ -3465,7 +4031,10 @@ jobs = 4
 index-url = https://pypi.org/simple
 proxy = http://127.0.0.1:7890
 "#;
-        assert_eq!(parse_pip_config_proxy(c1), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_pip_config_proxy(c1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let c2 = r#"
 [install]
@@ -3508,7 +4077,10 @@ trusted-host = pypi.org
                 }
             }
         }"#;
-        assert_eq!(parse_docker_config_proxy(json_with_proxy), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_docker_config_proxy(json_with_proxy),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let json_without_proxy = r#"{
             "auths": {}
@@ -3551,7 +4123,10 @@ systemProp.https.proxyPort=7890
 http_proxy = http://127.0.0.1:7890/
 use_proxy = on
 "#;
-        assert_eq!(parse_wgetrc_proxy(raw), Some("http://127.0.0.1:7890/".to_string()));
+        assert_eq!(
+            parse_wgetrc_proxy(raw),
+            Some("http://127.0.0.1:7890/".to_string())
+        );
 
         let empty = "verbose = off\n";
         assert_eq!(parse_wgetrc_proxy(empty), None);
@@ -3581,8 +4156,14 @@ proxy=http://127.0.0.1:7890
 https-proxy="http://127.0.0.1:7890"
 # comment=true
 "#;
-        assert_eq!(parse_npmrc_proxy(content, "proxy"), Some("http://127.0.0.1:7890".to_string()));
-        assert_eq!(parse_npmrc_proxy(content, "https-proxy"), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_npmrc_proxy(content, "proxy"),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+        assert_eq!(
+            parse_npmrc_proxy(content, "https-proxy"),
+            Some("http://127.0.0.1:7890".to_string())
+        );
         assert_eq!(parse_npmrc_proxy(content, "non_existent"), None);
     }
 
@@ -3655,7 +4236,10 @@ https-proxy="http://127.0.0.1:7890"
     fn test_parse_goproxy() {
         let val = "https://goproxy.cn,https://proxy.golang.org,direct";
         let parsed = parse_goproxy(val);
-        assert_eq!(parsed, vec!["https://goproxy.cn", "https://proxy.golang.org"]);
+        assert_eq!(
+            parsed,
+            vec!["https://goproxy.cn", "https://proxy.golang.org"]
+        );
 
         let direct_only = "direct";
         assert!(parse_goproxy(direct_only).is_empty());
@@ -3664,10 +4248,16 @@ https-proxy="http://127.0.0.1:7890"
     #[test]
     fn test_parse_yarnrc_proxy() {
         let content = "# yarn config\nproxy \"http://127.0.0.1:7890\"\nhttps-proxy \"http://127.0.0.1:7890\"\n";
-        assert_eq!(parse_yarnrc_proxy(content), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_yarnrc_proxy(content),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let unquoted = "proxy http://127.0.0.1:1080\n";
-        assert_eq!(parse_yarnrc_proxy(unquoted), Some("http://127.0.0.1:1080".to_string()));
+        assert_eq!(
+            parse_yarnrc_proxy(unquoted),
+            Some("http://127.0.0.1:1080".to_string())
+        );
 
         let commented = "# proxy \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_yarnrc_proxy(commented), None);
@@ -3675,11 +4265,18 @@ https-proxy="http://127.0.0.1:7890"
 
     #[test]
     fn test_parse_yarnrc_yml_proxy() {
-        let content = "httpProxy: \"http://127.0.0.1:7890\"\nhttpsProxy: \"http://127.0.0.1:7890\"\n";
-        assert_eq!(parse_yarnrc_yml_proxy(content), Some("http://127.0.0.1:7890".to_string()));
+        let content =
+            "httpProxy: \"http://127.0.0.1:7890\"\nhttpsProxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_yarnrc_yml_proxy(content),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let unquoted = "httpProxy: http://127.0.0.1:1080\n";
-        assert_eq!(parse_yarnrc_yml_proxy(unquoted), Some("http://127.0.0.1:1080".to_string()));
+        assert_eq!(
+            parse_yarnrc_yml_proxy(unquoted),
+            Some("http://127.0.0.1:1080".to_string())
+        );
 
         let empty = "nodeLinker: node-modules\n";
         assert_eq!(parse_yarnrc_yml_proxy(empty), None);
@@ -3687,9 +4284,18 @@ https-proxy="http://127.0.0.1:7890"
 
     #[test]
     fn test_check_case_mismatch() {
-        assert!(check_case_mismatch("http://127.0.0.1:7890", "http://127.0.0.1:1080"));
-        assert!(!check_case_mismatch("http://127.0.0.1:7890", "http://127.0.0.1:7890"));
-        assert!(!check_case_mismatch("http://127.0.0.1:7890/", "http://127.0.0.1:7890"));
+        assert!(check_case_mismatch(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:1080"
+        ));
+        assert!(!check_case_mismatch(
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:7890"
+        ));
+        assert!(!check_case_mismatch(
+            "http://127.0.0.1:7890/",
+            "http://127.0.0.1:7890"
+        ));
         assert!(!check_case_mismatch("", "http://127.0.0.1:7890"));
     }
 
@@ -3724,10 +4330,18 @@ ssl_verify: true
 0.0.0.0 telemetry.example.com
 "#;
         let entries = parse_hosts_file(content);
-        assert!(entries.iter().any(|e| e.ip == "140.82.112.4" && e.domain == "github.com"));
-        assert!(entries.iter().any(|e| e.ip == "140.82.112.4" && e.domain == "api.github.com"));
-        assert!(entries.iter().any(|e| e.ip == "185.199.108.133" && e.domain == "raw.githubusercontent.com"));
-        assert!(entries.iter().any(|e| e.ip == "0.0.0.0" && e.domain == "telemetry.example.com"));
+        assert!(entries
+            .iter()
+            .any(|e| e.ip == "140.82.112.4" && e.domain == "github.com"));
+        assert!(entries
+            .iter()
+            .any(|e| e.ip == "140.82.112.4" && e.domain == "api.github.com"));
+        assert!(entries
+            .iter()
+            .any(|e| e.ip == "185.199.108.133" && e.domain == "raw.githubusercontent.com"));
+        assert!(entries
+            .iter()
+            .any(|e| e.ip == "0.0.0.0" && e.domain == "telemetry.example.com"));
     }
 
     #[test]
@@ -3737,10 +4351,16 @@ ssl_verify: true
 proxy = "http://127.0.0.1:7890"
 exact = true
 "#;
-        assert_eq!(parse_bunfig_proxy(content), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_bunfig_proxy(content),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let toplevel = "proxy = 'http://127.0.0.1:1080'\n";
-        assert_eq!(parse_bunfig_proxy(toplevel), Some("http://127.0.0.1:1080".to_string()));
+        assert_eq!(
+            parse_bunfig_proxy(toplevel),
+            Some("http://127.0.0.1:1080".to_string())
+        );
 
         let clean = "[install]\nexact = true\n";
         assert_eq!(parse_bunfig_proxy(clean), None);
@@ -3753,8 +4373,14 @@ proxy=http://127.0.0.1:7890
 https-proxy="http://127.0.0.1:7890"
 registry=https://registry.npmjs.org/
 "#;
-        assert_eq!(parse_pnpmrc_proxy(content, "proxy"), Some("http://127.0.0.1:7890".to_string()));
-        assert_eq!(parse_pnpmrc_proxy(content, "https-proxy"), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_pnpmrc_proxy(content, "proxy"),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+        assert_eq!(
+            parse_pnpmrc_proxy(content, "https-proxy"),
+            Some("http://127.0.0.1:7890".to_string())
+        );
         assert_eq!(parse_pnpmrc_proxy(content, "nonexistent"), None);
     }
 
@@ -3771,7 +4397,10 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
         assert_eq!(replacements.len(), 1);
         assert_eq!(replacements[0].source, "crates-io");
         assert_eq!(replacements[0].replace_with, "ustc");
-        assert_eq!(replacements[0].registry_url, Some("https://mirrors.ustc.edu.cn/crates.io-index".to_string()));
+        assert_eq!(
+            replacements[0].registry_url,
+            Some("https://mirrors.ustc.edu.cn/crates.io-index".to_string())
+        );
     }
 
     #[test]
@@ -3812,7 +4441,16 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
 
     #[test]
     fn test_parse_gnome_proxy_manual() {
-        let res = parse_gnome_proxy("'manual'", "'127.0.0.1'", "7890", "'127.0.0.1'", "7890", "'127.0.0.1'", "1080").unwrap();
+        let res = parse_gnome_proxy(
+            "'manual'",
+            "'127.0.0.1'",
+            "7890",
+            "'127.0.0.1'",
+            "7890",
+            "'127.0.0.1'",
+            "1080",
+        )
+        .unwrap();
         assert!(res.http_enabled);
         assert_eq!(res.http_host, "127.0.0.1");
         assert_eq!(res.http_port, 7890);
@@ -3824,7 +4462,16 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
 
     #[test]
     fn test_parse_gnome_proxy_none() {
-        let res = parse_gnome_proxy("'none'", "'127.0.0.1'", "7890", "'127.0.0.1'", "7890", "''", "0").unwrap();
+        let res = parse_gnome_proxy(
+            "'none'",
+            "'127.0.0.1'",
+            "7890",
+            "'127.0.0.1'",
+            "7890",
+            "''",
+            "0",
+        )
+        .unwrap();
         assert!(!res.http_enabled);
         assert!(!res.https_enabled);
         assert!(!res.socks_enabled);
@@ -3838,7 +4485,8 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
             "http.proxyStrictSSL": false, // trailing comma follows
         }"#;
         let cleaned = clean_jsonc(input);
-        let val: serde_json::Value = serde_json::from_str(&cleaned).expect("Should parse valid JSON");
+        let val: serde_json::Value =
+            serde_json::from_str(&cleaned).expect("Should parse valid JSON");
         assert_eq!(val["http.proxy"], "http://127.0.0.1:7890");
         assert_eq!(val["http.proxyStrictSSL"], false);
     }
@@ -3847,7 +4495,8 @@ registry = "https://mirrors.ustc.edu.cn/crates.io-index"
     fn test_clean_jsonc_preserves_urls() {
         let input = r#"{"proxy": "http://127.0.0.1:7890//test"}"#;
         let cleaned = clean_jsonc(input);
-        let val: serde_json::Value = serde_json::from_str(&cleaned).expect("Should preserve // inside strings");
+        let val: serde_json::Value =
+            serde_json::from_str(&cleaned).expect("Should preserve // inside strings");
         assert_eq!(val["proxy"], "http://127.0.0.1:7890//test");
     }
 
@@ -3974,7 +4623,8 @@ editor:
     <add key="http_proxy" value="http://127.0.0.1:7890" />
   </config>
 </configuration>"#;
-        let proxy = parse_nuget_config_proxy(input).expect("Should find http_proxy in NuGet.Config");
+        let proxy =
+            parse_nuget_config_proxy(input).expect("Should find http_proxy in NuGet.Config");
         assert_eq!(proxy, "http://127.0.0.1:7890");
     }
 
@@ -3985,7 +4635,8 @@ editor:
     <add KEY = 'HTTP_PROXY' VALUE = 'http://127.0.0.1:1080' />
   </config>
 </configuration>"#;
-        let proxy = parse_nuget_config_proxy(input).expect("Should find HTTP_PROXY with single quotes");
+        let proxy =
+            parse_nuget_config_proxy(input).expect("Should find HTTP_PROXY with single quotes");
         assert_eq!(proxy, "http://127.0.0.1:1080");
     }
 
@@ -4012,10 +4663,16 @@ editor:
     #[test]
     fn test_parse_gemrc_proxy() {
         let yml1 = "---\n:backtrace: false\nhttp_proxy: http://127.0.0.1:7890\n";
-        assert_eq!(parse_gemrc_proxy(yml1), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_gemrc_proxy(yml1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let yml2 = "---\n:http_proxy: \"http://127.0.0.1:1080\"\n";
-        assert_eq!(parse_gemrc_proxy(yml2), Some("http://127.0.0.1:1080".to_string()));
+        assert_eq!(
+            parse_gemrc_proxy(yml2),
+            Some("http://127.0.0.1:1080".to_string())
+        );
 
         let yml3 = "# comment\nhttp_proxy: :system\n";
         assert_eq!(parse_gemrc_proxy(yml3), None);
@@ -4035,13 +4692,19 @@ group1 = *.example.com
 http-proxy-host = 127.0.0.1
 http-proxy-port = 7890
 "#;
-        assert_eq!(parse_svn_servers_proxy(ini1), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_svn_servers_proxy(ini1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let ini2 = r#"
 [global]
 http-proxy-host = 10.0.0.1
 "#;
-        assert_eq!(parse_svn_servers_proxy(ini2), Some("http://10.0.0.1:80".to_string()));
+        assert_eq!(
+            parse_svn_servers_proxy(ini2),
+            Some("http://10.0.0.1:80".to_string())
+        );
 
         let ini3 = r#"
 # all commented
@@ -4061,13 +4724,19 @@ username = Alice
 host = 127.0.0.1:7890
 no = localhost, 127.0.0.1
 "#;
-        assert_eq!(parse_hgrc_proxy(ini1), Some("http://127.0.0.1:7890".to_string()));
+        assert_eq!(
+            parse_hgrc_proxy(ini1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
 
         let ini2 = r#"
 [http_proxy]
 host = "socks5://127.0.0.1:1080"
 "#;
-        assert_eq!(parse_hgrc_proxy(ini2), Some("socks5://127.0.0.1:1080".to_string()));
+        assert_eq!(
+            parse_hgrc_proxy(ini2),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
 
         let ini3 = r#"
 [ui]
@@ -4085,7 +4754,10 @@ username = Bob
 registry "https://registry.npmmirror.com/"
 lastUpdateCheck 1590000000000
 "#;
-        assert_eq!(parse_yarnrc_registry(content), Some("https://registry.npmmirror.com/".to_string()));
+        assert_eq!(
+            parse_yarnrc_registry(content),
+            Some("https://registry.npmmirror.com/".to_string())
+        );
 
         let empty = "# only comments\n";
         assert_eq!(parse_yarnrc_registry(empty), None);
@@ -4097,9 +4769,86 @@ lastUpdateCheck 1590000000000
 npmRegistryServer: "https://registry.npmjs.org"
 yarnPath: ".yarn/releases/yarn-4.0.0.cjs"
 "#;
-        assert_eq!(parse_yarnrc_yml_registry(yaml), Some("https://registry.npmjs.org".to_string()));
+        assert_eq!(
+            parse_yarnrc_yml_registry(yaml),
+            Some("https://registry.npmjs.org".to_string())
+        );
 
         let empty = "plugins: []\n";
         assert_eq!(parse_yarnrc_yml_registry(empty), None);
+    }
+
+    #[test]
+    fn test_parse_uv_proxy() {
+        let toml1 = r#"
+http-proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_uv_proxy(toml1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let toml2 = r#"
+[pip]
+proxy = "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_uv_proxy(toml2),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let toml3 = r#"
+# http-proxy = "http://127.0.0.1:7890"
+[tool.uv]
+cache-dir = "~/.cache/uv"
+"#;
+        assert_eq!(parse_uv_proxy(toml3), None);
+    }
+
+    #[test]
+    fn test_parse_go_env_content() {
+        let env1 = "GOPROXY=\"http://127.0.0.1:7890,direct\"\nGONOPROXY=\n";
+        assert_eq!(
+            parse_go_env_content(env1),
+            Some("http://127.0.0.1:7890,direct".to_string())
+        );
+
+        let env2 = "GOPRIVATE=*.internal.corp\n";
+        assert_eq!(parse_go_env_content(env2), None);
+
+        let env3 = "# GOPROXY=http://127.0.0.1:8888\n";
+        assert_eq!(parse_go_env_content(env3), None);
+    }
+
+    #[test]
+    fn test_parse_composer_packagist_repo() {
+        let json1 = r#"{
+            "repositories": {
+                "packagist": {
+                    "type": "composer",
+                    "url": "https://mirrors.aliyun.com/composer/"
+                }
+            }
+        }"#;
+        assert_eq!(
+            parse_composer_packagist_repo(json1),
+            Some("https://mirrors.aliyun.com/composer/".to_string())
+        );
+
+        let json2 = r#"{ "config": {} }"#;
+        assert_eq!(parse_composer_packagist_repo(json2), None);
+    }
+
+    #[test]
+    fn test_parse_bazelrc_proxy() {
+        let bazel1 = "build --action_env=HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_bazelrc_proxy(bazel1),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let bazel2 =
+            "# build --action_env=HTTP_PROXY=http://127.0.0.1:7890\ntest --verbose_failures\n";
+        assert_eq!(parse_bazelrc_proxy(bazel2), None);
     }
 }
