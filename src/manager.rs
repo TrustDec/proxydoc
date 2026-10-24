@@ -544,11 +544,162 @@ pub fn unset_maven_proxy() -> Result<bool> {
     Ok(removed)
 }
 
+pub fn apply_yarn_proxy_yarnrc(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut has_proxy = false;
+    let mut has_https_proxy = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("proxy ") || lower.starts_with("proxy=") {
+            lines.push(format!("proxy \"{}\"", proxy_url));
+            has_proxy = true;
+        } else if lower.starts_with("https-proxy ") || lower.starts_with("https-proxy=") {
+            lines.push(format!("https-proxy \"{}\"", proxy_url));
+            has_https_proxy = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !has_proxy {
+        lines.push(format!("proxy \"{}\"", proxy_url));
+    }
+    if !has_https_proxy {
+        lines.push(format!("https-proxy \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_yarn_proxy_yarnrc(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("proxy ")
+            || lower.starts_with("https-proxy ")
+            || lower.starts_with("proxy=")
+            || lower.starts_with("https-proxy=")
+        {
+            removed = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn apply_yarn_proxy_yml(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut has_http = false;
+    let mut has_https = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if let Some((k, _)) = trim.split_once(':') {
+            let k_trim = k.trim();
+            if k_trim == "httpProxy" {
+                lines.push(format!("httpProxy: \"{}\"", proxy_url));
+                has_http = true;
+                continue;
+            } else if k_trim == "httpsProxy" {
+                lines.push(format!("httpsProxy: \"{}\"", proxy_url));
+                has_https = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !has_http {
+        lines.push(format!("httpProxy: \"{}\"", proxy_url));
+    }
+    if !has_https {
+        lines.push(format!("httpsProxy: \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_yarn_proxy_yml(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if let Some((k, _)) = trim.split_once(':') {
+            let k_trim = k.trim();
+            if k_trim == "httpProxy" || k_trim == "httpsProxy" {
+                removed = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_yarn_proxy(proxy_url: &str) -> Result<()> {
+    if let Some(home) = dirs::home_dir() {
+        let yml_path = home.join(".yarnrc.yml");
+        if yml_path.exists() {
+            let content = std::fs::read_to_string(&yml_path).unwrap_or_default();
+            let new_content = apply_yarn_proxy_yml(&content, proxy_url);
+            std::fs::write(&yml_path, new_content)?;
+        }
+
+        let rc_path = home.join(".yarnrc");
+        let content = std::fs::read_to_string(&rc_path).unwrap_or_default();
+        let new_content = apply_yarn_proxy_yarnrc(&content, proxy_url);
+        std::fs::write(&rc_path, new_content)?;
+    }
+    let _ = Command::new("yarn").args(["config", "set", "proxy", proxy_url]).output();
+    let _ = Command::new("yarn").args(["config", "set", "https-proxy", proxy_url]).output();
+    Ok(())
+}
+
+pub fn unset_yarn_proxy() -> Result<bool> {
+    let mut removed = false;
+    if let Some(home) = dirs::home_dir() {
+        let yml_path = home.join(".yarnrc.yml");
+        if yml_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&yml_path) {
+                let (new_content, r) = remove_yarn_proxy_yml(&content);
+                if r {
+                    std::fs::write(&yml_path, new_content)?;
+                    removed = true;
+                }
+            }
+        }
+
+        let rc_path = home.join(".yarnrc");
+        if rc_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&rc_path) {
+                let (new_content, r) = remove_yarn_proxy_yarnrc(&content);
+                if r {
+                    std::fs::write(&rc_path, new_content)?;
+                    removed = true;
+                }
+            }
+        }
+    }
+    let _ = Command::new("yarn").args(["config", "delete", "proxy"]).output();
+    let _ = Command::new("yarn").args(["config", "delete", "https-proxy"]).output();
+    Ok(removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
     cargo: bool,
     npm: bool,
+    yarn: bool,
     pip: bool,
     docker: bool,
     gradle: bool,
@@ -559,6 +710,7 @@ pub async fn turn_on(
     let set_git = git || all;
     let set_cargo = cargo || all;
     let set_npm = npm || all;
+    let set_yarn = yarn || all;
     let set_pip = pip || all;
     let set_docker = docker || all;
     let set_gradle = gradle || all;
@@ -615,6 +767,13 @@ pub async fn turn_on(
         eprintln!("{}", format!("✔ NPM proxy set to {}", proxy_url).green());
     }
 
+    if set_yarn {
+        match set_yarn_proxy(&proxy_url) {
+            Ok(_) => eprintln!("{}", format!("✔ Yarn proxy (~/.yarnrc / ~/.yarnrc.yml) set to {}", proxy_url).green()),
+            Err(e) => eprintln!("{} Failed to update Yarn config: {}", "▲".yellow(), e),
+        }
+    }
+
     if set_pip {
         let _ = Command::new("pip").args(["config", "set", "global.proxy", &proxy_url]).status();
         eprintln!("{}", format!("✔ Pip global proxy set to {}", proxy_url).green());
@@ -651,6 +810,7 @@ pub fn turn_off(
     git: bool,
     cargo: bool,
     npm: bool,
+    yarn: bool,
     pip: bool,
     docker: bool,
     gradle: bool,
@@ -661,6 +821,7 @@ pub fn turn_off(
     let unset_git = git || all;
     let unset_cargo = cargo || all;
     let unset_npm = npm || all;
+    let unset_yarn = yarn || all;
     let unset_pip = pip || all;
     let unset_docker = docker || all;
     let unset_gradle = gradle || all;
@@ -689,6 +850,14 @@ pub fn turn_off(
         let _ = Command::new("npm").args(["config", "delete", "proxy"]).status();
         let _ = Command::new("npm").args(["config", "delete", "https-proxy"]).status();
         eprintln!("{}", "✔ NPM proxy unset".green());
+    }
+
+    if unset_yarn {
+        match unset_yarn_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Cleared Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)".green()),
+            Ok(false) => eprintln!("{}", "○ Yarn proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to clear Yarn config: {}", "▲".yellow(), e),
+        }
     }
 
     if unset_pip {
@@ -915,5 +1084,44 @@ mod tests {
         assert!(removed);
         assert!(!cleaned.contains("proxy = "));
         assert!(cleaned.contains("jobs = 4"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_yarn_proxy_yarnrc() {
+        let initial = "registry \"https://registry.yarnpkg.com\"\n";
+        let with_proxy = apply_yarn_proxy_yarnrc(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("https-proxy \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("registry \"https://registry.yarnpkg.com\""));
+
+        // Replace existing
+        let updated = apply_yarn_proxy_yarnrc(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("proxy \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_yarn_proxy_yarnrc(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy"));
+        assert!(cleaned.contains("registry"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_yarn_proxy_yml() {
+        let initial = "nodeLinker: node-modules\n";
+        let with_proxy = apply_yarn_proxy_yml(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("httpProxy: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("httpsProxy: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("nodeLinker: node-modules"));
+
+        // Replace existing
+        let updated = apply_yarn_proxy_yml(&with_proxy, "http://127.0.0.1:1080");
+        assert!(updated.contains("httpProxy: \"http://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_yarn_proxy_yml(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("httpProxy"));
+        assert!(!cleaned.contains("httpsProxy"));
+        assert!(cleaned.contains("nodeLinker: node-modules"));
     }
 }

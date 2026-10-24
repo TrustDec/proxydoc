@@ -68,7 +68,9 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("HuggingFace", "https://huggingface.co/api/status"),
     ("crates.io", "https://crates.io/api/v1/summary"),
     ("npm Registry", "https://registry.npmjs.org"),
+    ("Yarn Registry", "https://registry.yarnpkg.com"),
     ("PyPI Registry", "https://pypi.org/simple/"),
+    ("Go Proxy", "https://proxy.golang.org"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -510,7 +512,9 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "OpenAI API"));
         assert!(standard.iter().any(|(name, _)| *name == "crates.io"));
         assert!(standard.iter().any(|(name, _)| *name == "npm Registry"));
+        assert!(standard.iter().any(|(name, _)| *name == "Yarn Registry"));
         assert!(standard.iter().any(|(name, _)| *name == "PyPI Registry"));
+        assert!(standard.iter().any(|(name, _)| *name == "Go Proxy"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

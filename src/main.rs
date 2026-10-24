@@ -74,6 +74,9 @@ enum Commands {
         /// Also configure npm proxy
         #[arg(long)]
         npm: bool,
+        /// Also configure Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)
+        #[arg(long)]
+        yarn: bool,
         /// Also configure pip global proxy
         #[arg(long)]
         pip: bool,
@@ -86,7 +89,7 @@ enum Commands {
         /// Also configure Maven global proxy (~/.m2/settings.xml)
         #[arg(long)]
         maven: bool,
-        /// Also configure git, cargo, npm, pip, docker, gradle, and maven proxy
+        /// Also configure git, cargo, npm, yarn, pip, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -104,6 +107,9 @@ enum Commands {
         /// Also unset npm proxy
         #[arg(long)]
         npm: bool,
+        /// Also unset Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)
+        #[arg(long)]
+        yarn: bool,
         /// Also unset pip global proxy
         #[arg(long)]
         pip: bool,
@@ -116,7 +122,7 @@ enum Commands {
         /// Also unset Maven global proxy (~/.m2/settings.xml)
         #[arg(long)]
         maven: bool,
-        /// Also unset git, cargo, npm, pip, docker, gradle, and maven proxy
+        /// Also unset git, cargo, npm, yarn, pip, docker, gradle, and maven proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -151,11 +157,11 @@ async fn main() -> Result<()> {
         Some(Commands::Scan { json }) => {
             scanner::run(json).await?;
         }
-        Some(Commands::On { target, git, cargo, npm, pip, docker, gradle, maven, all, shell }) => {
-            manager::turn_on(&target, git, cargo, npm, pip, docker, gradle, maven, all, shell.as_deref()).await?;
+        Some(Commands::On { target, git, cargo, npm, yarn, pip, docker, gradle, maven, all, shell }) => {
+            manager::turn_on(&target, git, cargo, npm, yarn, pip, docker, gradle, maven, all, shell.as_deref()).await?;
         }
-        Some(Commands::Off { git, cargo, npm, pip, docker, gradle, maven, all, shell }) => {
-            manager::turn_off(git, cargo, npm, pip, docker, gradle, maven, all, shell.as_deref())?;
+        Some(Commands::Off { git, cargo, npm, yarn, pip, docker, gradle, maven, all, shell }) => {
+            manager::turn_off(git, cargo, npm, yarn, pip, docker, gradle, maven, all, shell.as_deref())?;
         }
         Some(Commands::Init { shell }) => {
             manager::print_init_script(shell.as_deref());
@@ -345,6 +351,28 @@ mod tests {
         match cli.command {
             Some(Commands::Off { gradle, .. }) => {
                 assert!(gradle);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_yarn() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--yarn"]).unwrap();
+        match cli.command {
+            Some(Commands::On { yarn, .. }) => {
+                assert!(yarn);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_yarn() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--yarn"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { yarn, .. }) => {
+                assert!(yarn);
             }
             _ => panic!("Expected Off command"),
         }

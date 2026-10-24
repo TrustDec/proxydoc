@@ -607,6 +607,87 @@ pub fn get_ssh_config_proxies() -> Vec<SshProxyCommand> {
     Vec::new()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct YarnProxyConfig {
+    pub proxy: String,
+    pub source: String,
+}
+
+pub fn parse_yarnrc_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.is_empty() {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("proxy") || lower.starts_with("https-proxy") {
+            let rest = if let Some(stripped) = lower.strip_prefix("https-proxy") {
+                &trim[trim.len() - stripped.len()..]
+            } else if let Some(stripped) = lower.strip_prefix("proxy") {
+                &trim[trim.len() - stripped.len()..]
+            } else {
+                continue;
+            };
+            let rest_trim = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '=');
+            let val = rest_trim.trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn parse_yarnrc_yml_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.is_empty() {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once(':') {
+            let k_trim = k.trim();
+            if k_trim == "httpProxy" || k_trim == "httpsProxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_yarn_proxy() -> Option<YarnProxyConfig> {
+    if let Some(home) = dirs::home_dir() {
+        let yml_path = home.join(".yarnrc.yml");
+        if let Ok(content) = std::fs::read_to_string(yml_path) {
+            if let Some(proxy) = parse_yarnrc_yml_proxy(&content) {
+                return Some(YarnProxyConfig {
+                    proxy,
+                    source: "~/.yarnrc.yml".to_string(),
+                });
+            }
+        }
+
+        let rc_path = home.join(".yarnrc");
+        if let Ok(content) = std::fs::read_to_string(rc_path) {
+            if let Some(proxy) = parse_yarnrc_proxy(&content) {
+                return Some(YarnProxyConfig {
+                    proxy,
+                    source: "~/.yarnrc".to_string(),
+                });
+            }
+        }
+    }
+    None
+}
+
+pub fn check_case_mismatch(val1: &str, val2: &str) -> bool {
+    let t1 = val1.trim().trim_end_matches('/');
+    let t2 = val2.trim().trim_end_matches('/');
+    !t1.is_empty() && !t2.is_empty() && t1 != t2
+}
+
 pub fn detect_wsl2() -> Option<String> {
     if cfg!(target_os = "linux") {
         let is_wsl = std::env::var("WSL_DISTRO_NAME").is_ok()
@@ -757,6 +838,29 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "no_proxy / NO_PROXY",
                     "(not set)".yellow().to_string(),
                     "▲ Missing (Local servers might hang)".yellow().bold().to_string(),
+                ));
+            }
+        }
+    }
+
+    // Check for casing mismatch conflicts between lowercase and uppercase env vars
+    let case_pairs = [
+        ("http_proxy", "HTTP_PROXY"),
+        ("https_proxy", "HTTPS_PROXY"),
+        ("all_proxy", "ALL_PROXY"),
+    ];
+    for (lower_var, upper_var) in case_pairs {
+        if let (Ok(lower_val), Ok(upper_val)) = (std::env::var(lower_var), std::env::var(upper_var)) {
+            if check_case_mismatch(&lower_val, &upper_val) {
+                root_issues.push(format!(
+                    "Proxy environment casing conflict! `{}` (`{}`) != `{}` (`{}`). Tools like cURL, Go, and Python will behave inconsistently.",
+                    lower_var, lower_val, upper_var, upper_val
+                ));
+                items.push(DiagItem::new(
+                    "Env Conflict",
+                    format!("{} vs {}", lower_var, upper_var),
+                    format!("{} != {}", lower_val, upper_val),
+                    "▲ Inconsistent Values! (Dev tools disagree)".yellow().bold().to_string(),
                 ));
             }
         }
@@ -927,6 +1031,34 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                 if ok { "● Reachable".green().to_string() } else { "▲ DEAD PORT!".red().bold().to_string() },
             ));
         }
+    }
+
+    // 5. Yarn Config (~/.yarnrc / ~/.yarnrc.yml)
+    if let Some(cfg) = get_yarn_proxy() {
+        let ok = verify_proxy_url(&cfg.proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Yarn config ({}) points to dead proxy `{}` (yarn add & install will fail)",
+                cfg.source, cfg.proxy
+            ));
+        }
+        items.push(DiagItem::new(
+            "Yarn",
+            format!("{} proxy", cfg.source),
+            cfg.proxy,
+            if ok {
+                "● Reachable".green().to_string()
+            } else {
+                "▲ DEAD PORT! (yarn install fails)".red().bold().to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Yarn",
+            "~/.yarnrc / ~/.yarnrc.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Clean (Inherits Shell or Direct)".dimmed().to_string(),
+        ));
     }
 
     // 5. Cargo Config
@@ -1136,6 +1268,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "ANTHROPIC_BASE_URL",
         "DEEPSEEK_BASE_URL",
         "OLLAMA_HOST",
+        "HF_ENDPOINT",
     ];
     let mut ai_found = false;
     for var in ai_vars {
@@ -1166,7 +1299,7 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !ai_found {
         items.push(DiagItem::new(
             "AI Gateway",
-            "AI Base URLs (OpenAI/Anthropic/DeepSeek/Ollama)",
+            "AI Base URLs (OpenAI/Anthropic/DeepSeek/Ollama/HuggingFace)",
             "(default public endpoints)".dimmed().to_string(),
             "○ Direct Official Endpoints".dimmed().to_string(),
         ));
@@ -1231,6 +1364,8 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("api.anthropic.com", 443),
         ("api.deepseek.com", 443),
         ("pypi.org", 443),
+        ("proxy.golang.org", 443),
+        ("registry.yarnpkg.com", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -1631,5 +1766,37 @@ https-proxy="http://127.0.0.1:7890"
 
         let direct_only = "direct";
         assert!(parse_goproxy(direct_only).is_empty());
+    }
+
+    #[test]
+    fn test_parse_yarnrc_proxy() {
+        let content = "# yarn config\nproxy \"http://127.0.0.1:7890\"\nhttps-proxy \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_yarnrc_proxy(content), Some("http://127.0.0.1:7890".to_string()));
+
+        let unquoted = "proxy http://127.0.0.1:1080\n";
+        assert_eq!(parse_yarnrc_proxy(unquoted), Some("http://127.0.0.1:1080".to_string()));
+
+        let commented = "# proxy \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_yarnrc_proxy(commented), None);
+    }
+
+    #[test]
+    fn test_parse_yarnrc_yml_proxy() {
+        let content = "httpProxy: \"http://127.0.0.1:7890\"\nhttpsProxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_yarnrc_yml_proxy(content), Some("http://127.0.0.1:7890".to_string()));
+
+        let unquoted = "httpProxy: http://127.0.0.1:1080\n";
+        assert_eq!(parse_yarnrc_yml_proxy(unquoted), Some("http://127.0.0.1:1080".to_string()));
+
+        let empty = "nodeLinker: node-modules\n";
+        assert_eq!(parse_yarnrc_yml_proxy(empty), None);
+    }
+
+    #[test]
+    fn test_check_case_mismatch() {
+        assert!(check_case_mismatch("http://127.0.0.1:7890", "http://127.0.0.1:1080"));
+        assert!(!check_case_mismatch("http://127.0.0.1:7890", "http://127.0.0.1:7890"));
+        assert!(!check_case_mismatch("http://127.0.0.1:7890/", "http://127.0.0.1:7890"));
+        assert!(!check_case_mismatch("", "http://127.0.0.1:7890"));
     }
 }
