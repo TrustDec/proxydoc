@@ -199,6 +199,10 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Mem0 AI API", "https://api.mem0.ai"),
     ("Supabase API", "https://api.supabase.com"),
     ("Dify Cloud API", "https://api.dify.ai"),
+    ("Unstructured.io API", "https://api.unstructuredapp.io"),
+    ("Upstash API", "https://api.upstash.com"),
+    ("Vercel Cloud API", "https://api.vercel.com/v2/user"),
+    ("Resend API", "https://api.resend.com"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -760,6 +764,10 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Mem0 AI API"));
         assert!(standard.iter().any(|(name, _)| *name == "Supabase API"));
         assert!(standard.iter().any(|(name, _)| *name == "Dify Cloud API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Unstructured.io API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Upstash API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Vercel Cloud API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Resend API"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

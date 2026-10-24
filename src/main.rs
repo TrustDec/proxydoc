@@ -200,7 +200,16 @@ enum Commands {
         /// Also configure Microsoft Azure CLI (az) proxy (~/.azure/config)
         #[arg(long, visible_alias = "az")]
         azure: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, and azure proxy
+        /// Also configure Mamba / Micromamba proxy (~/.mambarc)
+        #[arg(long, visible_alias = "micromamba")]
+        mamba: bool,
+        /// Also configure Podman container engine proxy (~/.config/containers/containers.conf)
+        #[arg(long)]
+        podman: bool,
+        /// Also configure Vagrant proxy (~/.vagrant.d/Vagrantfile)
+        #[arg(long)]
+        vagrant: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, and vagrant proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -344,7 +353,16 @@ enum Commands {
         /// Also unset Microsoft Azure CLI (az) proxy (~/.azure/config)
         #[arg(long, visible_alias = "az")]
         azure: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, and azure proxy
+        /// Also unset Mamba / Micromamba proxy (~/.mambarc)
+        #[arg(long, visible_alias = "micromamba")]
+        mamba: bool,
+        /// Also unset Podman container engine proxy (~/.config/containers/containers.conf)
+        #[arg(long)]
+        podman: bool,
+        /// Also unset Vagrant proxy (~/.vagrant.d/Vagrantfile)
+        #[arg(long)]
+        vagrant: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, and vagrant proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -433,6 +451,9 @@ async fn main() -> Result<()> {
             gcloud,
             aws,
             azure,
+            mamba,
+            podman,
+            vagrant,
             all,
             shell,
         }) => {
@@ -483,6 +504,9 @@ async fn main() -> Result<()> {
                 gcloud,
                 aws,
                 azure,
+                mamba,
+                podman,
+                vagrant,
                 all,
                 shell.as_deref(),
             )
@@ -534,6 +558,9 @@ async fn main() -> Result<()> {
             gcloud,
             aws,
             azure,
+            mamba,
+            podman,
+            vagrant,
             all,
             shell,
         }) => {
@@ -583,6 +610,9 @@ async fn main() -> Result<()> {
                 gcloud,
                 aws,
                 azure,
+                mamba,
+                podman,
+                vagrant,
                 all,
                 shell.as_deref(),
             )?;
@@ -1659,6 +1689,88 @@ mod tests {
         match cli_alias.command {
             Some(Commands::Off { azure, .. }) => {
                 assert!(azure);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_mamba() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--mamba"]).unwrap();
+        match cli.command {
+            Some(Commands::On { mamba, .. }) => {
+                assert!(mamba);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--micromamba"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { mamba, .. }) => {
+                assert!(mamba);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_mamba() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--mamba"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { mamba, .. }) => {
+                assert!(mamba);
+            }
+            _ => panic!("Expected Off command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "off", "--micromamba"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::Off { mamba, .. }) => {
+                assert!(mamba);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_podman() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--podman"]).unwrap();
+        match cli.command {
+            Some(Commands::On { podman, .. }) => {
+                assert!(podman);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_podman() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--podman"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { podman, .. }) => {
+                assert!(podman);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_vagrant() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--vagrant"]).unwrap();
+        match cli.command {
+            Some(Commands::On { vagrant, .. }) => {
+                assert!(vagrant);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_vagrant() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--vagrant"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { vagrant, .. }) => {
+                assert!(vagrant);
             }
             _ => panic!("Expected Off command"),
         }

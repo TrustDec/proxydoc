@@ -4337,6 +4337,262 @@ pub fn unset_mamba_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn set_mamba_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_mamba_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_condarc_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn apply_podman_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_engine = false;
+    let mut engine_found = false;
+    let mut in_env_array = false;
+    let mut proxy_applied = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim().to_ascii_lowercase();
+            if in_engine && !proxy_applied {
+                lines.push(format!("env = [\"http_proxy={0}\", \"https_proxy={0}\", \"HTTP_PROXY={0}\", \"HTTPS_PROXY={0}\"]", proxy_url));
+                proxy_applied = true;
+            }
+            in_engine = section == "engine";
+            if in_engine {
+                engine_found = true;
+            }
+            in_env_array = false;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_engine {
+            if trim.starts_with("env") && trim.contains('=') {
+                if trim.contains('[') && !trim.contains(']') {
+                    in_env_array = true;
+                }
+                if !proxy_applied {
+                    lines.push(format!("env = [\"http_proxy={0}\", \"https_proxy={0}\", \"HTTP_PROXY={0}\", \"HTTPS_PROXY={0}\"]", proxy_url));
+                    proxy_applied = true;
+                }
+                continue;
+            }
+            if in_env_array {
+                if trim.contains(']') {
+                    in_env_array = false;
+                }
+                continue;
+            }
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_engine && !proxy_applied {
+        lines.push(format!("env = [\"http_proxy={0}\", \"https_proxy={0}\", \"HTTP_PROXY={0}\", \"HTTPS_PROXY={0}\"]", proxy_url));
+    } else if !engine_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[engine]".to_string());
+        lines.push(format!("env = [\"http_proxy={0}\", \"https_proxy={0}\", \"HTTP_PROXY={0}\", \"HTTPS_PROXY={0}\"]", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_podman_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_engine = false;
+    let mut in_env_array = false;
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim().to_ascii_lowercase();
+            in_engine = section == "engine" || section == "engine.env";
+            in_env_array = false;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_engine {
+            if trim.starts_with("env") && trim.contains('=') {
+                if trim.contains('[') && !trim.contains(']') {
+                    in_env_array = true;
+                }
+                let lower = trim.to_ascii_lowercase();
+                if lower.contains("proxy") {
+                    changed = true;
+                    if trim.contains(']') {
+                        continue;
+                    }
+                } else {
+                    lines.push(line.to_string());
+                }
+                continue;
+            }
+
+            if in_env_array {
+                let lower = trim.to_ascii_lowercase();
+                if lower.contains("proxy") {
+                    changed = true;
+                } else if !trim.is_empty() && trim != "]" {
+                    lines.push(line.to_string());
+                }
+                if trim.contains(']') {
+                    in_env_array = false;
+                }
+                continue;
+            }
+
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_podman_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_containers_conf_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_podman_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_podman_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_containers_conf_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, removed) = remove_podman_proxy(&content);
+            if removed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_vagrant_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_configure = false;
+    let mut configure_found = false;
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("Vagrant.configure") {
+            in_configure = true;
+            configure_found = true;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_configure {
+            let lower = trim.to_ascii_lowercase();
+            if lower.starts_with("config.proxy.") {
+                continue;
+            }
+            if trim == "end" && !proxy_set {
+                lines.push(format!("  if Vagrant.has_plugin?(\"vagrant-proxyconf\")\n    config.proxy.http = \"{0}\"\n    config.proxy.https = \"{0}\"\n  end", proxy_url));
+                proxy_set = true;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !configure_found {
+        let template = format!(
+            "Vagrant.configure(\"2\") do |config|\n  if Vagrant.has_plugin?(\"vagrant-proxyconf\")\n    config.proxy.http = \"{0}\"\n    config.proxy.https = \"{0}\"\n  end\nend\n",
+            proxy_url
+        );
+        return template;
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_vagrant_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("config.proxy.http") || lower.starts_with("config.proxy.https") {
+            changed = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_vagrant_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_vagrant_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_vagrant_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_vagrant_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_vagrant_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, removed) = remove_vagrant_proxy(&content);
+            if removed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -4384,6 +4640,9 @@ pub async fn turn_on(
     gcloud: bool,
     aws: bool,
     azure: bool,
+    mamba: bool,
+    podman: bool,
+    vagrant: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4430,6 +4689,9 @@ pub async fn turn_on(
     let set_gcloud = gcloud || all;
     let set_aws = aws || all;
     let set_azure = azure || all;
+    let set_mamba = mamba || all;
+    let set_podman = podman || all;
+    let set_vagrant = vagrant || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -5006,6 +5268,51 @@ pub async fn turn_on(
         }
     }
 
+    if set_mamba {
+        match set_mamba_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Mamba / Micromamba proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Mamba config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_podman {
+        match set_podman_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Podman container engine proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Podman config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_vagrant {
+        match set_vagrant_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Vagrant proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Vagrant config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -5066,6 +5373,9 @@ pub fn turn_off(
     gcloud: bool,
     aws: bool,
     azure: bool,
+    mamba: bool,
+    podman: bool,
+    vagrant: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5112,6 +5422,9 @@ pub fn turn_off(
     let unset_gcloud = gcloud || all;
     let unset_aws = aws || all;
     let unset_azure = azure || all;
+    let unset_mamba = mamba || all;
+    let unset_podman = podman || all;
+    let unset_vagrant = vagrant || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -5541,6 +5854,30 @@ pub fn turn_off(
                 "▲".yellow(),
                 e
             ),
+        }
+    }
+
+    if unset_mamba {
+        match unset_mamba_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Mamba / Micromamba proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Mamba proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Mamba proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_podman {
+        match unset_podman_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Podman container engine proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Podman proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Podman proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_vagrant {
+        match unset_vagrant_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Vagrant proxy removed from Vagrantfile".green()),
+            Ok(false) => eprintln!("{}", "○ Vagrant proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Vagrant proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -6586,5 +6923,40 @@ contexts: []
         assert!(!cleaned.contains("https ="));
         assert!(!cleaned.contains("mode = manual"));
         assert!(cleaned.contains("name = AzureCloud"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_podman_proxy() {
+        let initial = "[engine]\ncgroup_manager = \"systemd\"\n";
+        let with_proxy = apply_podman_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("[engine]"));
+        assert!(with_proxy.contains("http_proxy=http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("https_proxy=http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("cgroup_manager = \"systemd\""));
+
+        // Replace with new proxy
+        let updated = apply_podman_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("http_proxy=socks5://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_podman_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(cleaned.contains("cgroup_manager = \"systemd\""));
+    }
+
+    #[test]
+    fn test_apply_and_remove_vagrant_proxy() {
+        let initial = "Vagrant.configure(\"2\") do |config|\n  config.vm.box = \"ubuntu/focal64\"\nend\n";
+        let with_proxy = apply_vagrant_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("config.proxy.http = \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("config.proxy.https = \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("config.vm.box = \"ubuntu/focal64\""));
+
+        let (cleaned, removed) = remove_vagrant_proxy(&with_proxy);
+        assert!(removed);
+        assert!(!cleaned.contains("config.proxy.http"));
+        assert!(!cleaned.contains("config.proxy.https"));
+        assert!(cleaned.contains("config.vm.box = \"ubuntu/focal64\""));
     }
 }

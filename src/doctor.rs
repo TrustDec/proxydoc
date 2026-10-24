@@ -1131,6 +1131,19 @@ pub fn get_mambarc_path() -> Option<PathBuf> {
     None
 }
 
+pub fn get_mamba_write_path() -> PathBuf {
+    if let Some(p) = get_mambarc_path() {
+        return p;
+    }
+    if let Ok(mambarc_env) = std::env::var("MAMBARC") {
+        return PathBuf::from(mambarc_env.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".mambarc");
+    }
+    PathBuf::from(".mambarc")
+}
+
 pub fn get_conda_proxy() -> Option<CondaProxyConfig> {
     if let Some(path) = get_condarc_path() {
         if let Ok(content) = std::fs::read_to_string(path) {
@@ -4399,6 +4412,187 @@ pub fn get_azure_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn get_containers_conf_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("CONTAINERS_CONF") {
+        let p = PathBuf::from(path.trim());
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(cfg) = dirs::config_dir() {
+        let p = cfg.join("containers").join("containers.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".config").join("containers").join("containers.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata).join("containers").join("containers.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_containers_conf_write_path() -> PathBuf {
+    if let Some(p) = get_containers_conf_path() {
+        return p;
+    }
+    if let Ok(path) = std::env::var("CONTAINERS_CONF") {
+        return PathBuf::from(path.trim());
+    }
+    if let Some(cfg) = dirs::config_dir() {
+        return cfg.join("containers").join("containers.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("containers").join("containers.conf");
+    }
+    PathBuf::from(".config").join("containers").join("containers.conf")
+}
+
+pub fn parse_podman_proxy(content: &str) -> Option<String> {
+    let mut current_section = String::new();
+    let mut in_env_array = false;
+    let mut candidate = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.starts_with('[') && trim.ends_with(']') {
+            current_section = trim[1..trim.len() - 1].trim().to_ascii_lowercase();
+            in_env_array = false;
+            continue;
+        }
+
+        if current_section == "engine" || current_section == "engine.env" {
+            if trim.starts_with("env") && trim.contains('=') && trim.contains('[') {
+                in_env_array = true;
+            }
+
+            if in_env_array {
+                let check_str = trim.trim_matches(|c| c == '[' || c == ']' || c == ',');
+                for item in check_str.split(',') {
+                    let item_clean = item.trim().trim_matches('"').trim_matches('\'').trim();
+                    if let Some((k, v)) = item_clean.split_once('=') {
+                        let k_lower = k.trim().to_ascii_lowercase();
+                        if k_lower == "https_proxy" || k_lower == "http_proxy" || k_lower == "all_proxy" {
+                            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                            if !val.is_empty() {
+                                candidate = Some(val.to_string());
+                            }
+                        }
+                    }
+                }
+                if trim.ends_with(']') || trim.contains(']') {
+                    in_env_array = false;
+                }
+            } else if let Some((k, v)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if key == "https_proxy" || key == "http_proxy" || key == "all_proxy" {
+                    if !val.is_empty() {
+                        candidate = Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let cand = candidate?;
+    if cand.starts_with("http://") || cand.starts_with("https://") || cand.starts_with("socks") {
+        Some(cand)
+    } else {
+        Some(format!("http://{}", cand))
+    }
+}
+
+pub fn get_podman_proxy() -> Option<(String, PathBuf)> {
+    let p = get_containers_conf_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_podman_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn get_vagrant_config_path() -> Option<PathBuf> {
+    if let Ok(vhome) = std::env::var("VAGRANT_HOME") {
+        let p = PathBuf::from(vhome.trim()).join("Vagrantfile");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".vagrant.d").join("Vagrantfile");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(userprofile).join(".vagrant.d").join("Vagrantfile");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_vagrant_write_path() -> PathBuf {
+    if let Some(p) = get_vagrant_config_path() {
+        return p;
+    }
+    if let Ok(vhome) = std::env::var("VAGRANT_HOME") {
+        return PathBuf::from(vhome.trim()).join("Vagrantfile");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".vagrant.d").join("Vagrantfile");
+    }
+    PathBuf::from(".vagrant.d").join("Vagrantfile")
+}
+
+pub fn parse_vagrant_proxy(content: &str) -> Option<String> {
+    let mut candidate = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "config.proxy.http"
+                || key == "config.proxy.https"
+                || key == "config.proxy.http_proxy"
+                || key == "config.proxy.https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    candidate = Some(val.to_string());
+                }
+            }
+        }
+    }
+
+    let cand = candidate?;
+    if cand.starts_with("http://") || cand.starts_with("https://") || cand.starts_with("socks") {
+        Some(cand)
+    } else {
+        Some(format!("http://{}", cand))
+    }
+}
+
+pub fn get_vagrant_proxy() -> Option<(String, PathBuf)> {
+    let p = get_vagrant_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_vagrant_proxy(&content)?;
+    Some((proxy, p))
+}
+
 pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
@@ -6924,6 +7118,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Podman Container Engine Proxy (~/.config/containers/containers.conf)
+    if let Some((podproxy, podpath)) = get_podman_proxy() {
+        let ok = verify_proxy_url(&podproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Podman proxy `{}` in {} is dead! (podman pull / build will fail)",
+                podproxy,
+                podpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Podman",
+            format!("{} [engine]", podpath.display()),
+            podproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (podman fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Podman",
+            "containers.conf [engine]",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Vagrant Development Environments Proxy (~/.vagrant.d/Vagrantfile)
+    if let Some((vagproxy, vagpath)) = get_vagrant_proxy() {
+        let ok = verify_proxy_url(&vagproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Vagrant proxy `{}` in {} is dead! (vagrant box add / up will fail)",
+                vagproxy,
+                vagpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Vagrant",
+            format!("{} [config.proxy]", vagpath.display()),
+            vagproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (vagrant fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Vagrant",
+            "~/.vagrant.d/Vagrantfile",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -9416,5 +9674,54 @@ http = http://127.0.0.1:7890
 name = AzureCloud
 "#;
         assert_eq!(parse_azure_config_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_podman_proxy() {
+        let input_env_array = r#"[engine]
+env = [
+  "http_proxy=http://127.0.0.1:7890",
+  "https_proxy=http://127.0.0.1:7890"
+]
+"#;
+        assert_eq!(
+            parse_podman_proxy(input_env_array),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_engine_env = r#"[engine.env]
+http_proxy = "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_podman_proxy(input_engine_env),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = r#"[engine]
+cgroup_manager = "systemd"
+"#;
+        assert_eq!(parse_podman_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_vagrant_proxy() {
+        let input_vagrantfile = r#"Vagrant.configure("2") do |config|
+  if Vagrant.has_plugin?("vagrant-proxyconf")
+    config.proxy.http     = "http://127.0.0.1:7890"
+    config.proxy.https    = "http://127.0.0.1:7890"
+    config.proxy.no_proxy = "localhost,127.0.0.1"
+  end
+end
+"#;
+        assert_eq!(
+            parse_vagrant_proxy(input_vagrantfile),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_none = r#"Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/focal64"
+end
+"#;
+        assert_eq!(parse_vagrant_proxy(input_none), None);
     }
 }
