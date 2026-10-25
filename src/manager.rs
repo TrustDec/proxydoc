@@ -6175,6 +6175,239 @@ pub fn unset_snap_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_ollama_proxy(content: &str, proxy_url: &str) -> String {
+    let trim_content = content.trim();
+    if trim_content.is_empty() {
+        return format!(
+            "[Service]\nEnvironment=\"HTTP_PROXY={}\"\nEnvironment=\"HTTPS_PROXY={}\"\n",
+            proxy_url, proxy_url
+        );
+    }
+
+    // Handle macOS LaunchAgent plist XML format
+    if content.contains("<plist") {
+        if content.contains("<key>EnvironmentVariables</key>") {
+            let mut lines = Vec::new();
+            let mut in_env_dict = false;
+            let mut replaced_http = false;
+            let mut replaced_https = false;
+            for line in content.lines() {
+                let lower = line.trim().to_ascii_lowercase();
+                if lower.contains("<key>environmentvariables</key>") {
+                    in_env_dict = true;
+                    lines.push(line.to_string());
+                    continue;
+                }
+                if in_env_dict && lower.contains("</dict>") {
+                    if !replaced_http {
+                        lines.push(format!("        <key>HTTP_PROXY</key>\n        <string>{}</string>", proxy_url));
+                    }
+                    if !replaced_https {
+                        lines.push(format!("        <key>HTTPS_PROXY</key>\n        <string>{}</string>", proxy_url));
+                    }
+                    in_env_dict = false;
+                    lines.push(line.to_string());
+                    continue;
+                }
+                if in_env_dict && (lower.contains("<key>http_proxy</key>") || lower.contains("<key>https_proxy</key>")) {
+                    if lower.contains("<key>http_proxy</key>") {
+                        lines.push(format!("        <key>HTTP_PROXY</key>\n        <string>{}</string>", proxy_url));
+                        replaced_http = true;
+                    } else {
+                        lines.push(format!("        <key>HTTPS_PROXY</key>\n        <string>{}</string>", proxy_url));
+                        replaced_https = true;
+                    }
+                    continue;
+                }
+                lines.push(line.to_string());
+            }
+            return lines.join("\n") + "\n";
+        } else if let Some(dict_pos) = content.find("<dict>") {
+            let (before, after) = content.split_at(dict_pos + 6);
+            return format!(
+                "{}\n    <key>EnvironmentVariables</key>\n    <dict>\n        <key>HTTP_PROXY</key>\n        <string>{}</string>\n        <key>HTTPS_PROXY</key>\n        <string>{}</string>\n    </dict>{}",
+                before, proxy_url, proxy_url, after
+            );
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "all_proxy" || k_low == "ollama_proxy" {
+                    lines.push(format!("Environment=\"OLLAMA_PROXY={}\"", proxy_url));
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "all_proxy" || key == "ollama_proxy" {
+                lines.push(format!("OLLAMA_PROXY=\"{}\"", proxy_url));
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        if has_service_section {
+            let mut new_lines = Vec::new();
+            for l in &lines {
+                new_lines.push(l.clone());
+                if l.trim().eq_ignore_ascii_case("[service]") {
+                    new_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    if !replaced_https {
+                        new_lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                    }
+                }
+            }
+            lines = new_lines;
+        } else {
+            lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+            if !replaced_https {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+            }
+        }
+    }
+
+    if !replaced_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_ollama_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "ollama_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "ollama_proxy"
+                || key == "proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        if lower.contains("<key>http_proxy</key>")
+            || lower.contains("<key>https_proxy</key>")
+            || lower.contains("<key>ollama_proxy</key>")
+        {
+            changed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_ollama_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_ollama_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_ollama_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_ollama_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_ollama_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_ollama_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -6239,6 +6472,7 @@ pub async fn turn_on(
     docker_daemon: bool,
     flatpak: bool,
     snap: bool,
+    ollama: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -6302,6 +6536,7 @@ pub async fn turn_on(
     let set_docker_daemon = docker_daemon || all;
     let set_flatpak = flatpak || all;
     let set_snap = snap || all;
+    let set_ollama = ollama || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -7133,6 +7368,21 @@ pub async fn turn_on(
         }
     }
 
+    if set_ollama {
+        match set_ollama_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Ollama local AI runner daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Ollama daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -7210,6 +7460,7 @@ pub fn turn_off(
     docker_daemon: bool,
     flatpak: bool,
     snap: bool,
+    ollama: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -7273,6 +7524,7 @@ pub fn turn_off(
     let unset_docker_daemon = docker_daemon || all;
     let unset_flatpak = flatpak || all;
     let unset_snap = snap || all;
+    let unset_ollama = ollama || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -7838,6 +8090,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Snap proxy removed from snapd config / system settings".green()),
             Ok(false) => eprintln!("{}", "○ Snap proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Snap proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_ollama {
+        match unset_ollama_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Ollama daemon proxy removed from service/environment config".green()),
+            Ok(false) => eprintln!("{}", "○ Ollama proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Ollama daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -9246,5 +9506,33 @@ contexts: []
         let (cleaned_ini, removed_ini) = remove_snap_proxy(&with_ini);
         assert!(removed_ini);
         assert!(!cleaned_ini.contains("proxy.http"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_ollama_proxy() {
+        let initial_systemd = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"HTTPS_PROXY=http://127.0.0.1:7890\"\n";
+        let updated = apply_ollama_proxy(initial_systemd, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("Environment=\"HTTP_PROXY=socks5://127.0.0.1:1080\""));
+        assert!(updated.contains("Environment=\"HTTPS_PROXY=socks5://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_ollama_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY="));
+        assert!(!cleaned.contains("HTTPS_PROXY="));
+
+        // Empty file case creates systemd drop-in format
+        let clean = "";
+        let generated = apply_ollama_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("[Service]"));
+        assert!(generated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:7890\""));
+
+        // Env file format case
+        let env_initial = "HTTP_PROXY=\"http://127.0.0.1:7890\"\nHTTPS_PROXY=\"http://127.0.0.1:7890\"\n";
+        let env_updated = apply_ollama_proxy(env_initial, "http://127.0.0.1:8888");
+        assert!(env_updated.contains("HTTP_PROXY=\"http://127.0.0.1:8888\""));
+        let (env_cleaned, env_removed) = remove_ollama_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("HTTP_PROXY="));
     }
 }

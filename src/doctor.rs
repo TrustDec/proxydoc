@@ -6244,6 +6244,349 @@ pub fn get_snap_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_ollama_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("OLLAMA_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("environment");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("OLLAMA_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_env = home.join(".ollama").join("environment");
+        if user_env.exists() && !paths.contains(&user_env) {
+            paths.push(user_env);
+        }
+        let user_cfg = home.join(".ollama").join("config");
+        if user_cfg.exists() && !paths.contains(&user_cfg) {
+            paths.push(user_cfg);
+        }
+        let xdg_env = home.join(".config").join("ollama").join("environment");
+        if xdg_env.exists() && !paths.contains(&xdg_env) {
+            paths.push(xdg_env);
+        }
+        let user_systemd = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("ollama.service.d")
+            .join("http-proxy.conf");
+        if user_systemd.exists() && !paths.contains(&user_systemd) {
+            paths.push(user_systemd);
+        }
+        let mac_plist = home
+            .join("Library")
+            .join("LaunchAgents")
+            .join("com.ollama.ollama.plist");
+        if mac_plist.exists() && !paths.contains(&mac_plist) {
+            paths.push(mac_plist);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/systemd/system/ollama.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/ollama.service.d/override.conf"),
+        PathBuf::from("/etc/systemd/system/ollama.service.d/proxy.conf"),
+        PathBuf::from("/etc/systemd/system/ollama.service"),
+        PathBuf::from("/etc/default/ollama"),
+        PathBuf::from("/etc/ollama/ollama.conf"),
+        PathBuf::from("/etc/sysconfig/ollama"),
+        PathBuf::from("/Library/LaunchAgents/com.ollama.ollama.plist"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_ollama_config_path() -> Option<PathBuf> {
+    let paths = get_ollama_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_ollama_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_ollama_write_path() -> PathBuf {
+    if let Some(p) = get_ollama_config_path() {
+        return p;
+    }
+    let systemd_dir = PathBuf::from("/etc/systemd/system/ollama.service.d");
+    if systemd_dir.is_dir() {
+        let candidate = systemd_dir.join("http-proxy.conf");
+        if let Ok(f) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&candidate)
+        {
+            drop(f);
+            return candidate;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let mac_agent_dir = home.join("Library").join("LaunchAgents");
+        if mac_agent_dir.is_dir() {
+            let mac_plist = mac_agent_dir.join("com.ollama.ollama.plist");
+            if mac_plist.exists() {
+                return mac_plist;
+            }
+        }
+        let user_ollama = home.join(".ollama");
+        if user_ollama.is_dir() {
+            return user_ollama.join("environment");
+        }
+        let user_systemd_dir = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("ollama.service.d");
+        if user_systemd_dir.is_dir() {
+            return user_systemd_dir.join("http-proxy.conf");
+        }
+        return home.join(".ollama").join("environment");
+    }
+    PathBuf::from("/etc/systemd/system/ollama.service.d/http-proxy.conf")
+}
+
+pub fn parse_ollama_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+
+        // Systemd drop-in format: Environment="HTTP_PROXY=..."
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "ollama_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Key-value / Environment format: HTTP_PROXY=... or OLLAMA_PROXY=...
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "ollama_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // macOS LaunchAgent plist format inline: <key>HTTP_PROXY</key><string>...</string>
+        if lower.contains("<key>http_proxy</key>")
+            || lower.contains("<key>https_proxy</key>")
+            || lower.contains("<key>ollama_proxy</key>")
+        {
+            if let Some(pos) = lower.find("<string>") {
+                let rest = &trim[pos + 8..];
+                if let Some(end) = rest.to_ascii_lowercase().find("</string>") {
+                    let val = rest[..end].trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Multi-line plist XML: <key>HTTP_PROXY</key>\n<string>...</string>
+    if content.contains("<key>HTTP_PROXY</key>")
+        || content.contains("<key>http_proxy</key>")
+        || content.contains("<key>HTTPS_PROXY</key>")
+        || content.contains("<key>https_proxy</key>")
+        || content.contains("<key>OLLAMA_PROXY</key>")
+    {
+        let mut key_matched = false;
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+            if lower == "<key>http_proxy</key>"
+                || lower == "<key>https_proxy</key>"
+                || lower == "<key>ollama_proxy</key>"
+            {
+                key_matched = true;
+                continue;
+            }
+            if key_matched && lower.starts_with("<string>") && lower.ends_with("</string>") {
+                let val = trim[8..trim.len() - 9].trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+            if key_matched && trim.starts_with('<') {
+                key_matched = false;
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_ollama_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_ollama_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_ollama_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("OLLAMA_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OLLAMA_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
+        let p = PathBuf::from(p_str.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    let default_path = PathBuf::from("/etc/apk/repositories");
+    if default_path.exists() && !paths.contains(&default_path) {
+        paths.push(default_path);
+    }
+    let d_dir = PathBuf::from("/etc/apk/repositories.d");
+    if d_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(d_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().map(|e| e == "list").unwrap_or(false) && !paths.contains(&p) {
+                    paths.push(p);
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn parse_apk_repositories(content: &str) -> Vec<String> {
+    let mut repos = Vec::new();
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') {
+            continue;
+        }
+        let url_part = if trim.starts_with('@') {
+            trim.split_whitespace().nth(1).unwrap_or(trim)
+        } else {
+            trim
+        };
+        if url_part.starts_with("http://") || url_part.starts_with("https://") {
+            repos.push(url_part.to_string());
+        }
+    }
+    repos
+}
+
+pub fn clean_apk_repositories(content: &str, dead_urls: &[&str]) -> (String, bool) {
+    let mut out_lines = Vec::new();
+    let mut modified = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') {
+            out_lines.push(line.to_string());
+            continue;
+        }
+
+        let is_dead = dead_urls.iter().any(|d| trim.contains(d));
+        if is_dead {
+            out_lines.push(format!("# [proxydoc disabled dead repository] {}", line));
+            modified = true;
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+
+    (out_lines.join("\n") + "\n", modified)
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -9130,6 +9473,78 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Ollama (Local AI Model Runner Daemon) Proxy (/etc/systemd/system/ollama.service.d/http-proxy.conf / ~/.ollama/environment / plist)
+    if let Some((ollama_proxy, ollama_path)) = get_ollama_proxy() {
+        let ok = verify_proxy_url(&ollama_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Ollama local AI runner daemon proxy `{}` in {} is dead! (ollama pull/run will fail)",
+                ollama_proxy,
+                ollama_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Ollama Daemon",
+            format!("{}", ollama_path.display()),
+            ollama_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (ollama fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Ollama Daemon",
+            "/etc/systemd/system/ollama.service.d/http-proxy.conf & ~/.ollama/environment",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Alpine Linux Package Manager (apk) Repositories & Mirrors (/etc/apk/repositories)
+    let apk_paths = get_apk_repositories_paths();
+    if !apk_paths.is_empty() {
+        for apath in apk_paths {
+            if let Ok(content) = std::fs::read_to_string(&apath) {
+                let repos = parse_apk_repositories(&content);
+                for repo in repos {
+                    let ok = verify_proxy_url(&repo).await;
+                    if !ok {
+                        root_issues.push(format!(
+                            "Alpine Linux apk repository mirror `{}` in {} is unreachable! (apk add/update will fail)",
+                            repo,
+                            apath.display()
+                        ));
+                    }
+                    items.push(DiagItem::new(
+                        "Alpine apk",
+                        format!("{}", apath.display()),
+                        repo,
+                        if ok {
+                            "● Reachable Repository".green().to_string()
+                        } else {
+                            "▲ UNREACHABLE REPOSITORY! (apk fails)"
+                                .red()
+                                .bold()
+                                .to_string()
+                        },
+                    ));
+                }
+            }
+        }
+    } else {
+        items.push(DiagItem::new(
+            "Alpine apk",
+            "/etc/apk/repositories",
+            "(not set)".dimmed().to_string(),
+            "○ Official Mirrors / Non-Alpine OS".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -9608,6 +10023,9 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         "registry.yarnpkg.com",
         "crates.io",
         "proxy.golang.org",
+        "registry.ollama.ai",
+        "ghcr.io",
+        "objects.githubusercontent.com",
         "api.perplexity.ai",
         "api.mistral.ai",
     ];
@@ -9736,6 +10154,11 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ("rubygems.org", 443),
         ("api2.cursor.sh", 443),
         ("api.lancedb.com", 443),
+        ("registry.ollama.ai", 443),
+        ("ghcr.io", 443),
+        ("objects.githubusercontent.com", 443),
+        ("api.tailscale.com", 443),
+        ("api.replit.com", 443),
     ];
 
     for (domain, port) in dns_targets {
@@ -12092,5 +12515,81 @@ Environment="HTTPS_PROXY=http://127.0.0.1:7890"
 
         let input_empty = "";
         assert_eq!(parse_snap_proxy(input_empty), None);
+    }
+
+    #[test]
+    fn test_parse_ollama_proxy() {
+        let input_systemd = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_ollama_proxy(input_systemd),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_env = "HTTP_PROXY=socks5://127.0.0.1:1080\nHTTPS_PROXY=socks5://127.0.0.1:1080\n";
+        assert_eq!(
+            parse_ollama_proxy(input_env),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_ollama_proxy = "OLLAMA_PROXY=http://127.0.0.1:8888\n";
+        assert_eq!(
+            parse_ollama_proxy(input_ollama_proxy),
+            Some("http://127.0.0.1:8888".to_string())
+        );
+
+        let input_plist = r#"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HTTP_PROXY</key>
+        <string>http://127.0.0.1:7890</string>
+    </dict>
+</dict>
+</plist>
+"#;
+        assert_eq!(
+            parse_ollama_proxy(input_plist),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "#HTTP_PROXY=http://127.0.0.1:7890\n;Environment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_ollama_proxy(input_comment), None);
+
+        let input_empty = "";
+        assert_eq!(parse_ollama_proxy(input_empty), None);
+    }
+
+    #[test]
+    fn test_parse_and_clean_apk_repositories() {
+        let input_repos = r#"
+# Alpine official repositories
+https://dl-cdn.alpinelinux.org/alpine/v3.20/main
+https://dl-cdn.alpinelinux.org/alpine/v3.20/community
+@testing https://mirror.example.com/alpine/edge/testing
+https://dead-mirror.example.com/alpine/v3.20/main
+"#;
+        let repos = parse_apk_repositories(input_repos);
+        assert_eq!(repos.len(), 4);
+        assert_eq!(repos[0], "https://dl-cdn.alpinelinux.org/alpine/v3.20/main");
+        assert_eq!(repos[1], "https://dl-cdn.alpinelinux.org/alpine/v3.20/community");
+        assert_eq!(repos[2], "https://mirror.example.com/alpine/edge/testing");
+        assert_eq!(repos[3], "https://dead-mirror.example.com/alpine/v3.20/main");
+
+        let dead = ["https://dead-mirror.example.com/alpine/v3.20/main"];
+        let (cleaned, modified) = clean_apk_repositories(input_repos, &dead);
+        assert!(modified);
+        assert!(cleaned.contains("# [proxydoc disabled dead repository] https://dead-mirror.example.com/alpine/v3.20/main"));
+        assert!(cleaned.contains("https://dl-cdn.alpinelinux.org/alpine/v3.20/main"));
+
+        let remaining = parse_apk_repositories(&cleaned);
+        assert_eq!(remaining.len(), 3);
+        assert!(!remaining.contains(&"https://dead-mirror.example.com/alpine/v3.20/main".to_string()));
     }
 }

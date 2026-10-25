@@ -282,6 +282,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Deno Deploy API",
         "https://api.deno.com/v1/user",
     ),
+    (
+        "Ollama Registry",
+        "https://registry.ollama.ai/v2/",
+    ),
+    (
+        "GHCR (GitHub Packages)",
+        "https://ghcr.io/v2/",
+    ),
+    (
+        "GitHub Releases (Objects)",
+        "https://objects.githubusercontent.com",
+    ),
+    (
+        "Tailscale API",
+        "https://api.tailscale.com/api/v2",
+    ),
+    (
+        "Replit API",
+        "https://api.replit.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -877,6 +897,11 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Fastly API"));
         assert!(standard.iter().any(|(name, _)| *name == "Gitee API"));
         assert!(standard.iter().any(|(name, _)| *name == "Deno Deploy API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Ollama Registry"));
+        assert!(standard.iter().any(|(name, _)| *name == "GHCR (GitHub Packages)"));
+        assert!(standard.iter().any(|(name, _)| *name == "GitHub Releases (Objects)"));
+        assert!(standard.iter().any(|(name, _)| *name == "Tailscale API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Replit API"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
