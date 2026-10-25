@@ -4783,6 +4783,159 @@ pub fn get_colima_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn get_minikube_config_path() -> Option<PathBuf> {
+    if let Ok(minikube_home) = std::env::var("MINIKUBE_HOME") {
+        let candidates = [
+            PathBuf::from(minikube_home.trim()).join("config").join("config.json"),
+            PathBuf::from(minikube_home.trim()).join(".minikube").join("config").join("config.json"),
+            PathBuf::from(minikube_home.trim()).join("config.json"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".minikube").join("config").join("config.json"),
+            home.join(".minikube").join("config.json"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_minikube_write_path() -> PathBuf {
+    if let Some(p) = get_minikube_config_path() {
+        return p;
+    }
+    if let Ok(minikube_home) = std::env::var("MINIKUBE_HOME") {
+        return PathBuf::from(minikube_home.trim()).join("config").join("config.json");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".minikube").join("config").join("config.json");
+    }
+    PathBuf::from(".minikube").join("config").join("config.json")
+}
+
+pub fn parse_minikube_proxy(content: &str) -> Option<String> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = v.as_object() {
+            for key in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"] {
+                if let Some(val) = obj.get(key).and_then(|x| x.as_str()) {
+                    let trim = val.trim();
+                    if !trim.is_empty() && trim != "none" {
+                        if trim.starts_with("http://") || trim.starts_with("https://") || trim.starts_with("socks") {
+                            return Some(trim.to_string());
+                        } else {
+                            return Some(format!("http://{}", trim));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_minikube_proxy() -> Option<(String, PathBuf)> {
+    let p = get_minikube_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_minikube_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn get_spack_config_path() -> Option<PathBuf> {
+    if let Ok(spack_path) = std::env::var("SPACK_USER_CONFIG_PATH") {
+        let p = PathBuf::from(spack_path.trim());
+        if p.is_file() && p.exists() {
+            return Some(p);
+        }
+        let p_cfg = p.join("config.yaml");
+        if p_cfg.exists() {
+            return Some(p_cfg);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".spack").join("config.yaml"),
+            home.join(".config").join("spack").join("config.yaml"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("spack").join("config.yaml");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let p = PathBuf::from(appdata.trim()).join("spack").join("config.yaml");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_spack_write_path() -> PathBuf {
+    if let Some(p) = get_spack_config_path() {
+        return p;
+    }
+    if let Ok(spack_path) = std::env::var("SPACK_USER_CONFIG_PATH") {
+        let p = PathBuf::from(spack_path.trim());
+        if p.ends_with("config.yaml") {
+            return p;
+        }
+        return p.join("config.yaml");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".spack").join("config.yaml");
+    }
+    PathBuf::from(".spack").join("config.yaml")
+}
+
+pub fn parse_spack_proxy(content: &str) -> Option<String> {
+    let mut candidate = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once(':') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy" || key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() && val != "none" {
+                    candidate = Some(val.to_string());
+                }
+            }
+        }
+    }
+    let cand = candidate?;
+    if cand.starts_with("http://") || cand.starts_with("https://") || cand.starts_with("socks") {
+        Some(cand)
+    } else {
+        Some(format!("http://{}", cand))
+    }
+}
+
+pub fn get_spack_proxy() -> Option<(String, PathBuf)> {
+    let p = get_spack_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_spack_proxy(&content)?;
+    Some((proxy, p))
+}
+
 pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
@@ -7436,6 +7589,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Minikube Local Kubernetes Cluster Proxy (~/.minikube/config/config.json)
+    if let Some((miniproxy, minipath)) = get_minikube_proxy() {
+        let ok = verify_proxy_url(&miniproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Minikube cluster proxy `{}` in {} is dead! (minikube start / pull will fail)",
+                miniproxy,
+                minipath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Minikube",
+            format!("{} [config.json]", minipath.display()),
+            miniproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (minikube fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Minikube",
+            "~/.minikube/config/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Spack Scientific & HPC Package Manager Proxy (~/.spack/config.yaml)
+    if let Some((spackproxy, spackpath)) = get_spack_proxy() {
+        let ok = verify_proxy_url(&spackproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Spack package manager proxy `{}` in {} is dead! (spack install / fetch will fail)",
+                spackproxy,
+                spackpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Spack",
+            format!("{} [config.yaml]", spackpath.display()),
+            spackproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (spack fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Spack",
+            "~/.spack/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -10035,5 +10252,62 @@ network:
   address: false
 "#;
         assert_eq!(parse_colima_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_minikube_proxy() {
+        let input_json = r#"{
+    "http_proxy": "http://127.0.0.1:7890",
+    "https_proxy": "http://127.0.0.1:7890",
+    "no_proxy": "localhost,127.0.0.1"
+}"#;
+        assert_eq!(
+            parse_minikube_proxy(input_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_upper = r#"{ "HTTP_PROXY": "127.0.0.1:1080" }"#;
+        assert_eq!(
+            parse_minikube_proxy(input_upper),
+            Some("http://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = r#"{ "driver": "docker" }"#;
+        assert_eq!(parse_minikube_proxy(input_none), None);
+
+        let input_empty = r#"{ "http_proxy": "" }"#;
+        assert_eq!(parse_minikube_proxy(input_empty), None);
+    }
+
+    #[test]
+    fn test_parse_spack_proxy() {
+        let input_yaml = r#"config:
+  proxy: "http://127.0.0.1:7890"
+  connect_timeout: 10
+"#;
+        assert_eq!(
+            parse_spack_proxy(input_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_http_proxy = r#"config:
+  http_proxy: http://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_spack_proxy(input_http_proxy),
+            Some("http://127.0.0.1:1080".to_string())
+        );
+
+        let input_raw_host_port = "proxy: 127.0.0.1:8888\n";
+        assert_eq!(
+            parse_spack_proxy(input_raw_host_port),
+            Some("http://127.0.0.1:8888".to_string())
+        );
+
+        let input_commented = "# proxy: http://127.0.0.1:7890\n";
+        assert_eq!(parse_spack_proxy(input_commented), None);
+
+        let input_empty = "config:\n  connect_timeout: 10\n";
+        assert_eq!(parse_spack_proxy(input_empty), None);
     }
 }

@@ -4886,6 +4886,197 @@ pub fn unset_colima_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_minikube_proxy(content: &str, proxy_url: &str) -> String {
+    let mut val: serde_json::Value = if content.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(content).unwrap_or_else(|_| serde_json::json!({}))
+    };
+
+    if !val.is_object() {
+        val = serde_json::json!({});
+    }
+
+    let obj = val.as_object_mut().unwrap();
+    obj.insert(
+        "http_proxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+    obj.insert(
+        "https_proxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+    if !obj.contains_key("no_proxy") {
+        obj.insert(
+            "no_proxy".to_string(),
+            serde_json::Value::String("localhost,127.0.0.1,10.96.0.0/12,192.168.59.0/24".to_string()),
+        );
+    }
+
+    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n"
+}
+
+pub fn remove_minikube_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut changed = false;
+            for key in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"] {
+                if obj.remove(key).is_some() {
+                    changed = true;
+                }
+            }
+            if changed {
+                let new_content = serde_json::to_string_pretty(&val)
+                    .unwrap_or_else(|_| content.to_string())
+                    + "\n";
+                return (new_content, true);
+            }
+        }
+    }
+    (content.to_string(), false)
+}
+
+pub fn set_minikube_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let write_path = crate::doctor::get_minikube_write_path();
+    if let Some(parent) = write_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if write_path.exists() {
+        std::fs::read_to_string(&write_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let new_content = apply_minikube_proxy(&content, proxy_url);
+    std::fs::write(&write_path, new_content)?;
+    Ok(write_path)
+}
+
+pub fn unset_minikube_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_minikube_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, changed) = remove_minikube_proxy(&content);
+            if changed {
+                std::fs::write(&path, new_content)?;
+            }
+            return Ok(changed);
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_spack_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_config = false;
+    let mut config_found = false;
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim == "config:" || trim.starts_with("config:") {
+            in_config = true;
+            config_found = true;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_config {
+            if !line.starts_with(' ') && !line.starts_with('\t') && trim.ends_with(':') {
+                if !proxy_set {
+                    lines.push(format!("  proxy: \"{}\"", proxy_url));
+                    proxy_set = true;
+                }
+                in_config = false;
+                lines.push(line.to_string());
+                continue;
+            }
+
+            if let Some((k, _)) = trim.split_once(':') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy" || key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                    lines.push(format!("  proxy: \"{}\"", proxy_url));
+                    proxy_set = true;
+                    continue;
+                }
+            }
+        } else if let Some((k, _)) = trim.split_once(':') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy" || key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                lines.push(format!("proxy: \"{}\"", proxy_url));
+                proxy_set = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_config && !proxy_set {
+        lines.push(format!("  proxy: \"{}\"", proxy_url));
+        proxy_set = true;
+    }
+
+    if !config_found && !proxy_set {
+        return format!("config:\n  proxy: \"{}\"\n", proxy_url);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_spack_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once(':') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy" || key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_spack_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_spack_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_spack_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_spack_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_spack_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, removed) = remove_spack_proxy(&content);
+            if removed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -4938,6 +5129,8 @@ pub async fn turn_on(
     vagrant: bool,
     choco: bool,
     colima: bool,
+    minikube: bool,
+    spack: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4989,6 +5182,8 @@ pub async fn turn_on(
     let set_vagrant = vagrant || all;
     let set_choco = choco || all;
     let set_colima = colima || all;
+    let set_minikube = minikube || all;
+    let set_spack = spack || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -5640,6 +5835,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_minikube {
+        match set_minikube_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Minikube cluster proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Minikube config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_spack {
+        match set_spack_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Spack package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Spack config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -5705,6 +5930,8 @@ pub fn turn_off(
     vagrant: bool,
     choco: bool,
     colima: bool,
+    minikube: bool,
+    spack: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5756,6 +5983,8 @@ pub fn turn_off(
     let unset_vagrant = vagrant || all;
     let unset_choco = choco || all;
     let unset_colima = colima || all;
+    let unset_minikube = minikube || all;
+    let unset_spack = spack || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -6225,6 +6454,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Colima proxy removed from colima.yaml".green()),
             Ok(false) => eprintln!("{}", "○ Colima proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Colima proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_minikube {
+        match unset_minikube_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Minikube proxy removed from config.json".green()),
+            Ok(false) => eprintln!("{}", "○ Minikube proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Minikube proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_spack {
+        match unset_spack_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Spack proxy removed from config.yaml".green()),
+            Ok(false) => eprintln!("{}", "○ Spack proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Spack proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -7345,5 +7590,47 @@ contexts: []
         assert!(!cleaned.contains("HTTPS_PROXY"));
         assert!(!cleaned.contains("ALL_PROXY"));
         assert!(cleaned.contains("cpu: 2"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_minikube_proxy() {
+        let initial = r#"{
+  "driver": "docker"
+}"#;
+        let with_proxy = apply_minikube_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("\"http_proxy\": \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("\"https_proxy\": \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("\"no_proxy\":"));
+        assert!(with_proxy.contains("\"driver\": \"docker\""));
+
+        // Replace with new proxy
+        let updated = apply_minikube_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("\"http_proxy\": \"socks5://127.0.0.1:1080\""));
+        assert!(updated.contains("\"https_proxy\": \"socks5://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_minikube_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(!cleaned.contains("https_proxy"));
+        assert!(cleaned.contains("\"driver\": \"docker\""));
+    }
+
+    #[test]
+    fn test_apply_and_remove_spack_proxy() {
+        let initial = "config:\n  connect_timeout: 10\n";
+        let with_proxy = apply_spack_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("connect_timeout: 10"));
+
+        // Replace with new proxy
+        let updated = apply_spack_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("proxy: \"socks5://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_spack_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy:"));
+        assert!(cleaned.contains("connect_timeout: 10"));
     }
 }

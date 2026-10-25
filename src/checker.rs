@@ -208,6 +208,11 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Pydantic Logfire API", "https://logfire-api.pydantic.dev"),
     ("Railway Cloud API", "https://backboard.railway.com"),
     ("Sentry API", "https://sentry.io/api/0/"),
+    ("Neon Database API", "https://console.neon.tech/api/v2"),
+    ("Render Cloud API", "https://api.render.com"),
+    ("Fly.io Machines API", "https://api.machines.dev/v1"),
+    ("Turso Database API", "https://api.turso.tech/v1"),
+    ("Clerk Auth API", "https://api.clerk.com/v1"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {

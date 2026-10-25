@@ -215,7 +215,13 @@ enum Commands {
         /// Also configure Colima container runtime proxy (~/.colima/default/colima.yaml)
         #[arg(long)]
         colima: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, and colima proxy
+        /// Also configure Minikube cluster proxy (~/.minikube/config/config.json)
+        #[arg(long)]
+        minikube: bool,
+        /// Also configure Spack scientific package manager proxy (~/.spack/config.yaml)
+        #[arg(long)]
+        spack: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, and spack proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -374,7 +380,13 @@ enum Commands {
         /// Also unset Colima container runtime proxy (~/.colima/default/colima.yaml)
         #[arg(long)]
         colima: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, and colima proxy
+        /// Also unset Minikube cluster proxy (~/.minikube/config/config.json)
+        #[arg(long)]
+        minikube: bool,
+        /// Also unset Spack scientific package manager proxy (~/.spack/config.yaml)
+        #[arg(long)]
+        spack: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, and spack proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -468,6 +480,8 @@ async fn main() -> Result<()> {
             vagrant,
             choco,
             colima,
+            minikube,
+            spack,
             all,
             shell,
         }) => {
@@ -523,6 +537,8 @@ async fn main() -> Result<()> {
                 vagrant,
                 choco,
                 colima,
+                minikube,
+                spack,
                 all,
                 shell.as_deref(),
             )
@@ -579,6 +595,8 @@ async fn main() -> Result<()> {
             vagrant,
             choco,
             colima,
+            minikube,
+            spack,
             all,
             shell,
         }) => {
@@ -633,6 +651,8 @@ async fn main() -> Result<()> {
                 vagrant,
                 choco,
                 colima,
+                minikube,
+                spack,
                 all,
                 shell.as_deref(),
             )?;
@@ -1851,6 +1871,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { colima, .. }) => {
                 assert!(colima);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_minikube() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--minikube"]).unwrap();
+        match cli.command {
+            Some(Commands::On { minikube, .. }) => {
+                assert!(minikube);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_minikube() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--minikube"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { minikube, .. }) => {
+                assert!(minikube);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_spack() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--spack"]).unwrap();
+        match cli.command {
+            Some(Commands::On { spack, .. }) => {
+                assert!(spack);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_spack() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--spack"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { spack, .. }) => {
+                assert!(spack);
             }
             _ => panic!("Expected Off command"),
         }
