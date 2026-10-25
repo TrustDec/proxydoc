@@ -5472,6 +5472,268 @@ pub fn unset_zypper_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_pacman_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_options = false;
+    let mut options_found = false;
+    let mut xfer_updated = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim().to_ascii_lowercase();
+            if in_options && !xfer_updated {
+                lines.push(format!("XferCommand = /usr/bin/curl -g -L -C - --fail --retry 3 --proxy {} -o %o %u", proxy_url));
+                xfer_updated = true;
+            }
+            in_options = section == "options";
+            if in_options {
+                options_found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_options && !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim().eq_ignore_ascii_case("xfercommand") {
+                    lines.push(format!("XferCommand = /usr/bin/curl -g -L -C - --fail --retry 3 --proxy {} -o %o %u", proxy_url));
+                    xfer_updated = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_options && !xfer_updated {
+        lines.push(format!("XferCommand = /usr/bin/curl -g -L -C - --fail --retry 3 --proxy {} -o %o %u", proxy_url));
+    }
+
+    if !options_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[options]".to_string());
+        lines.push(format!("XferCommand = /usr/bin/curl -g -L -C - --fail --retry 3 --proxy {} -o %o %u", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pacman_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, v)) = trim.split_once('=') {
+                if k.trim().eq_ignore_ascii_case("xfercommand") {
+                    let cmd = v.trim();
+                    if cmd.contains("--proxy") || cmd.contains("-x ") || cmd.contains("-x=") || cmd.contains("http_proxy=") {
+                        if cmd.contains("--retry 3") || cmd.starts_with("/usr/bin/curl") {
+                            lines.push(format!("#XferCommand = {}", cmd));
+                        }
+                        changed = true;
+                        continue;
+                    }
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_pacman_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pacman_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_pacman_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_pacman_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pacman_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pacman_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_pkg_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            let clean = trim.trim_end_matches(';').trim();
+            let split_opt = if let Some((k, v)) = clean.split_once('=') {
+                if k.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    Some((k, v))
+                } else {
+                    clean.split_once(':')
+                }
+            } else {
+                clean.split_once(':')
+            };
+            if let Some((k, _)) = split_opt {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "pkg_proxy" || key == "proxy" {
+                    lines.push(format!("http_proxy: \"{}\";", proxy_url));
+                    proxy_set = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !proxy_set {
+        lines.push(format!("http_proxy: \"{}\";", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pkg_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            let clean = trim.trim_end_matches(';').trim();
+            let split_opt = if let Some((k, v)) = clean.split_once('=') {
+                if k.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    Some((k, v))
+                } else {
+                    clean.split_once(':')
+                }
+            } else {
+                clean.split_once(':')
+            };
+            if let Some((k, _)) = split_opt {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "pkg_proxy" || key == "proxy" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_pkg_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pkg_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_pkg_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_pkg_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pkg_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pkg_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
+pub fn remove_docker_daemon_proxy_json(root: &mut serde_json::Value) -> bool {
+    let mut modified = false;
+    if let Some(obj) = root.as_object_mut() {
+        if let Some(proxies) = obj.get_mut("proxies").and_then(|p| p.as_object_mut()) {
+            if proxies.remove("http-proxy").is_some() {
+                modified = true;
+            }
+            if proxies.remove("https-proxy").is_some() {
+                modified = true;
+            }
+            if proxies.remove("httpProxy").is_some() {
+                modified = true;
+            }
+            if proxies.remove("httpsProxy").is_some() {
+                modified = true;
+            }
+            if proxies.remove("no-proxy").is_some() {
+                modified = true;
+            }
+            if proxies.remove("noProxy").is_some() {
+                modified = true;
+            }
+        }
+        if let Some(proxies) = obj.get("proxies") {
+            if proxies.as_object().map_or(false, |m| m.is_empty()) {
+                obj.remove("proxies");
+                modified = true;
+            }
+        }
+        for key in ["http-proxy", "https-proxy", "httpProxy", "httpsProxy"] {
+            if obj.remove(key).is_some() {
+                modified = true;
+            }
+        }
+    }
+    modified
+}
+
+pub fn unset_docker_daemon_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_docker_daemon_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if remove_docker_daemon_proxy_json(&mut val) {
+                        if let Ok(pretty) = serde_json::to_string_pretty(&val) {
+                            let _ = std::fs::write(&path, pretty + "\n");
+                            any_removed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -5530,6 +5792,8 @@ pub async fn turn_on(
     apt: bool,
     dnf: bool,
     zypper: bool,
+    pacman: bool,
+    pkg: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5587,6 +5851,8 @@ pub async fn turn_on(
     let set_apt = apt || all;
     let set_dnf = dnf || all;
     let set_zypper = zypper || all;
+    let set_pacman = pacman || all;
+    let set_pkg = pkg || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -6328,6 +6594,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_pacman {
+        match set_pacman_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Pacman package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Pacman config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_pkg {
+        match set_pkg_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ FreeBSD pkg package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update FreeBSD pkg config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -6399,6 +6695,8 @@ pub fn turn_off(
     apt: bool,
     dnf: bool,
     zypper: bool,
+    pacman: bool,
+    pkg: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -6456,6 +6754,8 @@ pub fn turn_off(
     let unset_apt = apt || all;
     let unset_dnf = dnf || all;
     let unset_zypper = zypper || all;
+    let unset_pacman = pacman || all;
+    let unset_pkg = pkg || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -6973,6 +7273,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Zypper proxy removed from zypp.conf".green()),
             Ok(false) => eprintln!("{}", "○ Zypper proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Zypper proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pacman {
+        match unset_pacman_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Pacman proxy removed from pacman.conf".green()),
+            Ok(false) => eprintln!("{}", "○ Pacman proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Pacman proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pkg {
+        match unset_pkg_proxy() {
+            Ok(true) => eprintln!("{}", "✔ FreeBSD pkg proxy removed from pkg.conf".green()),
+            Ok(false) => eprintln!("{}", "○ FreeBSD pkg proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset FreeBSD pkg proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -8217,5 +8533,62 @@ contexts: []
         assert!(removed);
         assert!(!cleaned.contains("proxy = "));
         assert!(cleaned.contains("solver.onlyRequires = true"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pacman_proxy() {
+        let initial = "[options]\nHoldPkg = pacman glibc\n";
+        let with_proxy = apply_pacman_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("XferCommand = /usr/bin/curl -g -L -C - --fail --retry 3 --proxy http://127.0.0.1:7890 -o %o %u"));
+        assert!(with_proxy.contains("HoldPkg = pacman glibc"));
+
+        // Replace proxy
+        let updated = apply_pacman_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("--proxy socks5://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_pacman_proxy(&updated);
+        assert!(removed);
+        assert!(cleaned.contains("#XferCommand ="));
+        assert!(cleaned.contains("HoldPkg = pacman glibc"));
+
+        // Empty file case
+        let empty = "";
+        let applied_empty = apply_pacman_proxy(empty, "http://127.0.0.1:7890");
+        assert!(applied_empty.contains("[options]"));
+        assert!(applied_empty.contains("--proxy http://127.0.0.1:7890"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pkg_proxy() {
+        let initial = "# FreeBSD pkg config\nPKG_DBDIR = \"/var/db/pkg\";\n";
+        let with_proxy = apply_pkg_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("http_proxy: \"http://127.0.0.1:7890\";"));
+        assert!(with_proxy.contains("PKG_DBDIR = \"/var/db/pkg\";"));
+
+        // Replace proxy
+        let updated = apply_pkg_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("http_proxy: \"socks5://127.0.0.1:1080\";"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_pkg_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(cleaned.contains("PKG_DBDIR = \"/var/db/pkg\";"));
+    }
+
+    #[test]
+    fn test_remove_docker_daemon_proxy_json() {
+        let mut root: serde_json::Value = serde_json::json!({
+            "log-level": "info",
+            "proxies": {
+                "http-proxy": "http://127.0.0.1:7890",
+                "https-proxy": "http://127.0.0.1:7890",
+                "no-proxy": "localhost"
+            }
+        });
+        assert!(remove_docker_daemon_proxy_json(&mut root));
+        assert!(root.get("proxies").is_none());
+        assert_eq!(root["log-level"], "info");
     }
 }

@@ -5515,6 +5515,322 @@ pub fn clean_helm_repositories(content: &str, dead_urls: &[&str]) -> (String, bo
     (res, modified)
 }
 
+pub fn get_pacman_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(pacman_conf) = std::env::var("PACMAN_CONF") {
+        let p = PathBuf::from(pacman_conf.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_pacman = home.join(".config").join("pacman").join("pacman.conf");
+        if user_pacman.exists() && !paths.contains(&user_pacman) {
+            paths.push(user_pacman);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/pacman.conf"),
+        PathBuf::from("C:\\msys64\\etc\\pacman.conf"),
+        PathBuf::from("C:\\tools\\msys64\\etc\\pacman.conf"),
+        PathBuf::from("C:\\msys2\\etc\\pacman.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_pacman_config_path() -> Option<PathBuf> {
+    let paths = get_pacman_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_pacman_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_pacman_write_path() -> PathBuf {
+    if let Some(p) = get_pacman_config_path() {
+        return p;
+    }
+    let etc = PathBuf::from("/etc");
+    if etc.is_dir() {
+        let default_target = etc.join("pacman.conf");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&default_target) {
+            drop(f);
+            return default_target;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("pacman").join("pacman.conf");
+    }
+    PathBuf::from("/etc/pacman.conf")
+}
+
+pub fn parse_pacman_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            if k.trim().eq_ignore_ascii_case("xfercommand") {
+                let cmd = v.trim();
+                let tokens: Vec<&str> = cmd.split_whitespace().collect();
+                for i in 0..tokens.len() {
+                    let tok = tokens[i];
+                    if tok.starts_with("--proxy=") {
+                        let val = tok.trim_start_matches("--proxy=").trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    } else if tok == "--proxy" && i + 1 < tokens.len() {
+                        let val = tokens[i + 1].trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    } else if tok.starts_with("-x=") {
+                        let val = tok.trim_start_matches("-x=").trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    } else if tok == "-x" && i + 1 < tokens.len() {
+                        let val = tokens[i + 1].trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    } else if tok.contains("http_proxy=") {
+                        if let Some((_, val)) = tok.split_once("http_proxy=") {
+                            let clean = val.trim_matches('"').trim_matches('\'').trim();
+                            if !clean.is_empty() {
+                                return Some(if clean.starts_with("http://") || clean.starts_with("https://") || clean.starts_with("socks") {
+                                    clean.to_string()
+                                } else {
+                                    format!("http://{}", clean)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pacman_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pacman_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pacman_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pkg_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(pkg_conf) = std::env::var("PKG_CONF") {
+        let p = PathBuf::from(pkg_conf.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_pkg = home.join(".config").join("pkg").join("pkg.conf");
+        if user_pkg.exists() && !paths.contains(&user_pkg) {
+            paths.push(user_pkg);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/usr/local/etc/pkg.conf"),
+        PathBuf::from("/etc/pkg.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_pkg_config_path() -> Option<PathBuf> {
+    let paths = get_pkg_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_pkg_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_pkg_write_path() -> PathBuf {
+    if let Some(p) = get_pkg_config_path() {
+        return p;
+    }
+    let local_etc = PathBuf::from("/usr/local/etc");
+    if local_etc.is_dir() {
+        let default_target = local_etc.join("pkg.conf");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&default_target) {
+            drop(f);
+            return default_target;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("pkg").join("pkg.conf");
+    }
+    PathBuf::from("/usr/local/etc/pkg.conf")
+}
+
+pub fn parse_pkg_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let clean = trim.trim_end_matches(';').trim();
+        let split_opt = if let Some((k, v)) = clean.split_once('=') {
+            if k.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                Some((k, v))
+            } else {
+                clean.split_once(':')
+            }
+        } else {
+            clean.split_once(':')
+        };
+        if let Some((k, v)) = split_opt {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" || key == "https_proxy" || key == "pkg_proxy" || key == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pkg_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pkg_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pkg_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_docker_daemon_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(docker_daemon) = std::env::var("DOCKER_DAEMON_JSON") {
+        let p = PathBuf::from(docker_daemon.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/docker/daemon.json"),
+        PathBuf::from("C:\\ProgramData\\Docker\\config\\daemon.json"),
+        PathBuf::from("C:\\ProgramData\\docker\\config\\daemon.json"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_daemon = home.join(".docker").join("daemon.json");
+        if user_daemon.exists() && !paths.contains(&user_daemon) {
+            paths.push(user_daemon);
+        }
+        let rootless_daemon = home.join(".config").join("docker").join("daemon.json");
+        if rootless_daemon.exists() && !paths.contains(&rootless_daemon) {
+            paths.push(rootless_daemon);
+        }
+    }
+    paths
+}
+
+pub fn parse_docker_daemon_proxy(content: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(content).ok()?;
+    if let Some(proxies) = v.get("proxies").and_then(|p| p.as_object()) {
+        for key in ["http-proxy", "https-proxy", "httpProxy", "httpsProxy"] {
+            if let Some(val) = proxies.get(key).and_then(|s| s.as_str()) {
+                let trim = val.trim();
+                if !trim.is_empty() && !trim.eq_ignore_ascii_case("none") && !trim.eq_ignore_ascii_case("off") {
+                    return Some(if trim.starts_with("http://") || trim.starts_with("https://") || trim.starts_with("socks") {
+                        trim.to_string()
+                    } else {
+                        format!("http://{}", trim)
+                    });
+                }
+            }
+        }
+    }
+    for key in ["http-proxy", "https-proxy", "httpProxy", "httpsProxy"] {
+        if let Some(val) = v.get(key).and_then(|s| s.as_str()) {
+            let trim = val.trim();
+            if !trim.is_empty() && !trim.eq_ignore_ascii_case("none") && !trim.eq_ignore_ascii_case("off") {
+                return Some(if trim.starts_with("http://") || trim.starts_with("https://") || trim.starts_with("socks") {
+                    trim.to_string()
+                } else {
+                    format!("http://{}", trim)
+                });
+            }
+        }
+    }
+    None
+}
+
+pub fn get_docker_daemon_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_docker_daemon_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_docker_daemon_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -8206,6 +8522,102 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             "/etc/zypp/zypp.conf & ~/.zypp/zypp.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Pacman (Arch Linux / Manjaro / SteamOS / MSYS2) Package Manager Proxy (/etc/pacman.conf)
+    if let Some((pacproxy, pacpath)) = get_pacman_proxy() {
+        let ok = verify_proxy_url(&pacproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Pacman package manager proxy `{}` in {} is dead! (pacman -Syu will fail)",
+                pacproxy,
+                pacpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Pacman",
+            format!("{}", pacpath.display()),
+            pacproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (pacman fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Pacman",
+            "/etc/pacman.conf & ~/.config/pacman/pacman.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // FreeBSD pkg Package Manager Proxy (/usr/local/etc/pkg.conf / /etc/pkg.conf)
+    if let Some((pkgproxy, pkgpath)) = get_pkg_proxy() {
+        let ok = verify_proxy_url(&pkgproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "FreeBSD pkg package manager proxy `{}` in {} is dead! (pkg install/update will fail)",
+                pkgproxy,
+                pkgpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "FreeBSD pkg",
+            format!("{}", pkgpath.display()),
+            pkgproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (pkg fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "FreeBSD pkg",
+            "/usr/local/etc/pkg.conf & /etc/pkg.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Docker Daemon Engine Proxy (/etc/docker/daemon.json / ~/.docker/daemon.json)
+    if let Some((daemon_proxy, daemon_path)) = get_docker_daemon_proxy() {
+        let ok = verify_proxy_url(&daemon_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Docker Daemon proxy `{}` in {} is dead! (docker pull and image builds will fail)",
+                daemon_proxy,
+                daemon_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Docker Daemon",
+            format!("{}", daemon_path.display()),
+            daemon_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (docker pull fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Docker Daemon",
+            "/etc/docker/daemon.json & ~/.docker/daemon.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Host Network or Direct".dimmed().to_string(),
         ));
     }
 
@@ -10994,5 +11406,86 @@ proxy = http://127.0.0.1:7890
 
         let input_none = "proxy = none\n";
         assert_eq!(parse_zypper_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_pacman_proxy() {
+        let input_pacman = r#"
+[options]
+XferCommand = /usr/bin/curl -g -L -C - --fail --retry 3 --proxy http://127.0.0.1:7890 -o %o %u
+"#;
+        assert_eq!(
+            parse_pacman_proxy(input_pacman),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_short = "XferCommand = /usr/bin/curl -x socks5://127.0.0.1:1080 -L -C - -f %u -o %o\n";
+        assert_eq!(
+            parse_pacman_proxy(input_short),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_equal = "XferCommand = /usr/bin/curl --proxy=http://10.0.0.1:8080 -o %o %u\n";
+        assert_eq!(
+            parse_pacman_proxy(input_equal),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+
+        let input_commented = "#XferCommand = /usr/bin/curl --proxy http://127.0.0.1:7890\n";
+        assert_eq!(parse_pacman_proxy(input_commented), None);
+
+        let input_clean = "[options]\nHoldPkg = pacman glibc\n";
+        assert_eq!(parse_pacman_proxy(input_clean), None);
+    }
+
+    #[test]
+    fn test_parse_pkg_proxy() {
+        let input_pkg = r#"
+# FreeBSD pkg configuration
+http_proxy: "http://127.0.0.1:7890";
+"#;
+        assert_eq!(
+            parse_pkg_proxy(input_pkg),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_eq = "pkg_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(
+            parse_pkg_proxy(input_eq),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_commented = "# http_proxy: \"http://127.0.0.1:7890\";\n";
+        assert_eq!(parse_pkg_proxy(input_commented), None);
+
+        let input_none = "http_proxy: none;\n";
+        assert_eq!(parse_pkg_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_docker_daemon_proxy() {
+        let input_daemon = r#"{
+  "proxies": {
+    "http-proxy": "http://127.0.0.1:7890",
+    "https-proxy": "http://127.0.0.1:7890"
+  }
+}"#;
+        assert_eq!(
+            parse_docker_daemon_proxy(input_daemon),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_camel = r#"{
+  "proxies": {
+    "httpProxy": "socks5://127.0.0.1:1080"
+  }
+}"#;
+        assert_eq!(
+            parse_docker_daemon_proxy(input_camel),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_clean = r#"{ "log-level": "info" }"#;
+        assert_eq!(parse_docker_daemon_proxy(input_clean), None);
     }
 }

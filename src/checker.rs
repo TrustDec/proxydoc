@@ -226,6 +226,14 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Dub.co API", "https://api.dub.co"),
     ("Koyeb Cloud API", "https://api.koyeb.com/v1/account"),
     ("Novu API", "https://api.novu.co/v1/health-check"),
+    ("Linear API", "https://api.linear.app/graphql"),
+    ("Codeium API", "https://api.codeium.com"),
+    (
+        "Datadog API",
+        "https://api.datadoghq.com/api/v1/validate",
+    ),
+    ("Sanity API", "https://api.sanity.io/v1"),
+    ("Meilisearch Cloud", "https://cloud.meilisearch.com"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -801,6 +809,11 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Dub.co API"));
         assert!(standard.iter().any(|(name, _)| *name == "Koyeb Cloud API"));
         assert!(standard.iter().any(|(name, _)| *name == "Novu API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Linear API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Codeium API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Datadog API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Sanity API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Meilisearch Cloud"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
