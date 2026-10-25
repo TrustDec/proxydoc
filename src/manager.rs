@@ -5868,6 +5868,124 @@ pub fn unset_docker_daemon_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_flatpak_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_core = false;
+    let mut core_found = false;
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim().to_ascii_lowercase();
+            if in_core && !proxy_set {
+                lines.push(format!("proxy = {}", proxy_url));
+                proxy_set = true;
+            }
+            in_core = section == "core";
+            if in_core {
+                core_found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_core && !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy" || key == "http-proxy" || key == "http_proxy" {
+                    lines.push(format!("proxy = {}", proxy_url));
+                    proxy_set = true;
+                    continue;
+                }
+            }
+        }
+
+        // Also update any proxy setting inside remote sections to avoid conflict
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy" || key == "http-proxy" || key == "http_proxy" {
+                    lines.push(format!("proxy = {}", proxy_url));
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_core && !proxy_set {
+        lines.push(format!("proxy = {}", proxy_url));
+    }
+
+    if !core_found {
+        let mut new_lines = vec![
+            "[core]".to_string(),
+            "repo_version = 1".to_string(),
+            "mode = bare-user-only".to_string(),
+            format!("proxy = {}", proxy_url),
+            String::new(),
+        ];
+        new_lines.extend(lines);
+        return new_lines.join("\n").trim_end().to_string() + "\n";
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_flatpak_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy" || key == "http-proxy" || key == "http_proxy" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_flatpak_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_flatpak_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_flatpak_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_flatpak_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_flatpak_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_flatpak_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -5930,6 +6048,7 @@ pub async fn turn_on(
     pkg: bool,
     portage: bool,
     docker_daemon: bool,
+    flatpak: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5991,6 +6110,7 @@ pub async fn turn_on(
     let set_pkg = pkg || all;
     let set_portage = portage || all;
     let set_docker_daemon = docker_daemon || all;
+    let set_flatpak = flatpak || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -6792,6 +6912,21 @@ pub async fn turn_on(
         }
     }
 
+    if set_flatpak {
+        match set_flatpak_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Flatpak package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Flatpak config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -6867,6 +7002,7 @@ pub fn turn_off(
     pkg: bool,
     portage: bool,
     docker_daemon: bool,
+    flatpak: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -6928,6 +7064,7 @@ pub fn turn_off(
     let unset_pkg = pkg || all;
     let unset_portage = portage || all;
     let unset_docker_daemon = docker_daemon || all;
+    let unset_flatpak = flatpak || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -7477,6 +7614,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Docker Daemon proxy removed from daemon.json".green()),
             Ok(false) => eprintln!("{}", "○ Docker Daemon proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Docker Daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_flatpak {
+        match unset_flatpak_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Flatpak proxy removed from repo/config".green()),
+            Ok(false) => eprintln!("{}", "○ Flatpak proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Flatpak proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -8831,5 +8976,30 @@ contexts: []
         assert!(!cleaned.contains("http_proxy"));
         assert!(!cleaned.contains("https_proxy"));
         assert!(cleaned.contains("CFLAGS=\"-O2 -pipe\""));
+    }
+
+    #[test]
+    fn test_apply_and_remove_flatpak_proxy() {
+        let initial = "[core]\nrepo_version=1\nmode=bare-user-only\n\n[remote \"flathub\"]\nurl=https://dl.flathub.org/repo/\n";
+        let with_proxy = apply_flatpak_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy = http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("mode=bare-user-only"));
+        assert!(with_proxy.contains("[remote \"flathub\"]"));
+
+        // Replace proxy
+        let updated = apply_flatpak_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("proxy = socks5://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_flatpak_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy ="));
+        assert!(cleaned.contains("[remote \"flathub\"]"));
+
+        // Empty file case
+        let clean = "";
+        let generated = apply_flatpak_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("[core]"));
+        assert!(generated.contains("proxy = http://127.0.0.1:7890"));
     }
 }

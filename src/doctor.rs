@@ -5964,6 +5964,116 @@ pub fn get_portage_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_flatpak_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("FLATPAK_USER_DIR") {
+        let p = PathBuf::from(dir.trim()).join("repo/config");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(xdg_data) = std::env::var("XDG_DATA_HOME") {
+        let p = PathBuf::from(xdg_data.trim()).join("flatpak/repo/config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_flatpak = home.join(".local").join("share").join("flatpak").join("repo").join("config");
+        if user_flatpak.exists() && !paths.contains(&user_flatpak) {
+            paths.push(user_flatpak);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/var/lib/flatpak/repo/config"),
+        PathBuf::from("/etc/flatpak/repo/config"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let remotes_d = PathBuf::from("/etc/flatpak/remotes.d");
+    if remotes_d.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(remotes_d) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() && p.extension().map_or(false, |ext| ext == "conf") && !paths.contains(&p) {
+                    paths.push(p);
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_flatpak_config_path() -> Option<PathBuf> {
+    let paths = get_flatpak_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_flatpak_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_flatpak_write_path() -> PathBuf {
+    if let Some(p) = get_flatpak_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("FLATPAK_USER_DIR") {
+        return PathBuf::from(dir.trim()).join("repo/config");
+    }
+    if let Ok(xdg_data) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(xdg_data.trim()).join("flatpak/repo/config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".local").join("share").join("flatpak").join("repo").join("config");
+    }
+    PathBuf::from("/var/lib/flatpak/repo/config")
+}
+
+pub fn parse_flatpak_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy" || key == "http-proxy" || key == "http_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_flatpak_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_flatpak_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_flatpak_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -8783,6 +8893,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
             "/etc/docker/daemon.json & ~/.docker/daemon.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Host Network or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Flatpak (OSTree / Linux Desktop Application Manager) Proxy (~/.local/share/flatpak/repo/config / /var/lib/flatpak/repo/config)
+    if let Some((flatpak_proxy, flatpak_path)) = get_flatpak_proxy() {
+        let ok = verify_proxy_url(&flatpak_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Flatpak application package manager proxy `{}` in {} is dead! (flatpak install/update will fail)",
+                flatpak_proxy,
+                flatpak_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Flatpak",
+            format!("{}", flatpak_path.display()),
+            flatpak_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (flatpak fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Flatpak",
+            "~/.local/share/flatpak/repo/config & /var/lib/flatpak/repo/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
     }
 
@@ -11684,5 +11826,38 @@ https_proxy="http://127.0.0.1:7890"
 
         let input_none = "http_proxy=\"none\"\n";
         assert_eq!(parse_portage_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_flatpak_proxy() {
+        let input_core = r#"
+[core]
+repo_version=1
+mode=bare-user-only
+proxy = http://127.0.0.1:7890
+
+[remote "flathub"]
+url=https://dl.flathub.org/repo/
+"#;
+        assert_eq!(
+            parse_flatpak_proxy(input_core),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_http_proxy = r#"
+[remote "flathub"]
+url=https://dl.flathub.org/repo/
+http-proxy = "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_flatpak_proxy(input_http_proxy),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "#proxy=http://127.0.0.1:7890\n;http-proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_flatpak_proxy(input_comment), None);
+
+        let input_clean = "[core]\nrepo_version=1\n";
+        assert_eq!(parse_flatpak_proxy(input_clean), None);
     }
 }

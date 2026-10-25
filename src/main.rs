@@ -245,7 +245,10 @@ enum Commands {
         /// Also configure Docker Daemon engine proxy (/etc/docker/daemon.json)
         #[arg(long, visible_alias = "daemon")]
         docker_daemon: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, and docker daemon proxy
+        /// Also configure Flatpak package manager proxy (~/.local/share/flatpak/repo/config / /var/lib/flatpak/repo/config)
+        #[arg(long, visible_alias = "ostree")]
+        flatpak: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, and flatpak proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -434,7 +437,10 @@ enum Commands {
         /// Also unset Docker Daemon engine proxy (/etc/docker/daemon.json)
         #[arg(long, visible_alias = "daemon")]
         docker_daemon: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, and docker daemon proxy
+        /// Also unset Flatpak package manager proxy (~/.local/share/flatpak/repo/config / /var/lib/flatpak/repo/config)
+        #[arg(long, visible_alias = "ostree")]
+        flatpak: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, and flatpak proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -538,6 +544,7 @@ async fn main() -> Result<()> {
             pkg,
             portage,
             docker_daemon,
+            flatpak,
             all,
             shell,
         }) => {
@@ -603,6 +610,7 @@ async fn main() -> Result<()> {
                 pkg,
                 portage,
                 docker_daemon,
+                flatpak,
                 all,
                 shell.as_deref(),
             )
@@ -669,6 +677,7 @@ async fn main() -> Result<()> {
             pkg,
             portage,
             docker_daemon,
+            flatpak,
             all,
             shell,
         }) => {
@@ -733,6 +742,7 @@ async fn main() -> Result<()> {
                 pkg,
                 portage,
                 docker_daemon,
+                flatpak,
                 all,
                 shell.as_deref(),
             )?;
@@ -2171,6 +2181,28 @@ mod tests {
         match cli.command {
             Some(Commands::Off { docker_daemon, .. }) => {
                 assert!(docker_daemon);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_flatpak() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--flatpak"]).unwrap();
+        match cli.command {
+            Some(Commands::On { flatpak, .. }) => {
+                assert!(flatpak);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_flatpak() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--ostree"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { flatpak, .. }) => {
+                assert!(flatpak);
             }
             _ => panic!("Expected Off command"),
         }

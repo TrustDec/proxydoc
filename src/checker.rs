@@ -242,6 +242,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Hetzner Cloud API",
         "https://api.hetzner.cloud/v1",
     ),
+    (
+        "GitLab API",
+        "https://gitlab.com/api/v4/version",
+    ),
+    (
+        "DigitalOcean API",
+        "https://api.digitalocean.com/v2/account",
+    ),
+    (
+        "Netlify API",
+        "https://api.netlify.com/api/v1",
+    ),
+    (
+        "Scaleway Cloud API",
+        "https://api.scaleway.com",
+    ),
+    (
+        "Linode (Akamai) API",
+        "https://api.linode.com/v4/profile",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -827,6 +847,11 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Mintlify API"));
         assert!(standard.iter().any(|(name, _)| *name == "Val Town API"));
         assert!(standard.iter().any(|(name, _)| *name == "Hetzner Cloud API"));
+        assert!(standard.iter().any(|(name, _)| *name == "GitLab API"));
+        assert!(standard.iter().any(|(name, _)| *name == "DigitalOcean API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Netlify API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Scaleway Cloud API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Linode (Akamai) API"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
