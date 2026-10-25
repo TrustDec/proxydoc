@@ -209,7 +209,13 @@ enum Commands {
         /// Also configure Vagrant proxy (~/.vagrant.d/Vagrantfile)
         #[arg(long)]
         vagrant: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, and vagrant proxy
+        /// Also configure Chocolatey package manager proxy (chocolatey.config)
+        #[arg(long, visible_alias = "chocolatey")]
+        choco: bool,
+        /// Also configure Colima container runtime proxy (~/.colima/default/colima.yaml)
+        #[arg(long)]
+        colima: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, and colima proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -362,7 +368,13 @@ enum Commands {
         /// Also unset Vagrant proxy (~/.vagrant.d/Vagrantfile)
         #[arg(long)]
         vagrant: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, and vagrant proxy
+        /// Also unset Chocolatey package manager proxy (chocolatey.config)
+        #[arg(long, visible_alias = "chocolatey")]
+        choco: bool,
+        /// Also unset Colima container runtime proxy (~/.colima/default/colima.yaml)
+        #[arg(long)]
+        colima: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, and colima proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -454,6 +466,8 @@ async fn main() -> Result<()> {
             mamba,
             podman,
             vagrant,
+            choco,
+            colima,
             all,
             shell,
         }) => {
@@ -507,6 +521,8 @@ async fn main() -> Result<()> {
                 mamba,
                 podman,
                 vagrant,
+                choco,
+                colima,
                 all,
                 shell.as_deref(),
             )
@@ -561,6 +577,8 @@ async fn main() -> Result<()> {
             mamba,
             podman,
             vagrant,
+            choco,
+            colima,
             all,
             shell,
         }) => {
@@ -613,6 +631,8 @@ async fn main() -> Result<()> {
                 mamba,
                 podman,
                 vagrant,
+                choco,
+                colima,
                 all,
                 shell.as_deref(),
             )?;
@@ -1771,6 +1791,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { vagrant, .. }) => {
                 assert!(vagrant);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_choco() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--choco"]).unwrap();
+        match cli.command {
+            Some(Commands::On { choco, .. }) => {
+                assert!(choco);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--chocolatey"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { choco, .. }) => {
+                assert!(choco);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_choco() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--choco"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { choco, .. }) => {
+                assert!(choco);
+            }
+            _ => panic!("Expected Off command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "off", "--chocolatey"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::Off { choco, .. }) => {
+                assert!(choco);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_colima() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--colima"]).unwrap();
+        match cli.command {
+            Some(Commands::On { colima, .. }) => {
+                assert!(colima);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_colima() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--colima"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { colima, .. }) => {
+                assert!(colima);
             }
             _ => panic!("Expected Off command"),
         }

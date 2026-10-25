@@ -4593,6 +4593,299 @@ pub fn unset_vagrant_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_choco_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut found_proxy_line = false;
+    let mut in_config = false;
+    let mut config_found = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("<config>") || lower.starts_with("<config ") {
+            in_config = true;
+            config_found = true;
+            lines.push(line.to_string());
+            continue;
+        }
+        if in_config && lower.starts_with("</config>") {
+            if !found_proxy_line {
+                lines.push(format!("    <add key=\"proxy\" value=\"{}\" description=\"proxy\" />", proxy_url));
+                found_proxy_line = true;
+            }
+            in_config = false;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if lower.contains("<add ") && (lower.contains("key=\"proxy\"") || lower.contains("key='proxy'")) {
+            let new_line = if lower.contains("value=") {
+                let mut rebuilt = String::new();
+                let lower_line = line.to_ascii_lowercase();
+                if let Some(vpos) = lower_line.find("value=") {
+                    rebuilt.push_str(&line[..vpos]);
+                    let after_v = &line[vpos + 6..];
+                    if let Some(quote) = after_v.chars().next() {
+                        if quote == '"' || quote == '\'' {
+                            let rest = &after_v[quote.len_utf8()..];
+                            if let Some(close_q) = rest.find(quote) {
+                                rebuilt.push_str(&format!("value=\"{}\"{}", proxy_url, &rest[close_q + quote.len_utf8()..]));
+                            } else {
+                                rebuilt.push_str(&format!("value=\"{}\"", proxy_url));
+                            }
+                        } else {
+                            rebuilt.push_str(&format!("value=\"{}\"", proxy_url));
+                        }
+                    } else {
+                        rebuilt.push_str(&format!("value=\"{}\"", proxy_url));
+                    }
+                } else {
+                    rebuilt.push_str(&format!("    <add key=\"proxy\" value=\"{}\" description=\"proxy\" />", proxy_url));
+                }
+                rebuilt
+            } else {
+                format!("    <add key=\"proxy\" value=\"{}\" description=\"proxy\" />", proxy_url)
+            };
+            lines.push(new_line);
+            found_proxy_line = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !config_found {
+        return format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<chocolatey>\n  <config>\n    <add key=\"proxy\" value=\"{}\" description=\"proxy\" />\n  </config>\n</chocolatey>\n",
+            proxy_url
+        );
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_choco_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.contains("<add ") && (lower.contains("key=\"proxy\"") || lower.contains("key='proxy'")) {
+            if let Some(val) = crate::doctor::extract_xml_attr(trim, "value") {
+                if !val.trim().is_empty() {
+                    changed = true;
+                    let mut rebuilt = String::new();
+                    let lower_line = line.to_ascii_lowercase();
+                    if let Some(vpos) = lower_line.find("value=") {
+                        rebuilt.push_str(&line[..vpos]);
+                        let after_v = &line[vpos + 6..];
+                        if let Some(quote) = after_v.chars().next() {
+                            if quote == '"' || quote == '\'' {
+                                let rest = &after_v[quote.len_utf8()..];
+                                if let Some(close_q) = rest.find(quote) {
+                                    rebuilt.push_str(&format!("value=\"\"{}", &rest[close_q + quote.len_utf8()..]));
+                                } else {
+                                    rebuilt.push_str("value=\"\"");
+                                }
+                            } else {
+                                rebuilt.push_str("value=\"\"");
+                            }
+                        } else {
+                            rebuilt.push_str("value=\"\"");
+                        }
+                    } else {
+                        rebuilt = line.to_string();
+                    }
+                    lines.push(rebuilt);
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_choco_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_choco_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_choco_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_choco_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_choco_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, removed) = remove_choco_proxy(&content);
+            if removed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub fn apply_colima_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_env = false;
+    let mut env_found = false;
+    let mut http_set = false;
+    let mut https_set = false;
+    let mut all_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim == "env:" || trim.starts_with("env:") {
+            in_env = true;
+            env_found = true;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_env {
+            if !line.starts_with(' ') && !line.starts_with('\t') && trim.ends_with(':') {
+                if !http_set {
+                    lines.push(format!("  HTTP_PROXY: \"{}\"", proxy_url));
+                    http_set = true;
+                }
+                if !https_set {
+                    lines.push(format!("  HTTPS_PROXY: \"{}\"", proxy_url));
+                    https_set = true;
+                }
+                if !all_set {
+                    lines.push(format!("  ALL_PROXY: \"{}\"", proxy_url));
+                    all_set = true;
+                }
+                in_env = false;
+                lines.push(line.to_string());
+                continue;
+            }
+
+            if let Some((k, _)) = trim.split_once(':') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" {
+                    lines.push(format!("  HTTP_PROXY: \"{}\"", proxy_url));
+                    http_set = true;
+                    continue;
+                }
+                if key == "https_proxy" {
+                    lines.push(format!("  HTTPS_PROXY: \"{}\"", proxy_url));
+                    https_set = true;
+                    continue;
+                }
+                if key == "all_proxy" {
+                    lines.push(format!("  ALL_PROXY: \"{}\"", proxy_url));
+                    all_set = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_env {
+        if !http_set {
+            lines.push(format!("  HTTP_PROXY: \"{}\"", proxy_url));
+        }
+        if !https_set {
+            lines.push(format!("  HTTPS_PROXY: \"{}\"", proxy_url));
+        }
+        if !all_set {
+            lines.push(format!("  ALL_PROXY: \"{}\"", proxy_url));
+        }
+    } else if !env_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("env:".to_string());
+        lines.push(format!("  HTTP_PROXY: \"{}\"", proxy_url));
+        lines.push(format!("  HTTPS_PROXY: \"{}\"", proxy_url));
+        lines.push(format!("  ALL_PROXY: \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_colima_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut in_env = false;
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim == "env:" || trim.starts_with("env:") {
+            in_env = true;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_env {
+            if !line.starts_with(' ') && !line.starts_with('\t') && trim.ends_with(':') {
+                in_env = false;
+                lines.push(line.to_string());
+                continue;
+            }
+
+            if let Some((k, _)) = trim.split_once(':') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_colima_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_colima_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_colima_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_colima_proxy() -> Result<bool> {
+    if let Some(path) = crate::doctor::get_colima_config_path() {
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let (new_content, removed) = remove_colima_proxy(&content);
+            if removed {
+                std::fs::write(&path, new_content)?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -4643,6 +4936,8 @@ pub async fn turn_on(
     mamba: bool,
     podman: bool,
     vagrant: bool,
+    choco: bool,
+    colima: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -4692,6 +4987,8 @@ pub async fn turn_on(
     let set_mamba = mamba || all;
     let set_podman = podman || all;
     let set_vagrant = vagrant || all;
+    let set_choco = choco || all;
+    let set_colima = colima || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -5313,6 +5610,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_choco {
+        match set_choco_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Chocolatey package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Chocolatey config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_colima {
+        match set_colima_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Colima container runtime proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Colima config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -5376,6 +5703,8 @@ pub fn turn_off(
     mamba: bool,
     podman: bool,
     vagrant: bool,
+    choco: bool,
+    colima: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5425,6 +5754,8 @@ pub fn turn_off(
     let unset_mamba = mamba || all;
     let unset_podman = podman || all;
     let unset_vagrant = vagrant || all;
+    let unset_choco = choco || all;
+    let unset_colima = colima || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -5878,6 +6209,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Vagrant proxy removed from Vagrantfile".green()),
             Ok(false) => eprintln!("{}", "○ Vagrant proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Vagrant proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_choco {
+        match unset_choco_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Chocolatey proxy removed from chocolatey.config".green()),
+            Ok(false) => eprintln!("{}", "○ Chocolatey proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Chocolatey proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_colima {
+        match unset_colima_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Colima proxy removed from colima.yaml".green()),
+            Ok(false) => eprintln!("{}", "○ Colima proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Colima proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -6958,5 +7305,45 @@ contexts: []
         assert!(!cleaned.contains("config.proxy.http"));
         assert!(!cleaned.contains("config.proxy.https"));
         assert!(cleaned.contains("config.vm.box = \"ubuntu/focal64\""));
+    }
+
+    #[test]
+    fn test_apply_and_remove_choco_proxy() {
+        let initial = r#"<?xml version="1.0" encoding="utf-8"?>
+<chocolatey>
+  <config>
+    <add key="cacheLocation" value="" description="Cache location" />
+  </config>
+</chocolatey>
+"#;
+        let with_proxy = apply_choco_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("<add key=\"proxy\" value=\"http://127.0.0.1:7890\""));
+
+        // Replace with new proxy
+        let updated = apply_choco_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("value=\"socks5://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_choco_proxy(&updated);
+        assert!(removed);
+        assert!(cleaned.contains("value=\"\""));
+        assert!(!cleaned.contains("socks5://127.0.0.1:1080"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_colima_proxy() {
+        let initial = "cpu: 2\nmemory: 4\n";
+        let with_proxy = apply_colima_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("env:"));
+        assert!(with_proxy.contains("HTTP_PROXY: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("HTTPS_PROXY: \"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("ALL_PROXY: \"http://127.0.0.1:7890\""));
+
+        let (cleaned, removed) = remove_colima_proxy(&with_proxy);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY"));
+        assert!(!cleaned.contains("HTTPS_PROXY"));
+        assert!(!cleaned.contains("ALL_PROXY"));
+        assert!(cleaned.contains("cpu: 2"));
     }
 }

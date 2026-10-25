@@ -4593,6 +4593,196 @@ pub fn get_vagrant_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn get_choco_config_path() -> Option<PathBuf> {
+    if let Ok(chocohome) = std::env::var("ChocolateyInstall") {
+        let p = PathBuf::from(chocohome.trim()).join("config").join("chocolatey.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(chocohome) = std::env::var("CHOCOLATEY_INSTALL") {
+        let p = PathBuf::from(chocohome.trim()).join("config").join("chocolatey.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(progdata) = std::env::var("ProgramData") {
+        let p = PathBuf::from(progdata.trim()).join("chocolatey").join("config").join("chocolatey.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(allusers) = std::env::var("ALLUSERSPROFILE") {
+        let p = PathBuf::from(allusers.trim()).join("chocolatey").join("config").join("chocolatey.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let default_win = PathBuf::from("C:\\ProgramData\\chocolatey\\config\\chocolatey.config");
+    if default_win.exists() {
+        return Some(default_win);
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        let p = config_dir.join("chocolatey").join("chocolatey.config");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".config").join("chocolatey").join("chocolatey.config");
+        if p.exists() {
+            return Some(p);
+        }
+        let p2 = home.join(".chocolatey").join("chocolatey.config");
+        if p2.exists() {
+            return Some(p2);
+        }
+    }
+    None
+}
+
+pub fn get_choco_write_path() -> PathBuf {
+    if let Some(p) = get_choco_config_path() {
+        return p;
+    }
+    if let Ok(chocohome) = std::env::var("ChocolateyInstall") {
+        return PathBuf::from(chocohome.trim()).join("config").join("chocolatey.config");
+    }
+    if let Ok(chocohome) = std::env::var("CHOCOLATEY_INSTALL") {
+        return PathBuf::from(chocohome.trim()).join("config").join("chocolatey.config");
+    }
+    if let Ok(progdata) = std::env::var("ProgramData") {
+        return PathBuf::from(progdata.trim()).join("chocolatey").join("config").join("chocolatey.config");
+    }
+    if cfg!(windows) {
+        return PathBuf::from("C:\\ProgramData\\chocolatey\\config\\chocolatey.config");
+    }
+    if let Some(config_dir) = dirs::config_dir() {
+        return config_dir.join("chocolatey").join("chocolatey.config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("chocolatey").join("chocolatey.config");
+    }
+    PathBuf::from(".config").join("chocolatey").join("chocolatey.config")
+}
+
+pub fn parse_choco_proxy(content: &str) -> Option<String> {
+    let clean = strip_xml_comments(content);
+    for line in clean.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+        if lower.contains("<add ") && (lower.contains("key=\"proxy\"") || lower.contains("key='proxy'")) {
+            if let Some(val) = extract_xml_attr(trim, "value") {
+                let cleaned = val.trim();
+                if !cleaned.is_empty() {
+                    if cleaned.starts_with("http://") || cleaned.starts_with("https://") || cleaned.starts_with("socks") {
+                        return Some(cleaned.to_string());
+                    } else {
+                        return Some(format!("http://{}", cleaned));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_choco_proxy() -> Option<(String, PathBuf)> {
+    let p = get_choco_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_choco_proxy(&content)?;
+    Some((proxy, p))
+}
+
+pub fn get_colima_config_path() -> Option<PathBuf> {
+    if let Ok(colima_home) = std::env::var("COLIMA_HOME") {
+        let candidates = [
+            PathBuf::from(colima_home.trim()).join("default").join("colima.yaml"),
+            PathBuf::from(colima_home.trim()).join("_current").join("colima.yaml"),
+            PathBuf::from(colima_home.trim()).join("colima.yaml"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join(".colima").join("default").join("colima.yaml"),
+            home.join(".colima").join("_current").join("colima.yaml"),
+            home.join(".colima").join("colima.yaml"),
+        ];
+        for c in candidates {
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_colima_write_path() -> PathBuf {
+    if let Some(p) = get_colima_config_path() {
+        return p;
+    }
+    if let Ok(colima_home) = std::env::var("COLIMA_HOME") {
+        return PathBuf::from(colima_home.trim()).join("default").join("colima.yaml");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".colima").join("default").join("colima.yaml");
+    }
+    PathBuf::from(".colima").join("default").join("colima.yaml")
+}
+
+pub fn parse_colima_proxy(content: &str) -> Option<String> {
+    let mut in_env = false;
+    let mut candidate = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+
+        if trim == "env:" || trim.starts_with("env:") {
+            in_env = true;
+            continue;
+        }
+
+        if in_env {
+            if !line.starts_with(' ') && !line.starts_with('\t') && trim.ends_with(':') {
+                in_env = false;
+                continue;
+            }
+
+            if let Some((k, v)) = trim.split_once(':') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        candidate = Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let cand = candidate?;
+    if cand.starts_with("http://") || cand.starts_with("https://") || cand.starts_with("socks") {
+        Some(cand)
+    } else {
+        Some(format!("http://{}", cand))
+    }
+}
+
+pub fn get_colima_proxy() -> Option<(String, PathBuf)> {
+    let p = get_colima_config_path()?;
+    let content = std::fs::read_to_string(&p).ok()?;
+    let proxy = parse_colima_proxy(&content)?;
+    Some((proxy, p))
+}
+
 pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
@@ -7182,6 +7372,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // Chocolatey Package Manager Proxy (chocolatey.config)
+    if let Some((chocoproxy, chocopath)) = get_choco_proxy() {
+        let ok = verify_proxy_url(&chocoproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Chocolatey proxy `{}` in {} is dead! (choco install / upgrade will fail)",
+                chocoproxy,
+                chocopath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Chocolatey",
+            format!("{} [config.proxy]", chocopath.display()),
+            chocoproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (choco fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Chocolatey",
+            "chocolatey.config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Colima Container Runtime Proxy (~/.colima/default/colima.yaml)
+    if let Some((colimaproxy, colimapath)) = get_colima_proxy() {
+        let ok = verify_proxy_url(&colimaproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Colima container runtime proxy `{}` in {} is dead! (colima start / pull will fail)",
+                colimaproxy,
+                colimapath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Colima",
+            format!("{} [env]", colimapath.display()),
+            colimaproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (colima fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Colima",
+            "~/.colima/default/colima.yaml [env]",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -9723,5 +9977,63 @@ end
 end
 "#;
         assert_eq!(parse_vagrant_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_choco_proxy() {
+        let input_choco = r#"<?xml version="1.0" encoding="utf-8"?>
+<chocolatey>
+  <config>
+    <add key="proxy" value="http://127.0.0.1:7890" description="proxy" />
+    <add key="proxyUser" value="" />
+  </config>
+</chocolatey>
+"#;
+        assert_eq!(
+            parse_choco_proxy(input_choco),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_empty = r#"<?xml version="1.0" encoding="utf-8"?>
+<chocolatey>
+  <config>
+    <add key="proxy" value="" />
+  </config>
+</chocolatey>
+"#;
+        assert_eq!(parse_choco_proxy(input_empty), None);
+
+        let input_none = r#"<?xml version="1.0" encoding="utf-8"?>
+<chocolatey>
+  <config>
+    <add key="cacheLocation" value="" />
+  </config>
+</chocolatey>
+"#;
+        assert_eq!(parse_choco_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_colima_proxy() {
+        let input_yaml = r#"cpu: 2
+memory: 4
+env:
+  HTTP_PROXY: "http://127.0.0.1:7890"
+  HTTPS_PROXY: "http://127.0.0.1:7890"
+  ALL_PROXY: "socks5://127.0.0.1:1080"
+network:
+  address: false
+"#;
+        assert_eq!(
+            parse_colima_proxy(input_yaml),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_none = r#"cpu: 2
+memory: 4
+network:
+  address: false
+"#;
+        assert_eq!(parse_colima_proxy(input_none), None);
     }
 }

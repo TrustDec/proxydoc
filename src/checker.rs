@@ -203,6 +203,11 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Upstash API", "https://api.upstash.com"),
     ("Vercel Cloud API", "https://api.vercel.com/v2/user"),
     ("Resend API", "https://api.resend.com"),
+    ("E2B Sandbox API", "https://api.e2b.dev"),
+    ("PostHog Analytics API", "https://us.i.posthog.com"),
+    ("Pydantic Logfire API", "https://logfire-api.pydantic.dev"),
+    ("Railway Cloud API", "https://backboard.railway.com"),
+    ("Sentry API", "https://sentry.io/api/0/"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
