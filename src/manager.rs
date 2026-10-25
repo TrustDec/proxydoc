@@ -5986,6 +5986,195 @@ pub fn unset_flatpak_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_snap_proxy(content: &str, proxy_url: &str) -> String {
+    let trim_content = content.trim();
+    if trim_content.is_empty() {
+        return format!(
+            "[Service]\nEnvironment=\"HTTP_PROXY={}\"\nEnvironment=\"HTTPS_PROXY={}\"\n",
+            proxy_url, proxy_url
+        );
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_system_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[system]"));
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..].trim().trim_matches('"').trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy.http" || key == "proxy_http" || key == "http_proxy" {
+                lines.push(format!("{} = {}", k.trim(), proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "proxy.https" || key == "proxy_https" || key == "https_proxy" {
+                lines.push(format!("{} = {}", k.trim(), proxy_url));
+                replaced_https = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        if has_service_section {
+            let mut new_lines = Vec::new();
+            for l in &lines {
+                new_lines.push(l.clone());
+                if l.trim().eq_ignore_ascii_case("[service]") {
+                    new_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    if !replaced_https {
+                        new_lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                    }
+                }
+            }
+            lines = new_lines;
+        } else if has_system_section {
+            let mut new_lines = Vec::new();
+            for l in &lines {
+                new_lines.push(l.clone());
+                if l.trim().eq_ignore_ascii_case("[system]") {
+                    new_lines.push(format!("proxy.http = {}", proxy_url));
+                    if !replaced_https {
+                        new_lines.push(format!("proxy.https = {}", proxy_url));
+                        replaced_https = true;
+                    }
+                }
+            }
+            lines = new_lines;
+        } else {
+            lines.push(format!("http_proxy={}", proxy_url));
+            if !replaced_https {
+                lines.push(format!("https_proxy={}", proxy_url));
+                replaced_https = true;
+            }
+        }
+    }
+
+    if !replaced_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        } else if has_system_section {
+            lines.push(format!("proxy.https = {}", proxy_url));
+        } else {
+            lines.push(format!("https_proxy={}", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_snap_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..].trim().trim_matches('"').trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "all_proxy" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy.http"
+                || key == "proxy.https"
+                || key == "proxy_http"
+                || key == "proxy_https"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_snap_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let _ = Command::new("snap")
+        .args([
+            "set",
+            "system",
+            &format!("proxy.http={}", proxy_url),
+            &format!("proxy.https={}", proxy_url),
+        ])
+        .status();
+
+    let path = crate::doctor::get_snap_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_snap_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_snap_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    if let Ok(st) = Command::new("snap")
+        .args(["unset", "system", "proxy.http", "proxy.https"])
+        .status()
+    {
+        if st.success() {
+            any_removed = true;
+        }
+    }
+    for path in crate::doctor::get_snap_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_snap_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -6049,6 +6238,7 @@ pub async fn turn_on(
     portage: bool,
     docker_daemon: bool,
     flatpak: bool,
+    snap: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -6111,6 +6301,7 @@ pub async fn turn_on(
     let set_portage = portage || all;
     let set_docker_daemon = docker_daemon || all;
     let set_flatpak = flatpak || all;
+    let set_snap = snap || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -6927,6 +7118,21 @@ pub async fn turn_on(
         }
     }
 
+    if set_snap {
+        match set_snap_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Snap package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Snap config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -7003,6 +7209,7 @@ pub fn turn_off(
     portage: bool,
     docker_daemon: bool,
     flatpak: bool,
+    snap: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -7065,6 +7272,7 @@ pub fn turn_off(
     let unset_portage = portage || all;
     let unset_docker_daemon = docker_daemon || all;
     let unset_flatpak = flatpak || all;
+    let unset_snap = snap || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -7622,6 +7830,14 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Flatpak proxy removed from repo/config".green()),
             Ok(false) => eprintln!("{}", "○ Flatpak proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Flatpak proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_snap {
+        match unset_snap_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Snap proxy removed from snapd config / system settings".green()),
+            Ok(false) => eprintln!("{}", "○ Snap proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Snap proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -9001,5 +9217,34 @@ contexts: []
         let generated = apply_flatpak_proxy(clean, "http://127.0.0.1:7890");
         assert!(generated.contains("[core]"));
         assert!(generated.contains("proxy = http://127.0.0.1:7890"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_snap_proxy() {
+        let initial_systemd = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"HTTPS_PROXY=http://127.0.0.1:7890\"\n";
+        let updated = apply_snap_proxy(initial_systemd, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("Environment=\"HTTP_PROXY=socks5://127.0.0.1:1080\""));
+        assert!(updated.contains("Environment=\"HTTPS_PROXY=socks5://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_snap_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY="));
+        assert!(!cleaned.contains("HTTPS_PROXY="));
+
+        // Empty file case creates systemd drop-in format
+        let clean = "";
+        let generated = apply_snap_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("[Service]"));
+        assert!(generated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:7890\""));
+
+        // INI system config case
+        let initial_ini = "[system]\nproxy.http = http://127.0.0.1:7890\n";
+        let with_ini = apply_snap_proxy(initial_ini, "http://127.0.0.1:8888");
+        assert!(with_ini.contains("proxy.http = http://127.0.0.1:8888"));
+        assert!(with_ini.contains("proxy.https = http://127.0.0.1:8888"));
+        let (cleaned_ini, removed_ini) = remove_snap_proxy(&with_ini);
+        assert!(removed_ini);
+        assert!(!cleaned_ini.contains("proxy.http"));
     }
 }

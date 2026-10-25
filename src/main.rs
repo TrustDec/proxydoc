@@ -248,7 +248,10 @@ enum Commands {
         /// Also configure Flatpak package manager proxy (~/.local/share/flatpak/repo/config / /var/lib/flatpak/repo/config)
         #[arg(long, visible_alias = "ostree")]
         flatpak: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, and flatpak proxy
+        /// Also configure Snap package manager proxy (/etc/systemd/system/snapd.service.d/http-proxy.conf / snap set system proxy.http)
+        #[arg(long, visible_alias = "snapd")]
+        snap: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, and snap proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -440,7 +443,10 @@ enum Commands {
         /// Also unset Flatpak package manager proxy (~/.local/share/flatpak/repo/config / /var/lib/flatpak/repo/config)
         #[arg(long, visible_alias = "ostree")]
         flatpak: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, and flatpak proxy
+        /// Also unset Snap package manager proxy (/etc/systemd/system/snapd.service.d/http-proxy.conf / snap set system proxy.http)
+        #[arg(long, visible_alias = "snapd")]
+        snap: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, and snap proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -545,6 +551,7 @@ async fn main() -> Result<()> {
             portage,
             docker_daemon,
             flatpak,
+            snap,
             all,
             shell,
         }) => {
@@ -611,6 +618,7 @@ async fn main() -> Result<()> {
                 portage,
                 docker_daemon,
                 flatpak,
+                snap,
                 all,
                 shell.as_deref(),
             )
@@ -678,6 +686,7 @@ async fn main() -> Result<()> {
             portage,
             docker_daemon,
             flatpak,
+            snap,
             all,
             shell,
         }) => {
@@ -743,6 +752,7 @@ async fn main() -> Result<()> {
                 portage,
                 docker_daemon,
                 flatpak,
+                snap,
                 all,
                 shell.as_deref(),
             )?;
@@ -2203,6 +2213,28 @@ mod tests {
         match cli.command {
             Some(Commands::Off { flatpak, .. }) => {
                 assert!(flatpak);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_snap() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--snap"]).unwrap();
+        match cli.command {
+            Some(Commands::On { snap, .. }) => {
+                assert!(snap);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_snap() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--snapd"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { snap, .. }) => {
+                assert!(snap);
             }
             _ => panic!("Expected Off command"),
         }

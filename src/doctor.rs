@@ -6074,6 +6074,176 @@ pub fn get_flatpak_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_snap_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("SNAP_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("snap.conf");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+        let p = PathBuf::from(xdg_config.trim()).join("snap/snap.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_snap = home.join(".snap").join("snap.conf");
+        if user_snap.exists() && !paths.contains(&user_snap) {
+            paths.push(user_snap);
+        }
+        let user_cfg = home.join(".config").join("snap").join("snap.conf");
+        if user_cfg.exists() && !paths.contains(&user_cfg) {
+            paths.push(user_cfg);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/systemd/system/snapd.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/snapd.service.d/snap_proxy.conf"),
+        PathBuf::from("/etc/systemd/system/snapd.service.d/override.conf"),
+        PathBuf::from("/var/lib/snapd/environment"),
+        PathBuf::from("/etc/snapd/snapd.conf"),
+        PathBuf::from("/etc/environment.d/snap.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_snap_config_path() -> Option<PathBuf> {
+    let paths = get_snap_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_snap_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_snap_write_path() -> PathBuf {
+    if let Some(p) = get_snap_config_path() {
+        return p;
+    }
+    let systemd_dir = PathBuf::from("/etc/systemd/system/snapd.service.d");
+    if systemd_dir.is_dir() {
+        let candidate = systemd_dir.join("http-proxy.conf");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&candidate) {
+            drop(f);
+            return candidate;
+        }
+    }
+    let var_lib_snapd = PathBuf::from("/var/lib/snapd");
+    if var_lib_snapd.is_dir() {
+        let env_path = var_lib_snapd.join("environment");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&env_path) {
+            drop(f);
+            return env_path;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("snap").join("snap.conf");
+    }
+    PathBuf::from("/etc/systemd/system/snapd.service.d/http-proxy.conf")
+}
+
+pub fn parse_snap_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..].trim().trim_matches('"').trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "all_proxy" {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy.http"
+                || key == "proxy.https"
+                || key == "proxy_http"
+                || key == "proxy_https"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_snap_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_snap_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_snap_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(out) = std::process::Command::new("snap")
+        .args(["get", "system", "proxy.http"])
+        .output()
+    {
+        if out.status.success() {
+            let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !val.is_empty()
+                && !val.eq_ignore_ascii_case("none")
+                && !val.eq_ignore_ascii_case("off")
+                && val != "0"
+            {
+                let proxy = if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                    val
+                } else {
+                    format!("http://{}", val)
+                };
+                return Some((proxy, PathBuf::from("snap system proxy.http")));
+            }
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -8923,6 +9093,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Flatpak",
             "~/.local/share/flatpak/repo/config & /var/lib/flatpak/repo/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Snap (Canonical Snapcraft / Linux Application Package Manager) Proxy (/etc/systemd/system/snapd.service.d/http-proxy.conf / snap set system proxy.http)
+    if let Some((snap_proxy, snap_path)) = get_snap_proxy() {
+        let ok = verify_proxy_url(&snap_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Snap application package manager proxy `{}` in {} is dead! (snap install/refresh will fail)",
+                snap_proxy,
+                snap_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Snap",
+            format!("{}", snap_path.display()),
+            snap_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (snap fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Snap",
+            "/etc/systemd/system/snapd.service.d/http-proxy.conf & snap set system",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -11859,5 +12061,36 @@ http-proxy = "socks5://127.0.0.1:1080"
 
         let input_clean = "[core]\nrepo_version=1\n";
         assert_eq!(parse_flatpak_proxy(input_clean), None);
+    }
+
+    #[test]
+    fn test_parse_snap_proxy() {
+        let input_systemd = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_snap_proxy(input_systemd),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_env = "http_proxy=socks5://127.0.0.1:1080\nhttps_proxy=socks5://127.0.0.1:1080\n";
+        assert_eq!(
+            parse_snap_proxy(input_env),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_ini = "[system]\nproxy.http = http://127.0.0.1:8888\nproxy.https = http://127.0.0.1:8888\n";
+        assert_eq!(
+            parse_snap_proxy(input_ini),
+            Some("http://127.0.0.1:8888".to_string())
+        );
+
+        let input_comment = "#proxy.http=http://127.0.0.1:7890\n;Environment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_snap_proxy(input_comment), None);
+
+        let input_empty = "";
+        assert_eq!(parse_snap_proxy(input_empty), None);
     }
 }
