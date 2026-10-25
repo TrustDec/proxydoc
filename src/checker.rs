@@ -342,6 +342,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Kaggle API",
         "https://www.kaggle.com/api/v1",
     ),
+    (
+        "Rust Toolchain (rustup)",
+        "https://static.rust-lang.org/dist/channel-rust-stable.toml",
+    ),
+    (
+        "HashiCorp Releases",
+        "https://releases.hashicorp.com",
+    ),
+    (
+        "Alpine Linux CDN",
+        "https://dl-cdn.alpinelinux.org/alpine/",
+    ),
+    (
+        "Gradle Distributions",
+        "https://services.gradle.org/distributions",
+    ),
+    (
+        "Conan Center (JFrog)",
+        "https://center.conan.io",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -942,6 +962,19 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "GitHub Releases (Objects)"));
         assert!(standard.iter().any(|(name, _)| *name == "Tailscale API"));
         assert!(standard.iter().any(|(name, _)| *name == "Replit API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Rust Toolchain (rustup)"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HashiCorp Releases"));
+        assert!(standard.iter().any(|(name, _)| *name == "Alpine Linux CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Gradle Distributions"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Conan Center (JFrog)"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

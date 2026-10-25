@@ -263,7 +263,13 @@ enum Commands {
         /// Also configure K3s lightweight Kubernetes node daemon proxy (/etc/systemd/system/k3s.service.env / /etc/systemd/system/k3s.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "k3s-agent", visible_alias = "rancher")]
         k3s: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, and k3s proxy
+        /// Also configure MicroK8s lightweight Kubernetes daemon proxy (/var/snap/microk8s/current/args/containerd-env / /var/snap/microk8s/current/args/microk8s-env)
+        #[arg(long, visible_alias = "canonical-k8s")]
+        microk8s: bool,
+        /// Also configure k0s zero-friction Kubernetes daemon proxy (/etc/systemd/system/k0scontroller.service.d/http-proxy.conf / /etc/default/k0scontroller)
+        #[arg(long, visible_alias = "mirantis-k8s")]
+        k0s: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, and k0s proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -470,7 +476,13 @@ enum Commands {
         /// Also unset K3s lightweight Kubernetes node daemon proxy (/etc/systemd/system/k3s.service.env / /etc/systemd/system/k3s.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "k3s-agent", visible_alias = "rancher")]
         k3s: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, and k3s proxy
+        /// Also unset MicroK8s lightweight Kubernetes daemon proxy (/var/snap/microk8s/current/args/containerd-env / /var/snap/microk8s/current/args/microk8s-env)
+        #[arg(long, visible_alias = "canonical-k8s")]
+        microk8s: bool,
+        /// Also unset k0s zero-friction Kubernetes daemon proxy (/etc/systemd/system/k0scontroller.service.d/http-proxy.conf / /etc/default/k0scontroller)
+        #[arg(long, visible_alias = "mirantis-k8s")]
+        k0s: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, and k0s proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -580,6 +592,8 @@ async fn main() -> Result<()> {
             containerd,
             buildkit,
             k3s,
+            microk8s,
+            k0s,
             all,
             shell,
         }) => {
@@ -651,6 +665,8 @@ async fn main() -> Result<()> {
                 containerd,
                 buildkit,
                 k3s,
+                microk8s,
+                k0s,
                 all,
                 shell.as_deref(),
             )
@@ -723,6 +739,8 @@ async fn main() -> Result<()> {
             containerd,
             buildkit,
             k3s,
+            microk8s,
+            k0s,
             all,
             shell,
         }) => {
@@ -793,6 +811,8 @@ async fn main() -> Result<()> {
                 containerd,
                 buildkit,
                 k3s,
+                microk8s,
+                k0s,
                 all,
                 shell.as_deref(),
             )?;
@@ -2379,6 +2399,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { k3s, .. }) => {
                 assert!(k3s);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_microk8s() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--microk8s"]).unwrap();
+        match cli.command {
+            Some(Commands::On { microk8s, .. }) => {
+                assert!(microk8s);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--canonical-k8s"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { microk8s, .. }) => {
+                assert!(microk8s);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_microk8s() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--microk8s"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { microk8s, .. }) => {
+                assert!(microk8s);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_k0s() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--k0s"]).unwrap();
+        match cli.command {
+            Some(Commands::On { k0s, .. }) => {
+                assert!(k0s);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--mirantis-k8s"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { k0s, .. }) => {
+                assert!(k0s);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_k0s() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--k0s"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { k0s, .. }) => {
+                assert!(k0s);
             }
             _ => panic!("Expected Off command"),
         }

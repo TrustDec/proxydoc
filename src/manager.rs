@@ -7046,6 +7046,430 @@ pub fn unset_k3s_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_microk8s_proxy(content: &str, proxy_url: &str) -> String {
+    let trim_content = content.trim();
+    let no_proxy_def = "10.1.0.0/16,10.152.183.0/24,127.0.0.1,127.0.0.0/8,localhost,::1,.svc,.cluster.local";
+    if trim_content.is_empty() {
+        return format!(
+            "HTTP_PROXY={}\nHTTPS_PROXY={}\nNO_PROXY={}\n",
+            proxy_url, proxy_url, no_proxy_def
+        );
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_no = false;
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "all_proxy" || k_low == "microk8s_http_proxy" {
+                    lines.push(format!("Environment=\"MICROK8S_HTTP_PROXY={}\"", proxy_url));
+                    continue;
+                } else if k_low == "no_proxy" {
+                    lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY={}", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY={}", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "all_proxy" || key == "microk8s_http_proxy" {
+                lines.push(format!("MICROK8S_HTTP_PROXY={}", proxy_url));
+                continue;
+            } else if key == "no_proxy" {
+                lines.push(format!("NO_PROXY={}", no_proxy_def));
+                replaced_no = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        if has_service_section {
+            let mut new_lines = Vec::new();
+            for l in &lines {
+                new_lines.push(l.clone());
+                if l.trim().eq_ignore_ascii_case("[service]") {
+                    new_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    if !replaced_https {
+                        new_lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                    }
+                    if !replaced_no {
+                        new_lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                    }
+                }
+            }
+            lines = new_lines;
+        } else {
+            lines.push(format!("HTTP_PROXY={}", proxy_url));
+            if !replaced_https {
+                lines.push(format!("HTTPS_PROXY={}", proxy_url));
+                replaced_https = true;
+            }
+            if !replaced_no {
+                lines.push(format!("NO_PROXY={}", no_proxy_def));
+                replaced_no = true;
+            }
+        }
+    }
+
+    if !replaced_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTPS_PROXY={}", proxy_url));
+        }
+    }
+
+    if !replaced_no {
+        if has_service_section {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        } else {
+            lines.push(format!("NO_PROXY={}", no_proxy_def));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_microk8s_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "microk8s_http_proxy"
+                    || k_low == "microk8s_https_proxy"
+                    || k_low == "containerd_http_proxy"
+                    || k_low == "containerd_https_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "microk8s_http_proxy"
+                || key == "microk8s_https_proxy"
+                || key == "containerd_http_proxy"
+                || key == "containerd_https_proxy"
+                || key == "no_proxy"
+                || key == "proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_microk8s_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_microk8s_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_microk8s_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_microk8s_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_microk8s_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_microk8s_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_k0s_proxy(content: &str, proxy_url: &str) -> String {
+    let trim_content = content.trim();
+    let no_proxy_def = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,localhost,::1,.svc,.cluster.local";
+    if trim_content.is_empty() {
+        return format!(
+            "[Service]\nEnvironment=\"HTTP_PROXY={}\"\nEnvironment=\"HTTPS_PROXY={}\"\nEnvironment=\"NO_PROXY={}\"\n",
+            proxy_url, proxy_url, no_proxy_def
+        );
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_no = false;
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "all_proxy" || k_low == "k0s_http_proxy" {
+                    lines.push(format!("Environment=\"K0S_HTTP_PROXY={}\"", proxy_url));
+                    continue;
+                } else if k_low == "no_proxy" {
+                    lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "all_proxy" || key == "k0s_http_proxy" {
+                lines.push(format!("K0S_HTTP_PROXY=\"{}\"", proxy_url));
+                continue;
+            } else if key == "no_proxy" {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                replaced_no = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        if has_service_section {
+            let mut new_lines = Vec::new();
+            for l in &lines {
+                new_lines.push(l.clone());
+                if l.trim().eq_ignore_ascii_case("[service]") {
+                    new_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    if !replaced_https {
+                        new_lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                    }
+                    if !replaced_no {
+                        new_lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                    }
+                }
+            }
+            lines = new_lines;
+        } else {
+            lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+            if !replaced_https {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+            }
+            if !replaced_no {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                replaced_no = true;
+            }
+        }
+    }
+
+    if !replaced_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_no {
+        if has_service_section {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        } else {
+            lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_k0s_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "k0s_http_proxy"
+                    || k_low == "k0s_https_proxy"
+                    || k_low == "containerd_http_proxy"
+                    || k_low == "containerd_https_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "k0s_http_proxy"
+                || key == "k0s_https_proxy"
+                || key == "containerd_http_proxy"
+                || key == "containerd_https_proxy"
+                || key == "no_proxy"
+                || key == "proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_k0s_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_k0s_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_k0s_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_k0s_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_k0s_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_k0s_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -7114,6 +7538,8 @@ pub async fn turn_on(
     containerd: bool,
     buildkit: bool,
     k3s: bool,
+    microk8s: bool,
+    k0s: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -7181,6 +7607,8 @@ pub async fn turn_on(
     let set_containerd = containerd || all;
     let set_buildkit = buildkit || all;
     let set_k3s = k3s || all;
+    let set_microk8s = microk8s || all;
+    let set_k0s = k0s || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -8072,6 +8500,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_microk8s {
+        match set_microk8s_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ MicroK8s (Canonical Zero-ops Kubernetes) daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update MicroK8s daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_k0s {
+        match set_k0s_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ k0s (Mirantis Zero-friction Kubernetes) daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update k0s daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -8153,6 +8611,8 @@ pub fn turn_off(
     containerd: bool,
     buildkit: bool,
     k3s: bool,
+    microk8s: bool,
+    k0s: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -8220,6 +8680,8 @@ pub fn turn_off(
     let unset_containerd = containerd || all;
     let unset_buildkit = buildkit || all;
     let unset_k3s = k3s || all;
+    let unset_microk8s = microk8s || all;
+    let unset_k0s = k0s || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -8817,6 +9279,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ K3s daemon proxy removed from service/environment config".green()),
             Ok(false) => eprintln!("{}", "○ K3s proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset K3s daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_microk8s {
+        match unset_microk8s_proxy() {
+            Ok(true) => eprintln!("{}", "✔ MicroK8s daemon proxy removed from service/environment config".green()),
+            Ok(false) => eprintln!("{}", "○ MicroK8s proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset MicroK8s daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_k0s {
+        match unset_k0s_proxy() {
+            Ok(true) => eprintln!("{}", "✔ k0s daemon proxy removed from service/environment config".green()),
+            Ok(false) => eprintln!("{}", "○ k0s proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset k0s daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -10347,5 +10825,63 @@ contexts: []
         let (dropin_cleaned, dropin_removed) = remove_k3s_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_microk8s_proxy() {
+        let initial_env = "HTTP_PROXY=http://127.0.0.1:7890\nHTTPS_PROXY=http://127.0.0.1:7890\nNO_PROXY=10.1.0.0/16,10.152.183.0/24\n";
+        let updated = apply_microk8s_proxy(initial_env, "http://127.0.0.1:8080");
+        assert!(updated.contains("HTTP_PROXY=http://127.0.0.1:8080"));
+        assert!(updated.contains("HTTPS_PROXY=http://127.0.0.1:8080"));
+        assert!(updated.contains(".cluster.local"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_microk8s_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY="));
+        assert!(!cleaned.contains("HTTPS_PROXY="));
+
+        // Empty file case
+        let clean = "";
+        let generated = apply_microk8s_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("HTTP_PROXY=http://127.0.0.1:7890"));
+        assert!(generated.contains("10.152.183.0/24"));
+
+        // Systemd drop-in format case
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"HTTPS_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_microk8s_proxy(dropin_initial, "socks5://127.0.0.1:1080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=socks5://127.0.0.1:1080\""));
+        let (dropin_cleaned, dropin_removed) = remove_microk8s_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_k0s_proxy() {
+        let initial_dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"HTTPS_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"NO_PROXY=localhost,127.0.0.1\"\n";
+        let updated = apply_k0s_proxy(initial_dropin, "http://127.0.0.1:8080");
+        assert!(updated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("Environment=\"HTTPS_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains(".svc,.cluster.local"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_k0s_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY="));
+        assert!(!cleaned.contains("HTTPS_PROXY="));
+
+        // Empty file case
+        let clean = "";
+        let generated = apply_k0s_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("[Service]"));
+        assert!(generated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:7890\""));
+
+        // Default env file format case
+        let env_initial = "HTTP_PROXY=\"http://127.0.0.1:7890\"\nHTTPS_PROXY=\"http://127.0.0.1:7890\"\n";
+        let env_updated = apply_k0s_proxy(env_initial, "socks5://127.0.0.1:1080");
+        assert!(env_updated.contains("HTTP_PROXY=\"socks5://127.0.0.1:1080\""));
+        let (env_cleaned, env_removed) = remove_k0s_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("HTTP_PROXY="));
     }
 }

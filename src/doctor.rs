@@ -7216,6 +7216,454 @@ pub fn get_k3s_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_microk8s_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("MICROK8S_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("containerd-env");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MICROK8S_CONTAINERD_ENV") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MICROK8S_ENV") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_env = home.join(".microk8s").join("containerd-env");
+        if user_env.exists() && !paths.contains(&user_env) {
+            paths.push(user_env);
+        }
+        let user_cfg_env = home.join(".config").join("microk8s").join("containerd-env");
+        if user_cfg_env.exists() && !paths.contains(&user_cfg_env) {
+            paths.push(user_cfg_env);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/var/snap/microk8s/current/args/containerd-env"),
+        PathBuf::from("/var/snap/microk8s/current/args/microk8s-env"),
+        PathBuf::from("/var/snap/microk8s/common/default-args/containerd-env"),
+        PathBuf::from("/etc/systemd/system/snap.microk8s.daemon-containerd.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/snap.microk8s.daemon-cluster-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/microk8s"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_microk8s_config_path() -> Option<PathBuf> {
+    let paths = get_microk8s_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_microk8s_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_microk8s_write_path() -> PathBuf {
+    if let Some(p) = get_microk8s_config_path() {
+        return p;
+    }
+    let snap_args_dir = PathBuf::from("/var/snap/microk8s/current/args");
+    if snap_args_dir.is_dir() {
+        let target = snap_args_dir.join("containerd-env");
+        if let Ok(f) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&target)
+        {
+            drop(f);
+            return target;
+        }
+    }
+    let snap_common_dir = PathBuf::from("/var/snap/microk8s/common/default-args");
+    if snap_common_dir.is_dir() {
+        let target = snap_common_dir.join("containerd-env");
+        if let Ok(f) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&target)
+        {
+            drop(f);
+            return target;
+        }
+    }
+    let systemd_dropin = PathBuf::from("/etc/systemd/system/snap.microk8s.daemon-containerd.service.d");
+    if systemd_dropin.is_dir() {
+        return systemd_dropin.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_env = home.join(".microk8s").join("containerd-env");
+        if let Some(parent) = user_env.parent() {
+            if parent.is_dir() {
+                return user_env;
+            }
+        }
+    }
+    PathBuf::from("/var/snap/microk8s/current/args/containerd-env")
+}
+
+pub fn parse_microk8s_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+
+        // Systemd drop-in format: Environment="HTTP_PROXY=..."
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "microk8s_http_proxy"
+                        || k_low == "microk8s_https_proxy"
+                        || k_low == "containerd_http_proxy"
+                        || k_low == "containerd_https_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Environment format: HTTP_PROXY=... / HTTPS_PROXY=...
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "microk8s_http_proxy"
+                || key == "microk8s_https_proxy"
+                || key == "containerd_http_proxy"
+                || key == "containerd_https_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_microk8s_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_microk8s_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_microk8s_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MICROK8S_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MICROK8S_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MICROK8S_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MICROK8S_HTTPS_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_k0s_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("K0S_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("http-proxy.conf");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("K0S_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("K0S_SYSTEMD_DROPIN") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_dropin1 = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("k0scontroller.service.d")
+            .join("http-proxy.conf");
+        if user_dropin1.exists() && !paths.contains(&user_dropin1) {
+            paths.push(user_dropin1);
+        }
+        let user_dropin2 = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("k0sworker.service.d")
+            .join("http-proxy.conf");
+        if user_dropin2.exists() && !paths.contains(&user_dropin2) {
+            paths.push(user_dropin2);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/systemd/system/k0scontroller.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/k0sworker.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/k0s.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/k0scontroller"),
+        PathBuf::from("/etc/default/k0sworker"),
+        PathBuf::from("/etc/sysconfig/k0scontroller"),
+        PathBuf::from("/etc/sysconfig/k0sworker"),
+        PathBuf::from("/etc/k0s/k0s.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_k0s_config_path() -> Option<PathBuf> {
+    let paths = get_k0s_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_k0s_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_k0s_write_path() -> PathBuf {
+    if let Some(p) = get_k0s_config_path() {
+        return p;
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/k0scontroller.service.d");
+    if dropin_dir.is_dir() {
+        let f = dropin_dir.join("http-proxy.conf");
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&f)
+        {
+            drop(file);
+            return f;
+        }
+    }
+    let worker_dropin_dir = PathBuf::from("/etc/systemd/system/k0sworker.service.d");
+    if worker_dropin_dir.is_dir() {
+        return worker_dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_dropin = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("k0scontroller.service.d");
+        if user_dropin.is_dir() {
+            return user_dropin.join("http-proxy.conf");
+        }
+    }
+    let default_controller = PathBuf::from("/etc/default/k0scontroller");
+    if default_controller.exists() {
+        return default_controller;
+    }
+    let default_worker = PathBuf::from("/etc/default/k0sworker");
+    if default_worker.exists() {
+        return default_worker;
+    }
+    PathBuf::from("/etc/systemd/system/k0scontroller.service.d/http-proxy.conf")
+}
+
+pub fn parse_k0s_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+
+        // Systemd drop-in format: Environment="HTTP_PROXY=..."
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "k0s_http_proxy"
+                        || k_low == "k0s_https_proxy"
+                        || k_low == "containerd_http_proxy"
+                        || k_low == "containerd_https_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Environment format: HTTP_PROXY=... / HTTPS_PROXY=...
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "k0s_http_proxy"
+                || key == "k0s_https_proxy"
+                || key == "containerd_http_proxy"
+                || key == "containerd_https_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_k0s_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_k0s_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_k0s_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("K0S_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:K0S_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("K0S_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:K0S_HTTPS_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -10293,6 +10741,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "K3s Kubernetes Daemon",
             "/etc/systemd/system/k3s.service.env & /etc/systemd/system/k3s.service.d/http-proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // MicroK8s (Canonical Zero-ops Kubernetes Daemon) Proxy (/var/snap/microk8s/current/args/containerd-env / /var/snap/microk8s/current/args/microk8s-env)
+    if let Some((mk8s_proxy, mk8s_path)) = get_microk8s_proxy() {
+        let ok = verify_proxy_url(&mk8s_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "MicroK8s (Canonical Zero-ops Kubernetes) node daemon proxy `{}` in {} is dead! (containerd image pull will fail)",
+                mk8s_proxy,
+                mk8s_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "MicroK8s Kubernetes Daemon",
+            format!("{}", mk8s_path.display()),
+            mk8s_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (microk8s fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "MicroK8s Kubernetes Daemon",
+            "/var/snap/microk8s/current/args/containerd-env & /var/snap/microk8s/current/args/microk8s-env",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // k0s (Mirantis Zero-friction Kubernetes Daemon) Proxy (/etc/systemd/system/k0scontroller.service.d/http-proxy.conf / /etc/default/k0scontroller)
+    if let Some((k0s_proxy, k0s_path)) = get_k0s_proxy() {
+        let ok = verify_proxy_url(&k0s_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "k0s (Mirantis Zero-friction Kubernetes) node daemon proxy `{}` in {} is dead! (k0s image pull will hang)",
+                k0s_proxy,
+                k0s_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "k0s Kubernetes Daemon",
+            format!("{}", k0s_path.display()),
+            k0s_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (k0s fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "k0s Kubernetes Daemon",
+            "/etc/systemd/system/k0scontroller.service.d/http-proxy.conf & /etc/default/k0scontroller",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -13490,5 +14002,61 @@ http-proxy: "socks5://127.0.0.1:1080"
         let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
         assert_eq!(parse_k3s_proxy(input_comment), None);
         assert_eq!(parse_k3s_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_microk8s_proxy() {
+        let env_file = r#"
+# /var/snap/microk8s/current/args/containerd-env
+HTTP_PROXY=http://127.0.0.1:7890
+HTTPS_PROXY=http://127.0.0.1:7890
+NO_PROXY=10.1.0.0/16,10.152.183.0/24,127.0.0.1,localhost
+"#;
+        assert_eq!(
+            parse_microk8s_proxy(env_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let systemd_dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://192.168.1.1:8888"
+Environment="HTTPS_PROXY=http://192.168.1.1:8888"
+"#;
+        assert_eq!(
+            parse_microk8s_proxy(systemd_dropin),
+            Some("http://192.168.1.1:8888".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_microk8s_proxy(input_comment), None);
+        assert_eq!(parse_microk8s_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_k0s_proxy() {
+        let systemd_dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+Environment="NO_PROXY=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,localhost"
+"#;
+        assert_eq!(
+            parse_k0s_proxy(systemd_dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let default_env = r#"
+# /etc/default/k0scontroller
+HTTP_PROXY="http://10.0.0.2:8080"
+HTTPS_PROXY="http://10.0.0.2:8080"
+"#;
+        assert_eq!(
+            parse_k0s_proxy(default_env),
+            Some("http://10.0.0.2:8080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_k0s_proxy(input_comment), None);
+        assert_eq!(parse_k0s_proxy(""), None);
     }
 }
