@@ -322,6 +322,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Postman API",
         "https://api.getpostman.com",
     ),
+    (
+        "GitHub Raw (User Content)",
+        "https://raw.githubusercontent.com",
+    ),
+    (
+        "Stability AI API",
+        "https://api.stability.ai/v1/user/account",
+    ),
+    (
+        "Apify API",
+        "https://api.apify.com/v2/acts",
+    ),
+    (
+        "Anyscale Endpoints API",
+        "https://api.endpoints.anyscale.com/v1/models",
+    ),
+    (
+        "Kaggle API",
+        "https://www.kaggle.com/api/v1",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {

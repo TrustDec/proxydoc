@@ -257,7 +257,13 @@ enum Commands {
         /// Also configure Containerd & CRI-O container runtime daemon proxy (/etc/systemd/system/containerd.service.d/http-proxy.conf / /etc/default/containerd)
         #[arg(long, visible_alias = "crictl", visible_alias = "cri")]
         containerd: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, and containerd proxy
+        /// Also configure BuildKit (Docker Buildx / buildctl) container builder daemon proxy (/etc/systemd/system/buildkit.service.d/http-proxy.conf / /etc/default/buildkit)
+        #[arg(long, visible_alias = "buildkitd", visible_alias = "buildx")]
+        buildkit: bool,
+        /// Also configure K3s lightweight Kubernetes node daemon proxy (/etc/systemd/system/k3s.service.env / /etc/systemd/system/k3s.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "k3s-agent", visible_alias = "rancher")]
+        k3s: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, and k3s proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -458,7 +464,13 @@ enum Commands {
         /// Also unset Containerd & CRI-O container runtime daemon proxy (/etc/systemd/system/containerd.service.d/http-proxy.conf / /etc/default/containerd)
         #[arg(long, visible_alias = "crictl", visible_alias = "cri")]
         containerd: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, and containerd proxy
+        /// Also unset BuildKit (Docker Buildx / buildctl) container builder daemon proxy (/etc/systemd/system/buildkit.service.d/http-proxy.conf / /etc/default/buildkit)
+        #[arg(long, visible_alias = "buildkitd", visible_alias = "buildx")]
+        buildkit: bool,
+        /// Also unset K3s lightweight Kubernetes node daemon proxy (/etc/systemd/system/k3s.service.env / /etc/systemd/system/k3s.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "k3s-agent", visible_alias = "rancher")]
+        k3s: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, and k3s proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -566,6 +578,8 @@ async fn main() -> Result<()> {
             snap,
             ollama,
             containerd,
+            buildkit,
+            k3s,
             all,
             shell,
         }) => {
@@ -635,6 +649,8 @@ async fn main() -> Result<()> {
                 snap,
                 ollama,
                 containerd,
+                buildkit,
+                k3s,
                 all,
                 shell.as_deref(),
             )
@@ -705,6 +721,8 @@ async fn main() -> Result<()> {
             snap,
             ollama,
             containerd,
+            buildkit,
+            k3s,
             all,
             shell,
         }) => {
@@ -773,6 +791,8 @@ async fn main() -> Result<()> {
                 snap,
                 ollama,
                 containerd,
+                buildkit,
+                k3s,
                 all,
                 shell.as_deref(),
             )?;
@@ -2299,6 +2319,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { containerd, .. }) => {
                 assert!(containerd);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_buildkit() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--buildkit"]).unwrap();
+        match cli.command {
+            Some(Commands::On { buildkit, .. }) => {
+                assert!(buildkit);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--buildx"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { buildkit, .. }) => {
+                assert!(buildkit);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_buildkit() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--buildkitd"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { buildkit, .. }) => {
+                assert!(buildkit);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_k3s() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--k3s"]).unwrap();
+        match cli.command {
+            Some(Commands::On { k3s, .. }) => {
+                assert!(k3s);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--rancher"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { k3s, .. }) => {
+                assert!(k3s);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_k3s() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--k3s-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { k3s, .. }) => {
+                assert!(k3s);
             }
             _ => panic!("Expected Off command"),
         }
