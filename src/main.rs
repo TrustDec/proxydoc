@@ -254,7 +254,10 @@ enum Commands {
         /// Also configure Ollama local AI runner daemon proxy (/etc/systemd/system/ollama.service.d/http-proxy.conf / ~/.ollama/environment)
         #[arg(long, visible_alias = "ollamad")]
         ollama: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, and ollama proxy
+        /// Also configure Containerd & CRI-O container runtime daemon proxy (/etc/systemd/system/containerd.service.d/http-proxy.conf / /etc/default/containerd)
+        #[arg(long, visible_alias = "crictl", visible_alias = "cri")]
+        containerd: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, and containerd proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -452,7 +455,10 @@ enum Commands {
         /// Also unset Ollama local AI runner daemon proxy (/etc/systemd/system/ollama.service.d/http-proxy.conf / ~/.ollama/environment)
         #[arg(long, visible_alias = "ollamad")]
         ollama: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, and ollama proxy
+        /// Also unset Containerd & CRI-O container runtime daemon proxy (/etc/systemd/system/containerd.service.d/http-proxy.conf / /etc/default/containerd)
+        #[arg(long, visible_alias = "crictl", visible_alias = "cri")]
+        containerd: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, and containerd proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -559,6 +565,7 @@ async fn main() -> Result<()> {
             flatpak,
             snap,
             ollama,
+            containerd,
             all,
             shell,
         }) => {
@@ -627,6 +634,7 @@ async fn main() -> Result<()> {
                 flatpak,
                 snap,
                 ollama,
+                containerd,
                 all,
                 shell.as_deref(),
             )
@@ -696,6 +704,7 @@ async fn main() -> Result<()> {
             flatpak,
             snap,
             ollama,
+            containerd,
             all,
             shell,
         }) => {
@@ -763,6 +772,7 @@ async fn main() -> Result<()> {
                 flatpak,
                 snap,
                 ollama,
+                containerd,
                 all,
                 shell.as_deref(),
             )?;
@@ -2267,6 +2277,28 @@ mod tests {
         match cli.command {
             Some(Commands::Off { ollama, .. }) => {
                 assert!(ollama);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_containerd() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--containerd"]).unwrap();
+        match cli.command {
+            Some(Commands::On { containerd, .. }) => {
+                assert!(containerd);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_containerd() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--crictl"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { containerd, .. }) => {
+                assert!(containerd);
             }
             _ => panic!("Expected Off command"),
         }

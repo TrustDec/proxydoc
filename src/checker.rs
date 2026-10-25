@@ -302,6 +302,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Replit API",
         "https://api.replit.com",
     ),
+    (
+        "Quay.io (Red Hat Registry)",
+        "https://quay.io/v2/",
+    ),
+    (
+        "Terraform Registry",
+        "https://registry.terraform.io/v1/providers",
+    ),
+    (
+        "Ngrok API",
+        "https://api.ngrok.com",
+    ),
+    (
+        "Grafana Cloud API",
+        "https://grafana.com/api/plugins",
+    ),
+    (
+        "Postman API",
+        "https://api.getpostman.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
