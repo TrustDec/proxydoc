@@ -462,6 +462,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "FreeBSD Pkg CDN",
         "https://pkg.freebsd.org",
     ),
+    (
+        "CircleCI API",
+        "https://circleci.com/api/v2/me",
+    ),
+    (
+        "Azure DevOps API",
+        "https://dev.azure.com",
+    ),
+    (
+        "Gentoo Linux CDN",
+        "https://distfiles.gentoo.org",
+    ),
+    (
+        "OpenBSD CDN",
+        "https://cdn.openbsd.org/pub/OpenBSD/",
+    ),
+    (
+        "NixOS Binary Cache",
+        "https://cache.nixos.org/nix-cache-info",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1142,6 +1162,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "FreeBSD Pkg CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CircleCI API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Azure DevOps API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Gentoo Linux CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenBSD CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "NixOS Binary Cache"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

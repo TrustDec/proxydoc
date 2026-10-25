@@ -9755,6 +9755,555 @@ pub fn unset_act_runner_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_circleci_runner_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "all_proxy" || k_low == "circleci_http_proxy" || k_low == "circleci_runner_http_proxy" {
+                        lines.push(format!("Environment=\"CIRCLECI_HTTP_PROXY={}\"", proxy_url));
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Key=value format (/etc/default/circleci-runner)
+    let has_kv = content.lines().any(|l| {
+        let t = l.trim().to_ascii_lowercase();
+        t.starts_with("circleci_http_proxy=") || t.starts_with("circleci_runner_http_proxy=")
+    });
+
+    if has_kv {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            if trim.starts_with('#') || trim.starts_with(';') {
+                lines.push(line.to_string());
+                continue;
+            }
+
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+                if key == "circleci_http_proxy" || key == "circleci_runner_http_proxy" || key == "http_proxy" {
+                    lines.push(format!("CIRCLECI_HTTP_PROXY=\"{}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if key == "circleci_https_proxy" || key == "circleci_runner_https_proxy" || key == "https_proxy" {
+                    lines.push(format!("CIRCLECI_HTTPS_PROXY=\"{}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if key == "circleci_no_proxy" || key == "no_proxy" {
+                    lines.push(format!("CIRCLECI_NO_PROXY=\"{}\"", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("CIRCLECI_HTTP_PROXY=\"{}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("CIRCLECI_HTTPS_PROXY=\"{}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("CIRCLECI_NO_PROXY=\"{}\"", no_proxy_def));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format: circleci-runner-config.yaml
+    let mut lines = Vec::new();
+    let mut in_proxy = false;
+    let mut proxy_found = false;
+    let mut http_set = false;
+    let mut https_set = false;
+    let mut no_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if trim == "proxy:" || trim.starts_with("proxy:") {
+            in_proxy = true;
+            proxy_found = true;
+            lines.push("proxy:".to_string());
+            continue;
+        }
+
+        if in_proxy && !line.starts_with("  ") && !trim.is_empty() {
+            if !http_set {
+                lines.push(format!("  http: \"{}\"", proxy_url));
+                http_set = true;
+            }
+            if !https_set {
+                lines.push(format!("  https: \"{}\"", proxy_url));
+                https_set = true;
+            }
+            if !no_set {
+                lines.push(format!("  no_proxy: \"{}\"", no_proxy_def));
+                no_set = true;
+            }
+            in_proxy = false;
+        }
+
+        if in_proxy {
+            if let Some((k, _)) = trim.split_once(':') {
+                let key = k.trim().to_lowercase();
+                if key == "http" || key == "http_proxy" {
+                    lines.push(format!("  http: \"{}\"", proxy_url));
+                    http_set = true;
+                    continue;
+                } else if key == "https" || key == "https_proxy" {
+                    lines.push(format!("  https: \"{}\"", proxy_url));
+                    https_set = true;
+                    continue;
+                } else if key == "no_proxy" {
+                    lines.push(format!("  no_proxy: \"{}\"", no_proxy_def));
+                    no_set = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_proxy {
+        if !http_set {
+            lines.push(format!("  http: \"{}\"", proxy_url));
+        }
+        if !https_set {
+            lines.push(format!("  https: \"{}\"", proxy_url));
+        }
+        if !no_set {
+            lines.push(format!("  no_proxy: \"{}\"", no_proxy_def));
+        }
+    } else if !proxy_found {
+        if !lines.is_empty() && !lines.last().map(|l| l.is_empty()).unwrap_or(true) {
+            lines.push(String::new());
+        }
+        lines.push("proxy:".to_string());
+        lines.push(format!("  http: \"{}\"", proxy_url));
+        lines.push(format!("  https: \"{}\"", proxy_url));
+        lines.push(format!("  no_proxy: \"{}\"", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_circleci_runner_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+    let mut in_proxy = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "circleci_http_proxy"
+                    || k_low == "circleci_runner_http_proxy"
+                    || k_low == "circleci_https_proxy"
+                    || k_low == "circleci_no_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if trim == "proxy:" || trim.starts_with("proxy:") {
+            in_proxy = true;
+            changed = true;
+            continue;
+        }
+
+        if in_proxy {
+            if line.starts_with("  ") || trim.is_empty() {
+                changed = true;
+                continue;
+            } else {
+                in_proxy = false;
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "circleci_http_proxy"
+                || key == "circleci_runner_http_proxy"
+                || key == "circleci_https_proxy"
+                || key == "circleci_no_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_circleci_runner_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_circleci_runner_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_circleci_runner_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_circleci_runner_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_circleci_runner_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_circleci_runner_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_azure_pipelines_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "all_proxy" || k_low == "vsts_http_proxy" || k_low == "azp_http_proxy" {
+                        lines.push(format!("Environment=\"VSTS_HTTP_PROXY={}\"", proxy_url));
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Key-value .env format: contains http_proxy=, https_proxy=, or vsts_http_proxy=
+    let has_kv = content.lines().any(|l| {
+        let t = l.trim().to_ascii_lowercase();
+        t.starts_with("http_proxy=") || t.starts_with("https_proxy=") || t.starts_with("vsts_http_proxy=") || t.starts_with("azp_http_proxy=")
+    });
+
+    if has_kv {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            if let Some((k, _)) = trim.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" || k_low == "vsts_http_proxy" {
+                    lines.push(format!("http_proxy={}", proxy_url));
+                    lines.push(format!("VSTS_HTTP_PROXY={}", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" || k_low == "vsts_https_proxy" {
+                    lines.push(format!("https_proxy={}", proxy_url));
+                    lines.push(format!("VSTS_HTTPS_PROXY={}", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "no_proxy" {
+                    lines.push(format!("no_proxy={}", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("http_proxy={}", proxy_url));
+            lines.push(format!("VSTS_HTTP_PROXY={}", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("https_proxy={}", proxy_url));
+            lines.push(format!("VSTS_HTTPS_PROXY={}", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("no_proxy={}", no_proxy_def));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    // Default Azure Pipelines Agent `.proxy` format: single line proxy URL
+    format!("{}\n", proxy_url)
+}
+
+pub fn remove_azure_pipelines_agent_proxy(content: &str) -> (String, bool) {
+    let trim = content.trim();
+    if trim.is_empty() {
+        return (String::new(), false);
+    }
+
+    // Plain .proxy format
+    if trim.starts_with("http://")
+        || trim.starts_with("https://")
+        || trim.starts_with("socks://")
+        || trim.starts_with("socks5://")
+    {
+        return (String::new(), true);
+    }
+
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vsts_http_proxy"
+                    || k_low == "vsts_https_proxy"
+                    || k_low == "azp_http_proxy"
+                    || k_low == "azp_https_proxy"
+                    || k_low == "azure_pipelines_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "vsts_http_proxy"
+                || key == "vsts_https_proxy"
+                || key == "azp_http_proxy"
+                || key == "azp_https_proxy"
+                || key == "azure_pipelines_http_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_azure_pipelines_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_azure_pipelines_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_azure_pipelines_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    // If writing to .proxy, also generate .proxybypass
+    if path.file_name().map(|n| n == ".proxy").unwrap_or(false) {
+        if let Some(parent) = path.parent() {
+            let bypass_file = parent.join(".proxybypass");
+            let _ = std::fs::write(bypass_file, "[\"localhost\", \"127.0.0.1\", \".local\"]\n");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_azure_pipelines_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_azure_pipelines_agent_config_paths() {
+        if path.exists() {
+            if path.file_name().map(|n| n == ".proxy").unwrap_or(false) {
+                let _ = std::fs::remove_file(&path);
+                if let Some(parent) = path.parent() {
+                    let bypass_file = parent.join(".proxybypass");
+                    if bypass_file.exists() {
+                        let _ = std::fs::remove_file(bypass_file);
+                    }
+                }
+                any_removed = true;
+            } else if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_azure_pipelines_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -9835,6 +10384,8 @@ pub async fn turn_on(
     woodpecker_agent: bool,
     drone_runner: bool,
     act_runner: bool,
+    circleci_runner: bool,
+    azure_pipelines_agent: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -9914,6 +10465,8 @@ pub async fn turn_on(
     let set_woodpecker_agent = woodpecker_agent || all;
     let set_drone_runner = drone_runner || all;
     let set_act_runner = act_runner || all;
+    let set_circleci_runner = circleci_runner || all;
+    let set_azure_pipelines_agent = azure_pipelines_agent || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -10985,6 +11538,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_circleci_runner {
+        match set_circleci_runner_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ CircleCI runner daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update CircleCI runner daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_azure_pipelines_agent {
+        match set_azure_pipelines_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Azure Pipelines Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Azure Pipelines Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -11078,6 +11661,8 @@ pub fn turn_off(
     woodpecker_agent: bool,
     drone_runner: bool,
     act_runner: bool,
+    circleci_runner: bool,
+    azure_pipelines_agent: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -11157,6 +11742,8 @@ pub fn turn_off(
     let unset_woodpecker_agent = woodpecker_agent || all;
     let unset_drone_runner = drone_runner || all;
     let unset_act_runner = act_runner || all;
+    let unset_circleci_runner = circleci_runner || all;
+    let unset_azure_pipelines_agent = azure_pipelines_agent || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -11850,6 +12437,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Gitea/Forgejo Actions Runner daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Gitea/Forgejo Actions Runner proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Gitea/Forgejo Actions Runner daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_circleci_runner {
+        match unset_circleci_runner_proxy() {
+            Ok(true) => eprintln!("{}", "✔ CircleCI runner daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ CircleCI runner proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset CircleCI runner daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_azure_pipelines_agent {
+        match unset_azure_pipelines_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Azure Pipelines Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Azure Pipelines Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Azure Pipelines Agent daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -13702,5 +14305,46 @@ check_interval = 0
         let (dropin_cleaned, dropin_removed) = remove_act_runner_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_circleci_runner_proxy() {
+        // YAML config format
+        let yaml_initial = "runner:\n  name: test-runner\n";
+        let yaml_updated = apply_circleci_runner_proxy(yaml_initial, "http://127.0.0.1:7890");
+        assert!(yaml_updated.contains("proxy:"));
+        assert!(yaml_updated.contains("http: \"http://127.0.0.1:7890\""));
+        let (yaml_cleaned, yaml_removed) = remove_circleci_runner_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("proxy:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_circleci_runner_proxy(dropin_initial, "http://10.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_circleci_runner_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_azure_pipelines_agent_proxy() {
+        // Plain .proxy file single-line format
+        let proxy_initial = "http://127.0.0.1:7890\n";
+        let (proxy_cleaned, proxy_removed) = remove_azure_pipelines_agent_proxy(proxy_initial);
+        assert!(proxy_removed);
+        assert_eq!(proxy_cleaned, "");
+
+        let proxy_applied = apply_azure_pipelines_agent_proxy("", "http://127.0.0.1:8080");
+        assert_eq!(proxy_applied, "http://127.0.0.1:8080\n");
+
+        // Key-value .env format
+        let env_initial = "VSTS_HTTP_PROXY=http://127.0.0.1:7890\n";
+        let env_updated = apply_azure_pipelines_agent_proxy(env_initial, "http://10.0.0.2:9090");
+        assert!(env_updated.contains("http_proxy=http://10.0.0.2:9090"));
+        assert!(env_updated.contains("VSTS_HTTP_PROXY=http://10.0.0.2:9090"));
+        let (env_cleaned, env_removed) = remove_azure_pipelines_agent_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("VSTS_HTTP_PROXY="));
     }
 }

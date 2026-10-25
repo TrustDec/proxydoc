@@ -299,7 +299,13 @@ enum Commands {
         /// Also configure Gitea & Forgejo Actions Runner (act_runner CI daemon) proxy (/etc/act_runner/config.yaml / ~/.act_runner/config.yaml / /etc/systemd/system/act-runner.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "act", visible_alias = "gitea-runner", visible_alias = "forgejo-runner")]
         act_runner: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, and act-runner proxy
+        /// Also configure CircleCI Runner (Self-hosted CI Runner Daemon) proxy (/etc/circleci-runner/circleci-runner-config.yaml / ~/.circleci-runner/circleci-runner-config.yaml / /etc/systemd/system/circleci-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "circleci", visible_alias = "cci-runner")]
+        circleci_runner: bool,
+        /// Also configure Azure Pipelines Agent (vsts-agent / azp-agent CI runner daemon) proxy (~/azure-pipelines-agent/.proxy / /etc/azure-pipelines-agent/.proxy / /etc/systemd/system/azure-pipelines-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "azure-pipelines", visible_alias = "vsts-agent", visible_alias = "azp-agent", visible_alias = "azure-agent")]
+        azure_pipelines_agent: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, and azure-pipelines-agent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -542,7 +548,13 @@ enum Commands {
         /// Also unset Gitea & Forgejo Actions Runner (act_runner CI daemon) proxy (/etc/act_runner/config.yaml / ~/.act_runner/config.yaml / /etc/systemd/system/act-runner.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "act", visible_alias = "gitea-runner", visible_alias = "forgejo-runner")]
         act_runner: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, and act-runner proxy
+        /// Also unset CircleCI Runner (Self-hosted CI Runner Daemon) proxy (/etc/circleci-runner/circleci-runner-config.yaml / ~/.circleci-runner/circleci-runner-config.yaml / /etc/systemd/system/circleci-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "circleci", visible_alias = "cci-runner")]
+        circleci_runner: bool,
+        /// Also unset Azure Pipelines Agent (vsts-agent / azp-agent CI runner daemon) proxy (~/azure-pipelines-agent/.proxy / /etc/azure-pipelines-agent/.proxy / /etc/systemd/system/azure-pipelines-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "azure-pipelines", visible_alias = "vsts-agent", visible_alias = "azp-agent", visible_alias = "azure-agent")]
+        azure_pipelines_agent: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, and azure-pipelines-agent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -664,6 +676,8 @@ async fn main() -> Result<()> {
             woodpecker_agent,
             drone_runner,
             act_runner,
+            circleci_runner,
+            azure_pipelines_agent,
             all,
             shell,
         }) => {
@@ -747,6 +761,8 @@ async fn main() -> Result<()> {
                 woodpecker_agent,
                 drone_runner,
                 act_runner,
+                circleci_runner,
+                azure_pipelines_agent,
                 all,
                 shell.as_deref(),
             )
@@ -831,6 +847,8 @@ async fn main() -> Result<()> {
             woodpecker_agent,
             drone_runner,
             act_runner,
+            circleci_runner,
+            azure_pipelines_agent,
             all,
             shell,
         }) => {
@@ -913,6 +931,8 @@ async fn main() -> Result<()> {
                 woodpecker_agent,
                 drone_runner,
                 act_runner,
+                circleci_runner,
+                azure_pipelines_agent,
                 all,
                 shell.as_deref(),
             )?;
@@ -2915,6 +2935,90 @@ mod tests {
         match cli.command {
             Some(Commands::Off { act_runner, .. }) => {
                 assert!(act_runner);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_circleci_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--circleci-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::On { circleci_runner, .. }) => {
+                assert!(circleci_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--circleci"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { circleci_runner, .. }) => {
+                assert!(circleci_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--cci-runner"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { circleci_runner, .. }) => {
+                assert!(circleci_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_circleci_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--circleci-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { circleci_runner, .. }) => {
+                assert!(circleci_runner);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_azure_pipelines_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--azure-pipelines-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { azure_pipelines_agent, .. }) => {
+                assert!(azure_pipelines_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--vsts-agent"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { azure_pipelines_agent, .. }) => {
+                assert!(azure_pipelines_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--azp-agent"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { azure_pipelines_agent, .. }) => {
+                assert!(azure_pipelines_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--azure-agent"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { azure_pipelines_agent, .. }) => {
+                assert!(azure_pipelines_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_azure_pipelines_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--azure-pipelines-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { azure_pipelines_agent, .. }) => {
+                assert!(azure_pipelines_agent);
             }
             _ => panic!("Expected Off command"),
         }

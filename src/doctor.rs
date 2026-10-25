@@ -9912,6 +9912,448 @@ pub fn get_act_runner_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_circleci_runner_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CIRCLECI_RUNNER_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("CIRCLECI_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".circleci-runner").join("circleci-runner-config.yaml"),
+            home.join(".circleci-runner").join("config.yaml"),
+            home.join(".circleci").join("circleci-runner-config.yaml"),
+            home.join(".config").join("circleci-runner").join("circleci-runner-config.yaml"),
+            home.join(".config").join("systemd").join("user").join("circleci.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("circleci-runner.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/circleci-runner/circleci-runner-config.yaml"),
+        PathBuf::from("/etc/circleci-runner/config.yaml"),
+        PathBuf::from("/etc/circleci-runner.yaml"),
+        PathBuf::from("/etc/systemd/system/circleci.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/circleci-runner.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/circleci"),
+        PathBuf::from("/etc/default/circleci-runner"),
+        PathBuf::from("/etc/sysconfig/circleci-runner"),
+        PathBuf::from("/etc/systemd/system/circleci.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_circleci_runner_config_path() -> Option<PathBuf> {
+    let paths = get_circleci_runner_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_circleci_runner_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_circleci_runner_write_path() -> PathBuf {
+    if let Some(p) = get_circleci_runner_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CIRCLECI_RUNNER_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("CIRCLECI_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_dir = PathBuf::from("/etc/circleci-runner");
+    if etc_dir.is_dir() {
+        return etc_dir.join("circleci-runner-config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/circleci-runner.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".circleci-runner").join("circleci-runner-config.yaml");
+    }
+    PathBuf::from("/etc/circleci-runner/circleci-runner-config.yaml")
+}
+
+pub fn parse_circleci_runner_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "circleci_http_proxy"
+                        || k_low == "circleci_runner_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // YAML format: e.g. "http: http://..." or "http_proxy: ..."
+        if let Some((k, v)) = trim.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "http"
+                || key == "https"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "circleci_http_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        // key=value format (/etc/default/circleci-runner)
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "circleci_http_proxy"
+                || key == "circleci_runner_http_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+    None
+}
+
+pub fn get_circleci_runner_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_circleci_runner_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_circleci_runner_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CIRCLECI_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CIRCLECI_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CIRCLECI_RUNNER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CIRCLECI_RUNNER_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_azure_pipelines_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let env_dirs = ["AZURE_PIPELINES_AGENT_DIR", "VSTS_AGENT_DIR", "AZP_AGENT_DIR"];
+    for var in &env_dirs {
+        if let Ok(dir) = std::env::var(var) {
+            let p_proxy = PathBuf::from(dir.trim()).join(".proxy");
+            if p_proxy.exists() && !paths.contains(&p_proxy) {
+                paths.push(p_proxy);
+            }
+            let p_env = PathBuf::from(dir.trim()).join(".env");
+            if p_env.exists() && !paths.contains(&p_env) {
+                paths.push(p_env);
+            }
+        }
+    }
+    if let Ok(file) = std::env::var("AZURE_PIPELINES_AGENT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join("azure-pipelines-agent").join(".proxy"),
+            home.join("azure-pipelines-agent").join(".env"),
+            home.join("vsts-agent").join(".proxy"),
+            home.join("vsts-agent").join(".env"),
+            home.join("azp").join("agent").join(".proxy"),
+            home.join("azp").join("agent").join(".env"),
+            home.join("agent").join(".proxy"),
+            home.join("agent").join(".env"),
+            home.join(".azure-pipelines").join("agent").join(".proxy"),
+            home.join(".config").join("systemd").join("user").join("vsts.agent.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("azure-pipelines-agent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/opt/azure-pipelines-agent/.proxy"),
+        PathBuf::from("/opt/azure-pipelines-agent/.env"),
+        PathBuf::from("/opt/vsts-agent/.proxy"),
+        PathBuf::from("/opt/vsts-agent/.env"),
+        PathBuf::from("/opt/azp/agent/.proxy"),
+        PathBuf::from("/opt/azp/agent/.env"),
+        PathBuf::from("/var/lib/azure-pipelines-agent/.proxy"),
+        PathBuf::from("/var/lib/azure-pipelines-agent/.env"),
+        PathBuf::from("/etc/azure-pipelines-agent/.proxy"),
+        PathBuf::from("/etc/azure-pipelines-agent/.env"),
+        PathBuf::from("/etc/vsts-agent/.proxy"),
+        PathBuf::from("/etc/vsts-agent/.env"),
+        PathBuf::from("/etc/systemd/system/vsts.agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/azure-pipelines-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/azp-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/vsts-agent"),
+        PathBuf::from("/etc/default/azure-pipelines-agent"),
+        PathBuf::from("/etc/sysconfig/vsts-agent"),
+        PathBuf::from("/etc/systemd/system/azure-pipelines-agent.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_azure_pipelines_agent_config_path() -> Option<PathBuf> {
+    let paths = get_azure_pipelines_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_azure_pipelines_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_azure_pipelines_agent_write_path() -> PathBuf {
+    if let Some(p) = get_azure_pipelines_agent_config_path() {
+        return p;
+    }
+    let env_dirs = ["AZURE_PIPELINES_AGENT_DIR", "VSTS_AGENT_DIR", "AZP_AGENT_DIR"];
+    for var in &env_dirs {
+        if let Ok(dir) = std::env::var(var) {
+            return PathBuf::from(dir.trim()).join(".proxy");
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let candidates = [
+            home.join("azure-pipelines-agent"),
+            home.join("vsts-agent"),
+            home.join("azp").join("agent"),
+        ];
+        for c in &candidates {
+            if c.is_dir() {
+                return c.join(".proxy");
+            }
+        }
+        return home.join("azure-pipelines-agent").join(".proxy");
+    }
+    PathBuf::from("/etc/azure-pipelines-agent/.proxy")
+}
+
+pub fn parse_azure_pipelines_agent_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "vsts_http_proxy"
+                        || k_low == "azp_http_proxy"
+                        || k_low == "azure_pipelines_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Key-value .env format
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "vsts_http_proxy"
+                || key == "azp_http_proxy"
+                || key == "azure_pipelines_http_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        // Azure Pipelines Agent `.proxy` format: single URL line
+        if trim.starts_with("http://")
+            || trim.starts_with("https://")
+            || trim.starts_with("socks://")
+            || trim.starts_with("socks5://")
+        {
+            return Some(trim.to_string());
+        }
+    }
+    None
+}
+
+pub fn get_azure_pipelines_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_azure_pipelines_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_azure_pipelines_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("VSTS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VSTS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("AZP_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AZP_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("AZURE_PIPELINES_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AZURE_PIPELINES_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -13373,6 +13815,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Gitea/Forgejo Actions Runner",
             "~/.act_runner/config.yaml & /etc/act_runner/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // CircleCI Runner Daemon Proxy (/etc/circleci-runner/circleci-runner-config.yaml / ~/.circleci-runner/circleci-runner-config.yaml / /etc/systemd/system/circleci-runner.service.d/http-proxy.conf)
+    if let Some((cci_proxy, cci_path)) = get_circleci_runner_proxy() {
+        let ok = verify_proxy_url(&cci_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "CircleCI runner daemon proxy `{}` in {} is dead! (Task execution and artifact upload will fail)",
+                cci_proxy,
+                cci_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "CircleCI Runner",
+            format!("{}", cci_path.display()),
+            cci_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (circleci-runner fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "CircleCI Runner",
+            "~/.circleci-runner/circleci-runner-config.yaml & /etc/circleci-runner/circleci-runner-config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Azure Pipelines Agent (vsts-agent / azp-agent) Daemon Proxy (~/azure-pipelines-agent/.proxy / /etc/azure-pipelines-agent/.proxy / /etc/systemd/system/azure-pipelines-agent.service.d/http-proxy.conf)
+    if let Some((azp_proxy, azp_path)) = get_azure_pipelines_agent_proxy() {
+        let ok = verify_proxy_url(&azp_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Azure Pipelines Agent daemon proxy `{}` in {} is dead! (Pipeline jobs and artifact download will fail)",
+                azp_proxy,
+                azp_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Azure Pipelines Agent",
+            format!("{}", azp_path.display()),
+            azp_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (vsts-agent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Azure Pipelines Agent",
+            "~/azure-pipelines-agent/.proxy & /etc/azure-pipelines-agent/.proxy",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -16953,5 +17459,78 @@ ACT_RUNNER_HTTP_PROXY="http://127.0.0.1:9090"
         let input_comment = "# http_proxy: http://127.0.0.1:7890\n";
         assert_eq!(parse_act_runner_proxy(input_comment), None);
         assert_eq!(parse_act_runner_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_circleci_runner_proxy() {
+        // YAML format
+        let yaml_file = r#"
+runner:
+  name: "mac-runner"
+proxy:
+  http: "http://127.0.0.1:7890"
+  https: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_circleci_runner_proxy(yaml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        // Systemd drop-in format
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.2:8080"
+"#;
+        assert_eq!(
+            parse_circleci_runner_proxy(dropin),
+            Some("http://10.0.0.2:8080".to_string())
+        );
+
+        // Default env key=value format
+        let env_file = r#"
+CIRCLECI_RUNNER_HTTP_PROXY="http://127.0.0.1:8118"
+"#;
+        assert_eq!(
+            parse_circleci_runner_proxy(env_file),
+            Some("http://127.0.0.1:8118".to_string())
+        );
+
+        let input_comment = "# http: http://127.0.0.1:7890\n";
+        assert_eq!(parse_circleci_runner_proxy(input_comment), None);
+        assert_eq!(parse_circleci_runner_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_azure_pipelines_agent_proxy() {
+        // Plain .proxy file single-line format
+        let proxy_file = "http://127.0.0.1:8888\n";
+        assert_eq!(
+            parse_azure_pipelines_agent_proxy(proxy_file),
+            Some("http://127.0.0.1:8888".to_string())
+        );
+
+        // Key-value .env format
+        let env_file = r#"
+VSTS_HTTP_PROXY=http://127.0.0.1:7890
+VSTS_HTTPS_PROXY=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_azure_pipelines_agent_proxy(env_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        // Systemd drop-in format
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.3:8080"
+"#;
+        assert_eq!(
+            parse_azure_pipelines_agent_proxy(dropin),
+            Some("http://10.0.0.3:8080".to_string())
+        );
+
+        let input_comment = "# http://127.0.0.1:7890\n";
+        assert_eq!(parse_azure_pipelines_agent_proxy(input_comment), None);
+        assert_eq!(parse_azure_pipelines_agent_proxy(""), None);
     }
 }
