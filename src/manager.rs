@@ -7470,6 +7470,414 @@ pub fn unset_k0s_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_rke2_proxy(content: &str, proxy_url: &str) -> String {
+    let trim_content = content.trim();
+    let no_proxy_def = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,localhost,::1,.svc,.cluster.local";
+    if trim_content.is_empty() {
+        return format!(
+            "[Service]\nEnvironment=\"HTTP_PROXY={}\"\nEnvironment=\"HTTPS_PROXY={}\"\nEnvironment=\"CONTAINERD_HTTP_PROXY={}\"\nEnvironment=\"CONTAINERD_HTTPS_PROXY={}\"\nEnvironment=\"NO_PROXY={}\"\n",
+            proxy_url, proxy_url, proxy_url, proxy_url, no_proxy_def
+        );
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_c_http = false;
+    let mut replaced_c_https = false;
+    let mut replaced_no = false;
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "containerd_http_proxy" {
+                    lines.push(format!("Environment=\"CONTAINERD_HTTP_PROXY={}\"", proxy_url));
+                    replaced_c_http = true;
+                    continue;
+                } else if k_low == "containerd_https_proxy" {
+                    lines.push(format!("Environment=\"CONTAINERD_HTTPS_PROXY={}\"", proxy_url));
+                    replaced_c_https = true;
+                    continue;
+                } else if k_low == "all_proxy" || k_low == "rke2_http_proxy" {
+                    lines.push(format!("Environment=\"RKE2_HTTP_PROXY={}\"", proxy_url));
+                    continue;
+                } else if k_low == "no_proxy" {
+                    lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "containerd_http_proxy" {
+                lines.push(format!("CONTAINERD_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_c_http = true;
+                continue;
+            } else if key == "containerd_https_proxy" {
+                lines.push(format!("CONTAINERD_HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_c_https = true;
+                continue;
+            } else if key == "all_proxy" || key == "rke2_http_proxy" {
+                lines.push(format!("RKE2_HTTP_PROXY=\"{}\"", proxy_url));
+                continue;
+            } else if key == "no_proxy" {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                replaced_no = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_c_http {
+        if has_service_section {
+            lines.push(format!("Environment=\"CONTAINERD_HTTP_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("CONTAINERD_HTTP_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_c_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"CONTAINERD_HTTPS_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("CONTAINERD_HTTPS_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_no {
+        if has_service_section {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        } else {
+            lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_rke2_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "rke2_http_proxy"
+                    || k_low == "rke2_https_proxy"
+                    || k_low == "containerd_http_proxy"
+                    || k_low == "containerd_https_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "rke2_http_proxy"
+                || key == "rke2_https_proxy"
+                || key == "containerd_http_proxy"
+                || key == "containerd_https_proxy"
+                || key == "no_proxy"
+                || key == "proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_rke2_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_rke2_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_rke2_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_rke2_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_rke2_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_rke2_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_nomad_proxy(content: &str, proxy_url: &str) -> String {
+    let trim_content = content.trim();
+    let no_proxy_def = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,localhost,::1";
+    if trim_content.is_empty() {
+        return format!(
+            "[Service]\nEnvironment=\"HTTP_PROXY={}\"\nEnvironment=\"HTTPS_PROXY={}\"\nEnvironment=\"NO_PROXY={}\"\n",
+            proxy_url, proxy_url, no_proxy_def
+        );
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_no = false;
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "all_proxy" || k_low == "nomad_http_proxy" {
+                    lines.push(format!("Environment=\"NOMAD_HTTP_PROXY={}\"", proxy_url));
+                    continue;
+                } else if k_low == "no_proxy" {
+                    lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "all_proxy" || key == "nomad_http_proxy" {
+                lines.push(format!("NOMAD_HTTP_PROXY=\"{}\"", proxy_url));
+                continue;
+            } else if key == "no_proxy" {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                replaced_no = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_no {
+        if has_service_section {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        } else {
+            lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_nomad_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "nomad_http_proxy"
+                    || k_low == "nomad_https_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "nomad_http_proxy"
+                || key == "nomad_https_proxy"
+                || key == "no_proxy"
+                || key == "proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_nomad_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_nomad_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_nomad_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_nomad_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_nomad_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_nomad_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -7540,6 +7948,8 @@ pub async fn turn_on(
     k3s: bool,
     microk8s: bool,
     k0s: bool,
+    rke2: bool,
+    nomad: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -7609,6 +8019,8 @@ pub async fn turn_on(
     let set_k3s = k3s || all;
     let set_microk8s = microk8s || all;
     let set_k0s = k0s || all;
+    let set_rke2 = rke2 || all;
+    let set_nomad = nomad || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -8530,6 +8942,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_rke2 {
+        match set_rke2_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ RKE2 (Rancher Kubernetes Engine 2) daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update RKE2 daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_nomad {
+        match set_nomad_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Nomad (HashiCorp Nomad Workload Daemon) proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Nomad daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -8613,6 +9055,8 @@ pub fn turn_off(
     k3s: bool,
     microk8s: bool,
     k0s: bool,
+    rke2: bool,
+    nomad: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -8682,6 +9126,8 @@ pub fn turn_off(
     let unset_k3s = k3s || all;
     let unset_microk8s = microk8s || all;
     let unset_k0s = k0s || all;
+    let unset_rke2 = rke2 || all;
+    let unset_nomad = nomad || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -9295,6 +9741,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ k0s daemon proxy removed from service/environment config".green()),
             Ok(false) => eprintln!("{}", "○ k0s proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset k0s daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_rke2 {
+        match unset_rke2_proxy() {
+            Ok(true) => eprintln!("{}", "✔ RKE2 daemon proxy removed from service/environment config".green()),
+            Ok(false) => eprintln!("{}", "○ RKE2 proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset RKE2 daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_nomad {
+        match unset_nomad_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Nomad daemon proxy removed from service/environment config".green()),
+            Ok(false) => eprintln!("{}", "○ Nomad proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Nomad daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -10881,6 +11343,66 @@ contexts: []
         let env_updated = apply_k0s_proxy(env_initial, "socks5://127.0.0.1:1080");
         assert!(env_updated.contains("HTTP_PROXY=\"socks5://127.0.0.1:1080\""));
         let (env_cleaned, env_removed) = remove_k0s_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_rke2_proxy() {
+        let initial_dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"HTTPS_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"NO_PROXY=localhost,127.0.0.1\"\n";
+        let updated = apply_rke2_proxy(initial_dropin, "http://127.0.0.1:8080");
+        assert!(updated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("Environment=\"HTTPS_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("Environment=\"CONTAINERD_HTTP_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains(".svc,.cluster.local"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_rke2_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY="));
+        assert!(!cleaned.contains("CONTAINERD_HTTP_PROXY="));
+
+        // Empty file case
+        let clean = "";
+        let generated = apply_rke2_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("[Service]"));
+        assert!(generated.contains("Environment=\"CONTAINERD_HTTP_PROXY=http://127.0.0.1:7890\""));
+
+        // Default env file format case
+        let env_initial = "HTTP_PROXY=\"http://127.0.0.1:7890\"\nCONTAINERD_HTTP_PROXY=\"http://127.0.0.1:7890\"\n";
+        let env_updated = apply_rke2_proxy(env_initial, "socks5://127.0.0.1:1080");
+        assert!(env_updated.contains("HTTP_PROXY=\"socks5://127.0.0.1:1080\""));
+        assert!(env_updated.contains("CONTAINERD_HTTP_PROXY=\"socks5://127.0.0.1:1080\""));
+        let (env_cleaned, env_removed) = remove_rke2_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("HTTP_PROXY="));
+        assert!(!env_cleaned.contains("CONTAINERD_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_nomad_proxy() {
+        let initial_dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"HTTPS_PROXY=http://127.0.0.1:7890\"\n";
+        let updated = apply_nomad_proxy(initial_dropin, "http://127.0.0.1:8080");
+        assert!(updated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("Environment=\"HTTPS_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("Environment=\"NO_PROXY=10.0.0.0/8"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_nomad_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY="));
+
+        // Empty file case
+        let clean = "";
+        let generated = apply_nomad_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("[Service]"));
+        assert!(generated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:7890\""));
+
+        // Env file format case
+        let env_initial = "HTTP_PROXY=\"http://127.0.0.1:7890\"\n";
+        let env_updated = apply_nomad_proxy(env_initial, "socks5://127.0.0.1:1080");
+        assert!(env_updated.contains("HTTP_PROXY=\"socks5://127.0.0.1:1080\""));
+        let (env_cleaned, env_removed) = remove_nomad_proxy(&env_updated);
         assert!(env_removed);
         assert!(!env_cleaned.contains("HTTP_PROXY="));
     }

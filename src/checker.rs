@@ -362,6 +362,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Conan Center (JFrog)",
         "https://center.conan.io",
     ),
+    (
+        "PyPI Files CDN",
+        "https://files.pythonhosted.org",
+    ),
+    (
+        "Node.js Dist",
+        "https://nodejs.org/dist/index.json",
+    ),
+    (
+        "Homebrew Formulae",
+        "https://formulae.brew.sh/api/formula.json",
+    ),
+    (
+        "Debian Archive CDN",
+        "https://deb.debian.org",
+    ),
+    (
+        "Ubuntu Archive CDN",
+        "https://archive.ubuntu.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -975,6 +995,17 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Conan Center (JFrog)"));
+        assert!(standard.iter().any(|(name, _)| *name == "PyPI Files CDN"));
+        assert!(standard.iter().any(|(name, _)| *name == "Node.js Dist"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Homebrew Formulae"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Debian Archive CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Ubuntu Archive CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

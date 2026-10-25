@@ -21,7 +21,7 @@ use crate::doctor::{
     get_vagrant_proxy, get_choco_proxy, get_colima_proxy, get_minikube_proxy, get_spack_proxy,
     get_macports_proxy, get_apt_proxy, get_dnf_proxy, get_zypper_proxy,
     get_pacman_proxy, get_pkg_proxy, get_portage_proxy, get_docker_daemon_proxy,
-    get_flatpak_proxy, get_snap_proxy, get_ollama_proxy, get_containerd_proxy, get_buildkit_proxy, get_k3s_proxy, get_microk8s_proxy, get_k0s_proxy, get_apk_repositories_paths,
+    get_flatpak_proxy, get_snap_proxy, get_ollama_proxy, get_containerd_proxy, get_buildkit_proxy, get_k3s_proxy, get_microk8s_proxy, get_k0s_proxy, get_rke2_proxy, get_nomad_proxy, get_apk_repositories_paths,
     parse_apk_repositories, clean_apk_repositories,
 };
 use crate::manager::{
@@ -39,6 +39,7 @@ use crate::manager::{
     unset_pacman_proxy, unset_pkg_proxy, unset_portage_proxy, unset_docker_daemon_proxy,
     unset_flatpak_proxy, unset_snap_proxy, unset_ollama_proxy, unset_containerd_proxy,
     unset_buildkit_proxy, unset_k3s_proxy, unset_microk8s_proxy, unset_k0s_proxy,
+    unset_rke2_proxy, unset_nomad_proxy,
 };
 use crate::scanner;
 
@@ -84,7 +85,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = git_http {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [1/75] Found dead Git http.proxy (`{}`), cleaning...",
+                "  [1/77] Found dead Git http.proxy (`{}`), cleaning...",
                 val.yellow()
             );
             let _ = Command::new("git")
@@ -97,7 +98,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = git_https {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [1/75] Found dead Git https.proxy (`{}`), cleaning...",
+                "  [1/77] Found dead Git https.proxy (`{}`), cleaning...",
                 val.yellow()
             );
             let _ = Command::new("git")
@@ -110,7 +111,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(val) = get_git_config("http.sslCAInfo") {
         if !std::path::Path::new(&val).exists() {
-            println!("  [1/75] Found broken Git http.sslCAInfo pointing to missing file (`{}`), cleaning...", val.yellow());
+            println!("  [1/77] Found broken Git http.sslCAInfo pointing to missing file (`{}`), cleaning...", val.yellow());
             let _ = Command::new("git")
                 .args(["config", "--global", "--unset", "http.sslCAInfo"])
                 .status();
@@ -122,7 +123,7 @@ pub async fn run() -> Result<()> {
     if git_cleaned {
         println!("  {} Cleared broken Git global proxy.", "✔".green());
     } else {
-        println!("  [1/75] Git global proxy: {}", "Clean or healthy".dimmed());
+        println!("  [1/77] Git global proxy: {}", "Clean or healthy".dimmed());
     }
 
     // 2. Clean dead NPM proxy
@@ -133,7 +134,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = npm_http {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [2/75] Found dead NPM proxy (`{}`), cleaning...",
+                "  [2/77] Found dead NPM proxy (`{}`), cleaning...",
                 val.yellow()
             );
             let _ = Command::new("npm")
@@ -146,7 +147,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = npm_https {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [2/75] Found dead NPM https-proxy (`{}`), cleaning...",
+                "  [2/77] Found dead NPM https-proxy (`{}`), cleaning...",
                 val.yellow()
             );
             let _ = Command::new("npm")
@@ -160,14 +161,14 @@ pub async fn run() -> Result<()> {
     if npm_cleaned {
         println!("  {} Cleared broken NPM proxy.", "✔".green());
     } else {
-        println!("  [2/75] NPM proxy: {}", "Clean or healthy".dimmed());
+        println!("  [2/77] NPM proxy: {}", "Clean or healthy".dimmed());
     }
 
     // 3. Clean dead Yarn proxy (~/.yarnrc / ~/.yarnrc.yml)
     if let Some(cfg) = get_yarn_proxy() {
         if !verify_proxy_url(&cfg.proxy).await {
             println!(
-                "  [3/75] Found dead Yarn proxy (`{}` in {}), cleaning...",
+                "  [3/77] Found dead Yarn proxy (`{}` in {}), cleaning...",
                 cfg.proxy.yellow(),
                 cfg.source
             );
@@ -176,17 +177,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [3/75] Yarn proxy: {}", "Reachable".green());
+            println!("  [3/77] Yarn proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [3/75] Yarn proxy: {}", "Clean or not set".dimmed());
+        println!("  [3/77] Yarn proxy: {}", "Clean or not set".dimmed());
     }
 
     // 4. Clean dead pnpm proxy (~/.pnpmrc)
     if let Some(val) = get_pnpm_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [4/75] Found dead pnpm proxy (`{}` in ~/.pnpmrc), cleaning...",
+                "  [4/77] Found dead pnpm proxy (`{}` in ~/.pnpmrc), cleaning...",
                 val.yellow()
             );
             if let Ok(true) = unset_pnpm_proxy() {
@@ -194,17 +195,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [4/75] pnpm proxy: {}", "Reachable".green());
+            println!("  [4/77] pnpm proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [4/75] pnpm proxy: {}", "Clean or not set".dimmed());
+        println!("  [4/77] pnpm proxy: {}", "Clean or not set".dimmed());
     }
 
     // 5. Clean dead Bun proxy (~/.bunfig.toml)
     if let Some(val) = get_bun_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [5/75] Found dead Bun proxy (`{}` in ~/.bunfig.toml), cleaning...",
+                "  [5/77] Found dead Bun proxy (`{}` in ~/.bunfig.toml), cleaning...",
                 val.yellow()
             );
             if let Ok(true) = unset_bun_proxy() {
@@ -212,17 +213,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [5/75] Bun proxy: {}", "Reachable".green());
+            println!("  [5/77] Bun proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [5/75] Bun proxy: {}", "Clean or not set".dimmed());
+        println!("  [5/77] Bun proxy: {}", "Clean or not set".dimmed());
     }
 
     // 6. Clean dead Pip proxy
     if let Some(val) = get_pip_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [6/75] Found dead Pip global.proxy (`{}`), cleaning...",
+                "  [6/77] Found dead Pip global.proxy (`{}`), cleaning...",
                 val.yellow()
             );
             let _ = Command::new("pip")
@@ -231,10 +232,10 @@ pub async fn run() -> Result<()> {
             println!("  {} Cleared broken Pip global proxy.", "✔".green());
             fixed_count += 1;
         } else {
-            println!("  [6/75] Pip global proxy: {}", "Reachable".green());
+            println!("  [6/77] Pip global proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [6/75] Pip global proxy: {}", "Clean or not set".dimmed());
+        println!("  [6/77] Pip global proxy: {}", "Clean or not set".dimmed());
     }
 
     // 7. Clean dead Conda proxy (~/.condarc)
@@ -252,7 +253,7 @@ pub async fn run() -> Result<()> {
         }
 
         if dead {
-            println!("  [7/75] Found dead Conda proxy in ~/.condarc, cleaning...");
+            println!("  [7/77] Found dead Conda proxy in ~/.condarc, cleaning...");
             if let Ok(true) = unset_conda_proxy() {
                 println!(
                     "  {} Cleared broken Conda proxy in ~/.condarc.",
@@ -261,17 +262,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [7/75] Conda proxy: {}", "Reachable".green());
+            println!("  [7/77] Conda proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [7/75] Conda proxy: {}", "Clean or not set".dimmed());
+        println!("  [7/77] Conda proxy: {}", "Clean or not set".dimmed());
     }
 
     // 8. Clean dead Docker client proxy (~/.docker/config.json)
     if let Some(val) = get_docker_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [8/75] Found dead Docker proxy (`{}`), cleaning ~/.docker/config.json...",
+                "  [8/77] Found dead Docker proxy (`{}`), cleaning ~/.docker/config.json...",
                 val.yellow()
             );
             if let Ok(true) = unset_docker_proxy() {
@@ -279,11 +280,11 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [8/75] Docker client proxy: {}", "Reachable".green());
+            println!("  [8/77] Docker client proxy: {}", "Reachable".green());
         }
     } else {
         println!(
-            "  [8/75] Docker client proxy: {}",
+            "  [8/77] Docker client proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -292,7 +293,7 @@ pub async fn run() -> Result<()> {
     if let Some(cfg) = get_gradle_proxy() {
         if !scanner::check_host_port(&cfg.host, cfg.port).await {
             println!(
-                "  [9/75] Found dead Gradle proxy (`{}:{}`), removing from ~/.gradle/gradle.properties...",
+                "  [9/77] Found dead Gradle proxy (`{}:{}`), removing from ~/.gradle/gradle.properties...",
                 cfg.host.yellow(),
                 cfg.port
             );
@@ -301,11 +302,11 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [9/75] Gradle global proxy: {}", "Reachable".green());
+            println!("  [9/77] Gradle global proxy: {}", "Reachable".green());
         }
     } else {
         println!(
-            "  [9/75] Gradle global proxy: {}",
+            "  [9/77] Gradle global proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -314,7 +315,7 @@ pub async fn run() -> Result<()> {
     if let Some(cfg) = get_maven_proxy() {
         if !scanner::check_host_port(&cfg.host, cfg.port).await {
             println!(
-                "  [10/75] Found dead Maven proxy (`{}:{}`), deactivating in ~/.m2/settings.xml...",
+                "  [10/77] Found dead Maven proxy (`{}:{}`), deactivating in ~/.m2/settings.xml...",
                 cfg.host.yellow(),
                 cfg.port
             );
@@ -323,11 +324,11 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [10/75] Maven global proxy: {}", "Reachable".green());
+            println!("  [10/77] Maven global proxy: {}", "Reachable".green());
         }
     } else {
         println!(
-            "  [10/75] Maven global proxy: {}",
+            "  [10/77] Maven global proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -336,7 +337,7 @@ pub async fn run() -> Result<()> {
     if let Some((val, path)) = get_nuget_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [11/75] Found dead NuGet proxy (`{}` in {}), cleaning...",
+                "  [11/77] Found dead NuGet proxy (`{}` in {}), cleaning...",
                 val.yellow(),
                 path.display()
             );
@@ -346,13 +347,13 @@ pub async fn run() -> Result<()> {
             }
         } else {
             println!(
-                "  [11/75] NuGet (.NET) global proxy: {}",
+                "  [11/77] NuGet (.NET) global proxy: {}",
                 "Reachable".green()
             );
         }
     } else {
         println!(
-            "  [11/75] NuGet (.NET) global proxy: {}",
+            "  [11/77] NuGet (.NET) global proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -364,7 +365,7 @@ pub async fn run() -> Result<()> {
         if let Some(ref val) = info.proxy {
             if !verify_proxy_url(val).await {
                 println!(
-                    "  [12/75] Found dead {} proxy (`{}`), cleaning {}...",
+                    "  [12/77] Found dead {} proxy (`{}`), cleaning {}...",
                     info.ide_name,
                     val.yellow(),
                     info.path.display()
@@ -392,7 +393,7 @@ pub async fn run() -> Result<()> {
         println!("  {} Cleared broken IDE proxy settings.", "✔".green());
     } else {
         println!(
-            "  [12/75] VS Code & Cursor IDE settings: {}",
+            "  [12/77] VS Code & Cursor IDE settings: {}",
             "Clean or healthy".dimmed()
         );
     }
@@ -419,7 +420,7 @@ pub async fn run() -> Result<()> {
 
         if is_dead {
             println!(
-                "  [13/75] Found dead {} proxy in {}, deactivating...",
+                "  [13/77] Found dead {} proxy in {}, deactivating...",
                 info.ide_name,
                 info.path.display()
             );
@@ -444,7 +445,7 @@ pub async fn run() -> Result<()> {
         );
     } else {
         println!(
-            "  [13/75] JetBrains & Android Studio settings: {}",
+            "  [13/77] JetBrains & Android Studio settings: {}",
             "Clean or healthy".dimmed()
         );
     }
@@ -453,7 +454,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = get_gh_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [14/75] Found dead GitHub CLI (gh) proxy (`{}`), cleaning...",
+                "  [14/77] Found dead GitHub CLI (gh) proxy (`{}`), cleaning...",
                 val.yellow()
             );
             if let Ok(true) = unset_gh_proxy() {
@@ -461,11 +462,11 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [14/75] GitHub CLI (gh) proxy: {}", "Reachable".green());
+            println!("  [14/77] GitHub CLI (gh) proxy: {}", "Reachable".green());
         }
     } else {
         println!(
-            "  [14/75] GitHub CLI (gh) proxy: {}",
+            "  [14/77] GitHub CLI (gh) proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -477,7 +478,7 @@ pub async fn run() -> Result<()> {
         if let Some(val) = get_curlrc_proxy() {
             if !verify_proxy_url(&val).await {
                 if let Ok(content) = std::fs::read_to_string(&curlrc_path) {
-                    println!("  [15/75] Found dead proxy `{}` in ~/.curlrc, commenting out with backup...", val.yellow());
+                    println!("  [15/77] Found dead proxy `{}` in ~/.curlrc, commenting out with backup...", val.yellow());
                     let (new_c, changed) = comment_out_dead_lines(&content, |l| {
                         l.starts_with("proxy") || l.starts_with("-x") || l.starts_with("--proxy")
                     });
@@ -499,7 +500,7 @@ pub async fn run() -> Result<()> {
         if let Some(val) = get_wgetrc_proxy() {
             if !verify_proxy_url(&val).await {
                 if let Ok(content) = std::fs::read_to_string(&wgetrc_path) {
-                    println!("  [15/75] Found dead proxy `{}` in ~/.wgetrc, commenting out with backup...", val.yellow());
+                    println!("  [15/77] Found dead proxy `{}` in ~/.wgetrc, commenting out with backup...", val.yellow());
                     let (new_c, changed) = comment_out_dead_lines(&content, |l| {
                         l.to_ascii_lowercase().starts_with("http_proxy")
                             || l.to_ascii_lowercase().starts_with("https_proxy")
@@ -522,7 +523,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = get_cargo_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [15/75] Found dead Cargo proxy (`{}`), cleaning ~/.cargo/config.toml...",
+                "  [15/77] Found dead Cargo proxy (`{}`), cleaning ~/.cargo/config.toml...",
                 val.yellow()
             );
             if let Ok(true) = crate::manager::unset_cargo_proxy() {
@@ -531,7 +532,7 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             } else {
                 println!(
-                    "  [15/75] {} Cargo config has dead proxy `{}`! Please remove `proxy` in ~/.cargo/config.toml",
+                    "  [15/77] {} Cargo config has dead proxy `{}`! Please remove `proxy` in ~/.cargo/config.toml",
                     "▲".yellow(),
                     val.yellow()
                 );
@@ -542,7 +543,7 @@ pub async fn run() -> Result<()> {
 
     if !static_fixed {
         println!(
-            "  [15/75] cURL, Wget, and Cargo configs: {}",
+            "  [15/77] cURL, Wget, and Cargo configs: {}",
             "Clean or healthy".dimmed()
         );
     }
@@ -551,7 +552,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = get_gem_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [16/75] Found dead Gem proxy (`{}` in ~/.gemrc), cleaning with backup...",
+                "  [16/77] Found dead Gem proxy (`{}` in ~/.gemrc), cleaning with backup...",
                 val.yellow()
             );
             let path = get_gemrc_path();
@@ -566,11 +567,11 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [16/75] Gem (Ruby) proxy: {}", "Reachable".green());
+            println!("  [16/77] Gem (Ruby) proxy: {}", "Reachable".green());
         }
     } else {
         println!(
-            "  [16/75] Gem (Ruby) proxy: {}",
+            "  [16/77] Gem (Ruby) proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -579,7 +580,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = get_svn_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [17/75] Found dead Subversion proxy (`{}` in servers), cleaning with backup...",
+                "  [17/77] Found dead Subversion proxy (`{}` in servers), cleaning with backup...",
                 val.yellow()
             );
             let path = get_svn_servers_path();
@@ -594,11 +595,11 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [17/75] Subversion (SVN) proxy: {}", "Reachable".green());
+            println!("  [17/77] Subversion (SVN) proxy: {}", "Reachable".green());
         }
     } else {
         println!(
-            "  [17/75] Subversion (SVN) proxy: {}",
+            "  [17/77] Subversion (SVN) proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -607,7 +608,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = get_hg_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [18/75] Found dead Mercurial proxy (`{}` in ~/.hgrc), cleaning with backup...",
+                "  [18/77] Found dead Mercurial proxy (`{}` in ~/.hgrc), cleaning with backup...",
                 val.yellow()
             );
             let path = get_hgrc_path();
@@ -622,11 +623,11 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [18/75] Mercurial (Hg) proxy: {}", "Reachable".green());
+            println!("  [18/77] Mercurial (Hg) proxy: {}", "Reachable".green());
         }
     } else {
         println!(
-            "  [18/75] Mercurial (Hg) proxy: {}",
+            "  [18/77] Mercurial (Hg) proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -659,7 +660,7 @@ pub async fn run() -> Result<()> {
     }
     if !taobao_migrated {
         println!(
-            "  [19/75] Node / JS Registry mirrors: {}",
+            "  [19/77] Node / JS Registry mirrors: {}",
             "Clean or healthy".dimmed()
         );
     }
@@ -671,7 +672,7 @@ pub async fn run() -> Result<()> {
         if let Some(ref target) = cmd.target {
             if !verify_proxy_url(target).await {
                 println!(
-                    "  [20/75] {} ~/.ssh/config Host `{}` has dead ProxyCommand target `{}`! (Git clone over SSH will hang)",
+                    "  [20/77] {} ~/.ssh/config Host `{}` has dead ProxyCommand target `{}`! (Git clone over SSH will hang)",
                     "▲".red().bold(),
                     cmd.host_pattern.yellow(),
                     target.yellow()
@@ -682,7 +683,7 @@ pub async fn run() -> Result<()> {
     }
     if !ssh_has_dead {
         println!(
-            "  [20/75] SSH ProxyCommand configs: {}",
+            "  [20/77] SSH ProxyCommand configs: {}",
             "Clean or healthy".dimmed()
         );
     }
@@ -691,7 +692,7 @@ pub async fn run() -> Result<()> {
     if let Some(val) = get_uv_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [21/75] Found dead Astral uv proxy (`{}` in uv.toml), cleaning with backup...",
+                "  [21/77] Found dead Astral uv proxy (`{}` in uv.toml), cleaning with backup...",
                 val.yellow()
             );
             let path = get_uv_config_path();
@@ -706,10 +707,10 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [21/75] Astral uv proxy: {}", "Reachable".green());
+            println!("  [21/77] Astral uv proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [21/75] Astral uv proxy: {}", "Clean or not set".dimmed());
+        println!("  [21/77] Astral uv proxy: {}", "Clean or not set".dimmed());
     }
 
     // 22. Clean dead Go GOPROXY mirror
@@ -724,7 +725,7 @@ pub async fn run() -> Result<()> {
         }
         if dead_found {
             println!(
-                "  [22/75] Found dead GOPROXY mirror (`{}`), cleaning / resetting to default...",
+                "  [22/77] Found dead GOPROXY mirror (`{}`), cleaning / resetting to default...",
                 gp.yellow()
             );
             if let Ok(true) = unset_go_proxy() {
@@ -735,17 +736,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [22/75] Go GOPROXY: {}", "Reachable or direct".green());
+            println!("  [22/77] Go GOPROXY: {}", "Reachable or direct".green());
         }
     } else {
-        println!("  [22/75] Go GOPROXY: {}", "Clean or default".dimmed());
+        println!("  [22/77] Go GOPROXY: {}", "Clean or default".dimmed());
     }
 
     // 23. Clean dead Bazel (~/.bazelrc) action_env proxy
     if let Some((val, path)) = get_bazel_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [23/75] Found dead Bazel action_env proxy (`{}` in {}), cleaning with backup...",
+                "  [23/77] Found dead Bazel action_env proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -760,17 +761,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [23/75] Bazel proxy: {}", "Reachable".green());
+            println!("  [23/77] Bazel proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [23/75] Bazel proxy: {}", "Clean or not set".dimmed());
+        println!("  [23/77] Bazel proxy: {}", "Clean or not set".dimmed());
     }
 
     // 24. Clean dead PHP Composer (config.json) proxy
     if let Some((val, path)) = get_composer_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [24/75] Found dead PHP Composer proxy (`{}` in {}), cleaning with backup...",
+                "  [24/77] Found dead PHP Composer proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -785,17 +786,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [24/75] PHP Composer proxy: {}", "Reachable".green());
+            println!("  [24/77] PHP Composer proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [24/75] PHP Composer proxy: {}", "Clean or not set".dimmed());
+        println!("  [24/77] PHP Composer proxy: {}", "Clean or not set".dimmed());
     }
 
     // 25. Clean dead Conan C/C++ (global.conf / conan.conf) proxy
     if let Some((val, path)) = get_conan_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [25/75] Found dead Conan C/C++ proxy (`{}` in {}), cleaning with backup...",
+                "  [25/77] Found dead Conan C/C++ proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -810,17 +811,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [25/75] Conan C/C++ proxy: {}", "Reachable".green());
+            println!("  [25/77] Conan C/C++ proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [25/75] Conan C/C++ proxy: {}", "Clean or not set".dimmed());
+        println!("  [25/77] Conan C/C++ proxy: {}", "Clean or not set".dimmed());
     }
 
     // 26. Clean dead Scala Build Tool (~/.sbt/sbtopts) proxy
     if let Some((val, path)) = get_sbt_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [26/75] Found dead Scala (sbt) proxy (`{}` in {}), cleaning with backup...",
+                "  [26/77] Found dead Scala (sbt) proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -835,10 +836,10 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [26/75] Scala (sbt) proxy: {}", "Reachable".green());
+            println!("  [26/77] Scala (sbt) proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [26/75] Scala (sbt) proxy: {}", "Clean or not set".dimmed());
+        println!("  [26/77] Scala (sbt) proxy: {}", "Clean or not set".dimmed());
     }
 
     // 27. Clean dead Kubernetes (~/.kube/config) cluster proxy-url
@@ -854,7 +855,7 @@ pub async fn run() -> Result<()> {
             }
             if dead_cluster {
                 println!(
-                    "  [27/75] Found dead cluster proxy-url in {}, cleaning with backup...",
+                    "  [27/77] Found dead cluster proxy-url in {}, cleaning with backup...",
                     kpath.display()
                 );
                 let backup = kpath.with_extension("bak");
@@ -868,20 +869,20 @@ pub async fn run() -> Result<()> {
                     fixed_count += 1;
                 }
             } else if !kube_proxies.is_empty() {
-                println!("  [27/75] Kubernetes (kubectl) proxy-url: {}", "Reachable".green());
+                println!("  [27/77] Kubernetes (kubectl) proxy-url: {}", "Reachable".green());
             } else {
-                println!("  [27/75] Kubernetes (kubectl) proxy-url: {}", "Clean or not set".dimmed());
+                println!("  [27/77] Kubernetes (kubectl) proxy-url: {}", "Clean or not set".dimmed());
             }
         }
     } else {
-        println!("  [27/75] Kubernetes (kubectl) proxy-url: {}", "Clean or not set".dimmed());
+        println!("  [27/77] Kubernetes (kubectl) proxy-url: {}", "Clean or not set".dimmed());
     }
 
     // 28. Clean dead Julia startup (~/.julia/config/startup.jl) proxy
     if let Some((val, path)) = get_julia_startup_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [28/75] Found dead Julia startup proxy (`{}` in {}), cleaning with backup...",
+                "  [28/77] Found dead Julia startup proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -896,17 +897,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [28/75] Julia startup proxy: {}", "Reachable".green());
+            println!("  [28/77] Julia startup proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [28/75] Julia startup proxy: {}", "Clean or not set".dimmed());
+        println!("  [28/77] Julia startup proxy: {}", "Clean or not set".dimmed());
     }
 
     // 29. Clean dead GitLab CLI (~/.config/glab-cli/config.yml) proxy
     if let Some(val) = get_glab_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [29/75] Found dead GitLab CLI (glab) proxy (`{}`), cleaning...",
+                "  [29/77] Found dead GitLab CLI (glab) proxy (`{}`), cleaning...",
                 val.yellow()
             );
             if let Ok(true) = unset_glab_proxy() {
@@ -914,11 +915,11 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [29/75] GitLab CLI (glab) proxy: {}", "Reachable".green());
+            println!("  [29/77] GitLab CLI (glab) proxy: {}", "Reachable".green());
         }
     } else {
         println!(
-            "  [29/75] GitLab CLI (glab) proxy: {}",
+            "  [29/77] GitLab CLI (glab) proxy: {}",
             "Clean or not set".dimmed()
         );
     }
@@ -927,7 +928,7 @@ pub async fn run() -> Result<()> {
     if let Some((val, path)) = get_nix_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [30/75] Found dead Nix http-proxy (`{}` in {}), cleaning with backup...",
+                "  [30/77] Found dead Nix http-proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -942,17 +943,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [30/75] Nix (nix.conf) http-proxy: {}", "Reachable".green());
+            println!("  [30/77] Nix (nix.conf) http-proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [30/75] Nix (nix.conf) http-proxy: {}", "Clean or not set".dimmed());
+        println!("  [30/77] Nix (nix.conf) http-proxy: {}", "Clean or not set".dimmed());
     }
 
     // 31. Clean dead Haskell Cabal (~/.cabal/config) proxy
     if let Some((val, path)) = get_cabal_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [31/75] Found dead Haskell Cabal proxy (`{}` in {}), cleaning with backup...",
+                "  [31/77] Found dead Haskell Cabal proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -967,17 +968,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [31/75] Haskell Cabal proxy: {}", "Reachable".green());
+            println!("  [31/77] Haskell Cabal proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [31/75] Haskell Cabal proxy: {}", "Clean or not set".dimmed());
+        println!("  [31/77] Haskell Cabal proxy: {}", "Clean or not set".dimmed());
     }
 
     // 32. Clean dead Haskell Stack (~/.stack/config.yaml) proxy
     if let Some((val, path)) = get_stack_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [32/75] Found dead Haskell Stack proxy (`{}` in {}), cleaning with backup...",
+                "  [32/77] Found dead Haskell Stack proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -992,17 +993,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [32/75] Haskell Stack proxy: {}", "Reachable".green());
+            println!("  [32/77] Haskell Stack proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [32/75] Haskell Stack proxy: {}", "Clean or not set".dimmed());
+        println!("  [32/77] Haskell Stack proxy: {}", "Clean or not set".dimmed());
     }
 
     // 33. Clean dead Elixir / Erlang / Gleam Hex (~/.hex/hex.config) proxy
     if let Some((val, path)) = get_hex_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [33/75] Found dead Hex package proxy (`{}` in {}), cleaning with backup...",
+                "  [33/77] Found dead Hex package proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1017,10 +1018,10 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [33/75] Hex (Elixir/Gleam) proxy: {}", "Reachable".green());
+            println!("  [33/77] Hex (Elixir/Gleam) proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [33/75] Hex (Elixir/Gleam) proxy: {}", "Clean or not set".dimmed());
+        println!("  [33/77] Hex (Elixir/Gleam) proxy: {}", "Clean or not set".dimmed());
     }
 
     // 34. Clean dead SwiftPM (~/.swiftpm/configuration/mirrors.json) package mirrors
@@ -1035,7 +1036,7 @@ pub async fn run() -> Result<()> {
             }
             if !dead_mirrors.is_empty() {
                 println!(
-                    "  [34/75] Found {} dead SwiftPM mirror(s) in {}, cleaning with backup...",
+                    "  [34/77] Found {} dead SwiftPM mirror(s) in {}, cleaning with backup...",
                     dead_mirrors.len().to_string().yellow(),
                     mpath.display()
                 );
@@ -1052,20 +1053,20 @@ pub async fn run() -> Result<()> {
                     fixed_count += 1;
                 }
             } else if !mirrors.is_empty() {
-                println!("  [34/75] SwiftPM mirrors: {}", "Reachable".green());
+                println!("  [34/77] SwiftPM mirrors: {}", "Reachable".green());
             } else {
-                println!("  [34/75] SwiftPM mirrors: {}", "Clean or empty".dimmed());
+                println!("  [34/77] SwiftPM mirrors: {}", "Clean or empty".dimmed());
             }
         }
     } else {
-        println!("  [34/75] SwiftPM mirrors: {}", "Clean or not set".dimmed());
+        println!("  [34/77] SwiftPM mirrors: {}", "Clean or not set".dimmed());
     }
 
     // 35. Clean dead R package manager (~/.Renviron) proxy
     if let Some((val, path)) = get_renviron_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [35/75] Found dead R proxy (`{}` in {}), cleaning with backup...",
+                "  [35/77] Found dead R proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1080,17 +1081,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [35/75] R (~/.Renviron) proxy: {}", "Reachable".green());
+            println!("  [35/77] R (~/.Renviron) proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [35/75] R (~/.Renviron) proxy: {}", "Clean or not set".dimmed());
+        println!("  [35/77] R (~/.Renviron) proxy: {}", "Clean or not set".dimmed());
     }
 
     // 36. Clean dead OCaml OPAM (~/.opam/config) proxy
     if let Some((val, path)) = get_opam_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [36/75] Found dead OCaml OPAM proxy (`{}` in {}), cleaning with backup...",
+                "  [36/77] Found dead OCaml OPAM proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1105,10 +1106,10 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [36/75] OCaml OPAM proxy: {}", "Reachable".green());
+            println!("  [36/77] OCaml OPAM proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [36/75] OCaml OPAM proxy: {}", "Clean or not set".dimmed());
+        println!("  [36/77] OCaml OPAM proxy: {}", "Clean or not set".dimmed());
     }
 
     // 37. Clean dead Terraform / OpenTofu (~/.terraformrc / ~/.tofurc) network mirrors
@@ -1125,7 +1126,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_mirrors.is_empty() {
                     println!(
-                        "  [37/75] Found {} dead Terraform/OpenTofu mirror(s) in {}, cleaning with backup...",
+                        "  [37/77] Found {} dead Terraform/OpenTofu mirror(s) in {}, cleaning with backup...",
                         dead_mirrors.len().to_string().yellow(),
                         tpath.display()
                     );
@@ -1143,21 +1144,21 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !mirrors.is_empty() {
-                    println!("  [37/75] Terraform/OpenTofu network mirrors: {}", "Reachable".green());
+                    println!("  [37/77] Terraform/OpenTofu network mirrors: {}", "Reachable".green());
                 } else {
-                    println!("  [37/75] Terraform/OpenTofu network mirrors: {}", "Clean or empty".dimmed());
+                    println!("  [37/77] Terraform/OpenTofu network mirrors: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [37/75] Terraform/OpenTofu network mirrors: {}", "Clean or not set".dimmed());
+        println!("  [37/77] Terraform/OpenTofu network mirrors: {}", "Clean or not set".dimmed());
     }
 
     // 38. Clean dead Clojure Leiningen (~/.lein/profiles.clj) proxy
     if let Some((val, path)) = get_lein_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [38/75] Found dead Clojure Leiningen proxy (`{}` in {}), cleaning with backup...",
+                "  [38/77] Found dead Clojure Leiningen proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1172,17 +1173,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [38/75] Clojure Leiningen proxy: {}", "Reachable".green());
+            println!("  [38/77] Clojure Leiningen proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [38/75] Clojure Leiningen proxy: {}", "Clean or not set".dimmed());
+        println!("  [38/77] Clojure Leiningen proxy: {}", "Clean or not set".dimmed());
     }
 
     // 39. Clean dead Perl CPAN (~/.cpan/CPAN/MyConfig.pm) proxy
     if let Some((val, path)) = get_cpan_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [39/75] Found dead Perl CPAN proxy (`{}` in {}), cleaning with backup...",
+                "  [39/77] Found dead Perl CPAN proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1197,17 +1198,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [39/75] Perl CPAN proxy: {}", "Reachable".green());
+            println!("  [39/77] Perl CPAN proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [39/75] Perl CPAN proxy: {}", "Clean or not set".dimmed());
+        println!("  [39/77] Perl CPAN proxy: {}", "Clean or not set".dimmed());
     }
 
     // 40. Clean dead LuaRocks (~/.luarocks/config.lua) proxy
     if let Some((val, path)) = get_luarocks_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [40/75] Found dead LuaRocks proxy (`{}` in {}), cleaning with backup...",
+                "  [40/77] Found dead LuaRocks proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1222,17 +1223,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [40/75] LuaRocks proxy: {}", "Reachable".green());
+            println!("  [40/77] LuaRocks proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [40/75] LuaRocks proxy: {}", "Clean or not set".dimmed());
+        println!("  [40/77] LuaRocks proxy: {}", "Clean or not set".dimmed());
     }
 
     // 41. Clean dead Nim (Nimble, ~/.config/nimble/nimble.ini) proxy
     if let Some((val, path)) = get_nimble_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [41/75] Found dead Nimble proxy (`{}` in {}), cleaning with backup...",
+                "  [41/77] Found dead Nimble proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1247,17 +1248,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [41/75] Nimble proxy: {}", "Reachable".green());
+            println!("  [41/77] Nimble proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [41/75] Nimble proxy: {}", "Clean or not set".dimmed());
+        println!("  [41/77] Nimble proxy: {}", "Clean or not set".dimmed());
     }
 
     // 42. Clean dead Erlang (Rebar3, ~/.config/rebar3/rebar.config) proxy
     if let Some((val, path)) = get_rebar3_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [42/75] Found dead Rebar3 proxy (`{}` in {}), cleaning with backup...",
+                "  [42/77] Found dead Rebar3 proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1272,17 +1273,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [42/75] Rebar3 proxy: {}", "Reachable".green());
+            println!("  [42/77] Rebar3 proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [42/75] Rebar3 proxy: {}", "Clean or not set".dimmed());
+        println!("  [42/77] Rebar3 proxy: {}", "Clean or not set".dimmed());
     }
 
     // 43. Clean dead Scoop (~/.config/scoop/config.json) proxy
     if let Some((val, path)) = get_scoop_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [43/75] Found dead Scoop proxy (`{}` in {}), cleaning with backup...",
+                "  [43/77] Found dead Scoop proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1297,17 +1298,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [43/75] Scoop proxy: {}", "Reachable".green());
+            println!("  [43/77] Scoop proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [43/75] Scoop proxy: {}", "Clean or not set".dimmed());
+        println!("  [43/77] Scoop proxy: {}", "Clean or not set".dimmed());
     }
 
     // 44. Clean dead Ruby Bundler (~/.bundle/config) proxy
     if let Some((val, path)) = get_bundler_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [44/75] Found dead Bundler proxy (`{}` in {}), cleaning with backup...",
+                "  [44/77] Found dead Bundler proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1322,17 +1323,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [44/75] Bundler proxy: {}", "Reachable".green());
+            println!("  [44/77] Bundler proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [44/75] Bundler proxy: {}", "Clean or not set".dimmed());
+        println!("  [44/77] Bundler proxy: {}", "Clean or not set".dimmed());
     }
 
     // 45. Clean dead Google Cloud SDK (gcloud) proxy (~/.config/gcloud/configurations/config_*)
     if let Some((val, path)) = get_gcloud_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [45/75] Found dead Google Cloud SDK (gcloud) proxy (`{}` in {}), cleaning with backup...",
+                "  [45/77] Found dead Google Cloud SDK (gcloud) proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1347,17 +1348,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [45/75] Google Cloud SDK (gcloud) proxy: {}", "Reachable".green());
+            println!("  [45/77] Google Cloud SDK (gcloud) proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [45/75] Google Cloud SDK (gcloud) proxy: {}", "Clean or not set".dimmed());
+        println!("  [45/77] Google Cloud SDK (gcloud) proxy: {}", "Clean or not set".dimmed());
     }
 
     // 46. Clean dead AWS CLI proxy (~/.aws/config)
     if let Some((val, path)) = get_aws_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [46/75] Found dead AWS CLI proxy (`{}` in {}), cleaning with backup...",
+                "  [46/77] Found dead AWS CLI proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1372,17 +1373,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [46/75] AWS CLI proxy: {}", "Reachable".green());
+            println!("  [46/77] AWS CLI proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [46/75] AWS CLI proxy: {}", "Clean or not set".dimmed());
+        println!("  [46/77] AWS CLI proxy: {}", "Clean or not set".dimmed());
     }
 
     // 47. Clean dead Microsoft Azure CLI proxy (~/.azure/config)
     if let Some((val, path)) = get_azure_proxy() {
         if !verify_proxy_url(&val).await {
             println!(
-                "  [47/75] Found dead Azure CLI proxy (`{}` in {}), cleaning with backup...",
+                "  [47/77] Found dead Azure CLI proxy (`{}` in {}), cleaning with backup...",
                 val.yellow(),
                 path.display()
             );
@@ -1397,10 +1398,10 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [47/75] Azure CLI proxy: {}", "Reachable".green());
+            println!("  [47/77] Azure CLI proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [47/75] Azure CLI proxy: {}", "Clean or not set".dimmed());
+        println!("  [47/77] Azure CLI proxy: {}", "Clean or not set".dimmed());
     }
 
     // 48. Clean dead Mamba / Micromamba proxy (~/.mambarc)
@@ -1421,7 +1422,7 @@ pub async fn run() -> Result<()> {
                     }
                     if dead {
                         println!(
-                            "  [48/75] Found dead Mamba proxy in {}, cleaning with backup...",
+                            "  [48/77] Found dead Mamba proxy in {}, cleaning with backup...",
                             mamba_path.display()
                         );
                         let backup = mamba_path.with_extension("bak");
@@ -1435,26 +1436,26 @@ pub async fn run() -> Result<()> {
                             fixed_count += 1;
                         }
                     } else {
-                        println!("  [48/75] Mamba proxy: {}", "Reachable".green());
+                        println!("  [48/77] Mamba proxy: {}", "Reachable".green());
                     }
                 } else {
-                    println!("  [48/75] Mamba proxy: {}", "Clean or not set".dimmed());
+                    println!("  [48/77] Mamba proxy: {}", "Clean or not set".dimmed());
                 }
             } else {
-                println!("  [48/75] Mamba proxy: {}", "Clean or not set".dimmed());
+                println!("  [48/77] Mamba proxy: {}", "Clean or not set".dimmed());
             }
         } else {
-            println!("  [48/75] Mamba proxy: {}", "Clean or not set".dimmed());
+            println!("  [48/77] Mamba proxy: {}", "Clean or not set".dimmed());
         }
     } else {
-        println!("  [48/75] Mamba proxy: {}", "Clean or not set".dimmed());
+        println!("  [48/77] Mamba proxy: {}", "Clean or not set".dimmed());
     }
 
     // 49. Clean dead Podman proxy (~/.config/containers/containers.conf)
     if let Some((podproxy, podpath)) = get_podman_proxy() {
         if !verify_proxy_url(&podproxy).await {
             println!(
-                "  [49/75] Found dead Podman proxy (`{}` in {}), cleaning with backup...",
+                "  [49/77] Found dead Podman proxy (`{}` in {}), cleaning with backup...",
                 podproxy.yellow(),
                 podpath.display()
             );
@@ -1469,17 +1470,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [49/75] Podman proxy: {}", "Reachable".green());
+            println!("  [49/77] Podman proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [49/75] Podman proxy: {}", "Clean or not set".dimmed());
+        println!("  [49/77] Podman proxy: {}", "Clean or not set".dimmed());
     }
 
     // 50. Clean dead Vagrant proxy (~/.vagrant.d/Vagrantfile)
     if let Some((vagproxy, vagpath)) = get_vagrant_proxy() {
         if !verify_proxy_url(&vagproxy).await {
             println!(
-                "  [50/75] Found dead Vagrant proxy (`{}` in {}), cleaning with backup...",
+                "  [50/77] Found dead Vagrant proxy (`{}` in {}), cleaning with backup...",
                 vagproxy.yellow(),
                 vagpath.display()
             );
@@ -1494,17 +1495,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [50/75] Vagrant proxy: {}", "Reachable".green());
+            println!("  [50/77] Vagrant proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [50/75] Vagrant proxy: {}", "Clean or not set".dimmed());
+        println!("  [50/77] Vagrant proxy: {}", "Clean or not set".dimmed());
     }
 
     // 51. Clean dead Chocolatey proxy (chocolatey.config)
     if let Some((chocoproxy, chocopath)) = get_choco_proxy() {
         if !verify_proxy_url(&chocoproxy).await {
             println!(
-                "  [51/75] Found dead Chocolatey proxy (`{}` in {}), cleaning with backup...",
+                "  [51/77] Found dead Chocolatey proxy (`{}` in {}), cleaning with backup...",
                 chocoproxy.yellow(),
                 chocopath.display()
             );
@@ -1519,17 +1520,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [51/75] Chocolatey proxy: {}", "Reachable".green());
+            println!("  [51/77] Chocolatey proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [51/75] Chocolatey proxy: {}", "Clean or not set".dimmed());
+        println!("  [51/77] Chocolatey proxy: {}", "Clean or not set".dimmed());
     }
 
     // 52. Clean dead Colima proxy (~/.colima/default/colima.yaml)
     if let Some((colimaproxy, colimapath)) = get_colima_proxy() {
         if !verify_proxy_url(&colimaproxy).await {
             println!(
-                "  [52/75] Found dead Colima proxy (`{}` in {}), cleaning with backup...",
+                "  [52/77] Found dead Colima proxy (`{}` in {}), cleaning with backup...",
                 colimaproxy.yellow(),
                 colimapath.display()
             );
@@ -1544,17 +1545,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [52/75] Colima proxy: {}", "Reachable".green());
+            println!("  [52/77] Colima proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [52/75] Colima proxy: {}", "Clean or not set".dimmed());
+        println!("  [52/77] Colima proxy: {}", "Clean or not set".dimmed());
     }
 
     // 53. Clean dead Minikube proxy (~/.minikube/config/config.json)
     if let Some((miniproxy, minipath)) = get_minikube_proxy() {
         if !verify_proxy_url(&miniproxy).await {
             println!(
-                "  [53/75] Found dead Minikube proxy (`{}` in {}), cleaning with backup...",
+                "  [53/77] Found dead Minikube proxy (`{}` in {}), cleaning with backup...",
                 miniproxy.yellow(),
                 minipath.display()
             );
@@ -1569,17 +1570,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [53/75] Minikube proxy: {}", "Reachable".green());
+            println!("  [53/77] Minikube proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [53/75] Minikube proxy: {}", "Clean or not set".dimmed());
+        println!("  [53/77] Minikube proxy: {}", "Clean or not set".dimmed());
     }
 
     // 54. Clean dead Spack proxy (~/.spack/config.yaml)
     if let Some((spackproxy, spackpath)) = get_spack_proxy() {
         if !verify_proxy_url(&spackproxy).await {
             println!(
-                "  [54/75] Found dead Spack proxy (`{}` in {}), cleaning with backup...",
+                "  [54/77] Found dead Spack proxy (`{}` in {}), cleaning with backup...",
                 spackproxy.yellow(),
                 spackpath.display()
             );
@@ -1594,17 +1595,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [54/75] Spack proxy: {}", "Reachable".green());
+            println!("  [54/77] Spack proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [54/75] Spack proxy: {}", "Clean or not set".dimmed());
+        println!("  [54/77] Spack proxy: {}", "Clean or not set".dimmed());
     }
 
     // 55. Clean dead MacPorts proxy (~/.macports/macports.conf / /opt/local/etc/macports/macports.conf)
     if let Some((mpproxy, mppath)) = get_macports_proxy() {
         if !verify_proxy_url(&mpproxy).await {
             println!(
-                "  [55/75] Found dead MacPorts proxy (`{}` in {}), cleaning with backup...",
+                "  [55/77] Found dead MacPorts proxy (`{}` in {}), cleaning with backup...",
                 mpproxy.yellow(),
                 mppath.display()
             );
@@ -1619,17 +1620,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [55/75] MacPorts proxy: {}", "Reachable".green());
+            println!("  [55/77] MacPorts proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [55/75] MacPorts proxy: {}", "Clean or not set".dimmed());
+        println!("  [55/77] MacPorts proxy: {}", "Clean or not set".dimmed());
     }
 
     // 56. Clean dead APT proxy (/etc/apt/apt.conf.d/* / ~/.apt/apt.conf)
     if let Some((aptproxy, aptpath)) = get_apt_proxy() {
         if !verify_proxy_url(&aptproxy).await {
             println!(
-                "  [56/75] Found dead APT proxy (`{}` in {}), cleaning with backup...",
+                "  [56/77] Found dead APT proxy (`{}` in {}), cleaning with backup...",
                 aptproxy.yellow(),
                 aptpath.display()
             );
@@ -1644,17 +1645,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [56/75] APT proxy: {}", "Reachable".green());
+            println!("  [56/77] APT proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [56/75] APT proxy: {}", "Clean or not set".dimmed());
+        println!("  [56/77] APT proxy: {}", "Clean or not set".dimmed());
     }
 
     // 57. Clean dead DNF & YUM proxy (/etc/dnf/dnf.conf / ~/.config/dnf/dnf.conf / /etc/yum.conf)
     if let Some((dnfproxy, dnfpath)) = get_dnf_proxy() {
         if !verify_proxy_url(&dnfproxy).await {
             println!(
-                "  [57/75] Found dead DNF/YUM proxy (`{}` in {}), cleaning with backup...",
+                "  [57/77] Found dead DNF/YUM proxy (`{}` in {}), cleaning with backup...",
                 dnfproxy.yellow(),
                 dnfpath.display()
             );
@@ -1669,17 +1670,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [57/75] DNF/YUM proxy: {}", "Reachable".green());
+            println!("  [57/77] DNF/YUM proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [57/75] DNF/YUM proxy: {}", "Clean or not set".dimmed());
+        println!("  [57/77] DNF/YUM proxy: {}", "Clean or not set".dimmed());
     }
 
     // 58. Clean dead Zypper proxy (/etc/zypp/zypp.conf / ~/.zypp/zypp.conf)
     if let Some((zyppproxy, zypppath)) = get_zypper_proxy() {
         if !verify_proxy_url(&zyppproxy).await {
             println!(
-                "  [58/75] Found dead Zypper proxy (`{}` in {}), cleaning with backup...",
+                "  [58/77] Found dead Zypper proxy (`{}` in {}), cleaning with backup...",
                 zyppproxy.yellow(),
                 zypppath.display()
             );
@@ -1694,17 +1695,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [58/75] Zypper proxy: {}", "Reachable".green());
+            println!("  [58/77] Zypper proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [58/75] Zypper proxy: {}", "Clean or not set".dimmed());
+        println!("  [58/77] Zypper proxy: {}", "Clean or not set".dimmed());
     }
 
     // 59. Clean dead Pacman package manager proxy in /etc/pacman.conf
     if let Some((pacproxy, pacpath)) = get_pacman_proxy() {
         if !verify_proxy_url(&pacproxy).await {
             println!(
-                "  [59/75] Found dead Pacman proxy (`{}` in {}), cleaning with backup...",
+                "  [59/77] Found dead Pacman proxy (`{}` in {}), cleaning with backup...",
                 pacproxy.yellow(),
                 pacpath.display()
             );
@@ -1719,17 +1720,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [59/75] Pacman proxy: {}", "Reachable".green());
+            println!("  [59/77] Pacman proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [59/75] Pacman proxy: {}", "Clean or not set".dimmed());
+        println!("  [59/77] Pacman proxy: {}", "Clean or not set".dimmed());
     }
 
     // 60. Clean dead FreeBSD pkg package manager proxy in /usr/local/etc/pkg.conf
     if let Some((pkgproxy, pkgpath)) = get_pkg_proxy() {
         if !verify_proxy_url(&pkgproxy).await {
             println!(
-                "  [60/75] Found dead FreeBSD pkg proxy (`{}` in {}), cleaning with backup...",
+                "  [60/77] Found dead FreeBSD pkg proxy (`{}` in {}), cleaning with backup...",
                 pkgproxy.yellow(),
                 pkgpath.display()
             );
@@ -1744,17 +1745,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [60/75] FreeBSD pkg proxy: {}", "Reachable".green());
+            println!("  [60/77] FreeBSD pkg proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [60/75] FreeBSD pkg proxy: {}", "Clean or not set".dimmed());
+        println!("  [60/77] FreeBSD pkg proxy: {}", "Clean or not set".dimmed());
     }
 
     // 61. Clean dead Portage package manager proxy in make.conf
     if let Some((portproxy, portpath)) = get_portage_proxy() {
         if !verify_proxy_url(&portproxy).await {
             println!(
-                "  [61/75] Found dead Portage proxy (`{}` in {}), cleaning with backup...",
+                "  [61/77] Found dead Portage proxy (`{}` in {}), cleaning with backup...",
                 portproxy.yellow(),
                 portpath.display()
             );
@@ -1769,17 +1770,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [61/75] Portage proxy: {}", "Reachable".green());
+            println!("  [61/77] Portage proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [61/75] Portage proxy: {}", "Clean or not set".dimmed());
+        println!("  [61/77] Portage proxy: {}", "Clean or not set".dimmed());
     }
 
     // 62. Clean dead Docker Daemon engine proxy in daemon.json
     if let Some((daemon_proxy, daemon_path)) = get_docker_daemon_proxy() {
         if !verify_proxy_url(&daemon_proxy).await {
             println!(
-                "  [62/75] Found dead Docker Daemon proxy (`{}` in {}), cleaning with backup...",
+                "  [62/77] Found dead Docker Daemon proxy (`{}` in {}), cleaning with backup...",
                 daemon_proxy.yellow(),
                 daemon_path.display()
             );
@@ -1794,17 +1795,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [62/75] Docker Daemon proxy: {}", "Reachable".green());
+            println!("  [62/77] Docker Daemon proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [62/75] Docker Daemon proxy: {}", "Clean or not set".dimmed());
+        println!("  [62/77] Docker Daemon proxy: {}", "Clean or not set".dimmed());
     }
 
     // 63. Clean dead Flatpak package manager proxy in repo/config
     if let Some((flatpak_proxy, flatpak_path)) = get_flatpak_proxy() {
         if !verify_proxy_url(&flatpak_proxy).await {
             println!(
-                "  [63/75] Found dead Flatpak proxy (`{}` in {}), cleaning with backup...",
+                "  [63/77] Found dead Flatpak proxy (`{}` in {}), cleaning with backup...",
                 flatpak_proxy.yellow(),
                 flatpak_path.display()
             );
@@ -1819,17 +1820,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [63/75] Flatpak proxy: {}", "Reachable".green());
+            println!("  [63/77] Flatpak proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [63/75] Flatpak proxy: {}", "Clean or not set".dimmed());
+        println!("  [63/77] Flatpak proxy: {}", "Clean or not set".dimmed());
     }
 
     // 64. Clean dead Snap package manager proxy in snapd config / system settings
     if let Some((snap_proxy, snap_path)) = get_snap_proxy() {
         if !verify_proxy_url(&snap_proxy).await {
             println!(
-                "  [64/75] Found dead Snap proxy (`{}` in {}), cleaning with backup...",
+                "  [64/77] Found dead Snap proxy (`{}` in {}), cleaning with backup...",
                 snap_proxy.yellow(),
                 snap_path.display()
             );
@@ -1846,17 +1847,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [64/75] Snap proxy: {}", "Reachable".green());
+            println!("  [64/77] Snap proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [64/75] Snap proxy: {}", "Clean or not set".dimmed());
+        println!("  [64/77] Snap proxy: {}", "Clean or not set".dimmed());
     }
 
     // 65. Clean dead Ollama local AI runner daemon proxy in systemd / config
     if let Some((ollama_proxy, ollama_path)) = get_ollama_proxy() {
         if !verify_proxy_url(&ollama_proxy).await {
             println!(
-                "  [65/75] Found dead Ollama daemon proxy (`{}` in {}), cleaning with backup...",
+                "  [65/77] Found dead Ollama daemon proxy (`{}` in {}), cleaning with backup...",
                 ollama_proxy.yellow(),
                 ollama_path.display()
             );
@@ -1873,17 +1874,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [65/75] Ollama daemon proxy: {}", "Reachable".green());
+            println!("  [65/77] Ollama daemon proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [65/75] Ollama daemon proxy: {}", "Clean or not set".dimmed());
+        println!("  [65/77] Ollama daemon proxy: {}", "Clean or not set".dimmed());
     }
 
     // 66. Clean dead Containerd (Kubernetes / CRI) container runtime daemon proxy in systemd / config
     if let Some((containerd_proxy, containerd_path)) = get_containerd_proxy() {
         if !verify_proxy_url(&containerd_proxy).await {
             println!(
-                "  [66/75] Found dead Containerd daemon proxy (`{}` in {}), cleaning with backup...",
+                "  [66/77] Found dead Containerd daemon proxy (`{}` in {}), cleaning with backup...",
                 containerd_proxy.yellow(),
                 containerd_path.display()
             );
@@ -1900,17 +1901,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [66/75] Containerd daemon proxy: {}", "Reachable".green());
+            println!("  [66/77] Containerd daemon proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [66/75] Containerd daemon proxy: {}", "Clean or not set".dimmed());
+        println!("  [66/77] Containerd daemon proxy: {}", "Clean or not set".dimmed());
     }
 
     // 67. Clean dead BuildKit (Docker Buildx / buildctl) container builder daemon proxy in systemd / config
     if let Some((buildkit_proxy, buildkit_path)) = get_buildkit_proxy() {
         if !verify_proxy_url(&buildkit_proxy).await {
             println!(
-                "  [67/75] Found dead BuildKit daemon proxy (`{}` in {}), cleaning with backup...",
+                "  [67/77] Found dead BuildKit daemon proxy (`{}` in {}), cleaning with backup...",
                 buildkit_proxy.yellow(),
                 buildkit_path.display()
             );
@@ -1927,17 +1928,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [67/75] BuildKit daemon proxy: {}", "Reachable".green());
+            println!("  [67/77] BuildKit daemon proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [67/75] BuildKit daemon proxy: {}", "Clean or not set".dimmed());
+        println!("  [67/77] BuildKit daemon proxy: {}", "Clean or not set".dimmed());
     }
 
     // 68. Clean dead K3s (Lightweight Kubernetes / k3s-agent) node daemon proxy in systemd / env
     if let Some((k3s_proxy, k3s_path)) = get_k3s_proxy() {
         if !verify_proxy_url(&k3s_proxy).await {
             println!(
-                "  [68/75] Found dead K3s daemon proxy (`{}` in {}), cleaning with backup...",
+                "  [68/77] Found dead K3s daemon proxy (`{}` in {}), cleaning with backup...",
                 k3s_proxy.yellow(),
                 k3s_path.display()
             );
@@ -1954,17 +1955,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [68/75] K3s daemon proxy: {}", "Reachable".green());
+            println!("  [68/77] K3s daemon proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [68/75] K3s daemon proxy: {}", "Clean or not set".dimmed());
+        println!("  [68/77] K3s daemon proxy: {}", "Clean or not set".dimmed());
     }
 
     // 69. Clean dead MicroK8s (Canonical Zero-ops Kubernetes) node daemon proxy in /var/snap/microk8s/current/args/containerd-env
     if let Some((mk8s_proxy, mk8s_path)) = get_microk8s_proxy() {
         if !verify_proxy_url(&mk8s_proxy).await {
             println!(
-                "  [69/75] Found dead MicroK8s daemon proxy (`{}` in {}), cleaning with backup...",
+                "  [69/77] Found dead MicroK8s daemon proxy (`{}` in {}), cleaning with backup...",
                 mk8s_proxy.yellow(),
                 mk8s_path.display()
             );
@@ -1981,17 +1982,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [69/75] MicroK8s daemon proxy: {}", "Reachable".green());
+            println!("  [69/77] MicroK8s daemon proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [69/75] MicroK8s daemon proxy: {}", "Clean or not set".dimmed());
+        println!("  [69/77] MicroK8s daemon proxy: {}", "Clean or not set".dimmed());
     }
 
     // 70. Clean dead k0s (Mirantis Zero-friction Kubernetes) node daemon proxy in systemd / default
     if let Some((k0s_proxy, k0s_path)) = get_k0s_proxy() {
         if !verify_proxy_url(&k0s_proxy).await {
             println!(
-                "  [70/75] Found dead k0s daemon proxy (`{}` in {}), cleaning with backup...",
+                "  [70/77] Found dead k0s daemon proxy (`{}` in {}), cleaning with backup...",
                 k0s_proxy.yellow(),
                 k0s_path.display()
             );
@@ -2008,13 +2009,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [70/75] k0s daemon proxy: {}", "Reachable".green());
+            println!("  [70/77] k0s daemon proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [70/75] k0s daemon proxy: {}", "Clean or not set".dimmed());
+        println!("  [70/77] k0s daemon proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 71. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 71. Clean dead RKE2 (Rancher Kubernetes Engine 2) node daemon proxy in /etc/rancher/rke2/rke2.env / systemd
+    if let Some((rke2_proxy, rke2_path)) = get_rke2_proxy() {
+        if !verify_proxy_url(&rke2_proxy).await {
+            println!(
+                "  [71/77] Found dead RKE2 daemon proxy (`{}` in {}), cleaning with backup...",
+                rke2_proxy.yellow(),
+                rke2_path.display()
+            );
+            if rke2_path.exists() {
+                let backup = rke2_path.with_extension("bak");
+                let _ = std::fs::copy(&rke2_path, &backup);
+            }
+            if let Ok(true) = unset_rke2_proxy() {
+                println!(
+                    "  {} Cleared broken RKE2 proxy in {} (backup saved)",
+                    "✔".green(),
+                    rke2_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [71/77] RKE2 daemon proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [71/77] RKE2 daemon proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 72. Clean dead Nomad (HashiCorp Nomad Workload Daemon) proxy in systemd / default
+    if let Some((nomad_proxy, nomad_path)) = get_nomad_proxy() {
+        if !verify_proxy_url(&nomad_proxy).await {
+            println!(
+                "  [72/77] Found dead Nomad daemon proxy (`{}` in {}), cleaning with backup...",
+                nomad_proxy.yellow(),
+                nomad_path.display()
+            );
+            if nomad_path.exists() {
+                let backup = nomad_path.with_extension("bak");
+                let _ = std::fs::copy(&nomad_path, &backup);
+            }
+            if let Ok(true) = unset_nomad_proxy() {
+                println!(
+                    "  {} Cleared broken Nomad proxy in {} (backup saved)",
+                    "✔".green(),
+                    nomad_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [72/77] Nomad daemon proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [72/77] Nomad daemon proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 73. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -2028,7 +2083,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [71/75] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [73/77] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -2045,17 +2100,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [71/75] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [73/77] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [71/75] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [73/77] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [71/75] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [73/77] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 72. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 74. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -2069,7 +2124,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [72/75] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [74/77] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -2087,17 +2142,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [72/75] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [74/77] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [72/75] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [74/77] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [72/75] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [74/77] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 73. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 75. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -2111,7 +2166,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [73/75] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [75/77] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -2129,17 +2184,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [73/75] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [75/77] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [73/75] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [75/77] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [73/75] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [75/77] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 74. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 76. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -2158,7 +2213,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [74/75] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [76/77] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -2186,12 +2241,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [74/75] No active local proxy client found. Ensure your proxy software is open."
+            "  [76/77] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 75. Flush local DNS cache
-    println!("  [75/75] Flushing local DNS cache to fix resolution stalls...");
+    // 77. Flush local DNS cache
+    println!("  [77/77] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

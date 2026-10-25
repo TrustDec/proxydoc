@@ -7664,6 +7664,463 @@ pub fn get_k0s_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_rke2_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("RKE2_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("rke2.env");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("RKE2_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("RKE2_ENV_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_dropin1 = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("rke2-server.service.d")
+            .join("http-proxy.conf");
+        if user_dropin1.exists() && !paths.contains(&user_dropin1) {
+            paths.push(user_dropin1);
+        }
+        let user_dropin2 = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("rke2-agent.service.d")
+            .join("http-proxy.conf");
+        if user_dropin2.exists() && !paths.contains(&user_dropin2) {
+            paths.push(user_dropin2);
+        }
+        let user_env = home.join(".config").join("rke2").join("rke2.env");
+        if user_env.exists() && !paths.contains(&user_env) {
+            paths.push(user_env);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/rancher/rke2/rke2.env"),
+        PathBuf::from("/etc/default/rke2-server"),
+        PathBuf::from("/etc/default/rke2-agent"),
+        PathBuf::from("/etc/sysconfig/rke2-server"),
+        PathBuf::from("/etc/sysconfig/rke2-agent"),
+        PathBuf::from("/etc/systemd/system/rke2-server.service.env"),
+        PathBuf::from("/etc/systemd/system/rke2-agent.service.env"),
+        PathBuf::from("/etc/systemd/system/rke2-server.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/rke2-agent.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_rke2_config_path() -> Option<PathBuf> {
+    let paths = get_rke2_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_rke2_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_rke2_write_path() -> PathBuf {
+    if let Some(p) = get_rke2_config_path() {
+        return p;
+    }
+    let rancher_dir = PathBuf::from("/etc/rancher/rke2");
+    if rancher_dir.is_dir() {
+        return rancher_dir.join("rke2.env");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/rke2-server.service.d");
+    if dropin_dir.is_dir() {
+        let f = dropin_dir.join("http-proxy.conf");
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&f)
+        {
+            drop(file);
+            return f;
+        }
+    }
+    let systemd_dir = PathBuf::from("/etc/systemd/system");
+    if systemd_dir.is_dir() {
+        let env_file = systemd_dir.join("rke2-server.service.env");
+        if let Ok(f) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&env_file)
+        {
+            drop(f);
+            return env_file;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_env = home.join(".config").join("rke2").join("rke2.env");
+        if let Some(parent) = user_env.parent() {
+            if parent.is_dir() {
+                return user_env;
+            }
+        }
+    }
+    let default_server = PathBuf::from("/etc/default/rke2-server");
+    if default_server.exists() {
+        return default_server;
+    }
+    PathBuf::from("/etc/rancher/rke2/rke2.env")
+}
+
+pub fn parse_rke2_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+
+        // Systemd drop-in format: Environment="HTTP_PROXY=..."
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "rke2_http_proxy"
+                        || k_low == "rke2_https_proxy"
+                        || k_low == "containerd_http_proxy"
+                        || k_low == "containerd_https_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Environment format: HTTP_PROXY=... / HTTPS_PROXY=... / CONTAINERD_HTTP_PROXY=...
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "rke2_http_proxy"
+                || key == "rke2_https_proxy"
+                || key == "containerd_http_proxy"
+                || key == "containerd_https_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_rke2_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_rke2_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_rke2_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("RKE2_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RKE2_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("RKE2_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RKE2_HTTPS_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_nomad_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("NOMAD_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("http-proxy.conf");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NOMAD_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NOMAD_ENV_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_dropin = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("nomad.service.d")
+            .join("http-proxy.conf");
+        if user_dropin.exists() && !paths.contains(&user_dropin) {
+            paths.push(user_dropin);
+        }
+        let user_env = home.join(".config").join("nomad").join("nomad.env");
+        if user_env.exists() && !paths.contains(&user_env) {
+            paths.push(user_env);
+        }
+        let user_legacy = home.join(".nomad.d").join("nomad.env");
+        if user_legacy.exists() && !paths.contains(&user_legacy) {
+            paths.push(user_legacy);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/systemd/system/nomad.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/nomad"),
+        PathBuf::from("/etc/sysconfig/nomad"),
+        PathBuf::from("/etc/nomad.d/nomad.env"),
+        PathBuf::from("/etc/systemd/system/nomad.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_nomad_config_path() -> Option<PathBuf> {
+    let paths = get_nomad_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_nomad_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_nomad_write_path() -> PathBuf {
+    if let Some(p) = get_nomad_config_path() {
+        return p;
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/nomad.service.d");
+    if dropin_dir.is_dir() {
+        let f = dropin_dir.join("http-proxy.conf");
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&f)
+        {
+            drop(file);
+            return f;
+        }
+    }
+    let default_nomad = PathBuf::from("/etc/default/nomad");
+    if default_nomad.exists() {
+        return default_nomad;
+    }
+    let sysconfig_nomad = PathBuf::from("/etc/sysconfig/nomad");
+    if sysconfig_nomad.exists() {
+        return sysconfig_nomad;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_dropin = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("nomad.service.d");
+        if user_dropin.is_dir() {
+            return user_dropin.join("http-proxy.conf");
+        }
+    }
+    PathBuf::from("/etc/systemd/system/nomad.service.d/http-proxy.conf")
+}
+
+pub fn parse_nomad_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+
+        // Systemd drop-in format: Environment="HTTP_PROXY=..."
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "nomad_http_proxy"
+                        || k_low == "nomad_https_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Environment format: HTTP_PROXY=... / HTTPS_PROXY=...
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "nomad_http_proxy"
+                || key == "nomad_https_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nomad_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_nomad_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_nomad_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NOMAD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NOMAD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("NOMAD_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NOMAD_HTTPS_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -10805,6 +11262,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "k0s Kubernetes Daemon",
             "/etc/systemd/system/k0scontroller.service.d/http-proxy.conf & /etc/default/k0scontroller",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // RKE2 (Rancher Kubernetes Engine 2 Daemon) Proxy (/etc/rancher/rke2/rke2.env / /etc/systemd/system/rke2-server.service.d/http-proxy.conf)
+    if let Some((rke2_proxy, rke2_path)) = get_rke2_proxy() {
+        let ok = verify_proxy_url(&rke2_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "RKE2 (Rancher Kubernetes Engine 2) node daemon proxy `{}` in {} is dead! (RKE2 image pulls and node join will fail)",
+                rke2_proxy,
+                rke2_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "RKE2 Kubernetes Daemon",
+            format!("{}", rke2_path.display()),
+            rke2_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (rke2 fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "RKE2 Kubernetes Daemon",
+            "/etc/rancher/rke2/rke2.env & /etc/systemd/system/rke2-server.service.d/http-proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Nomad (HashiCorp Nomad Workload Daemon) Proxy (/etc/systemd/system/nomad.service.d/http-proxy.conf / /etc/default/nomad)
+    if let Some((nomad_proxy, nomad_path)) = get_nomad_proxy() {
+        let ok = verify_proxy_url(&nomad_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Nomad (HashiCorp Nomad Workload Daemon) proxy `{}` in {} is dead! (Nomad task artifact download and image pull will fail)",
+                nomad_proxy,
+                nomad_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Nomad Workload Daemon",
+            format!("{}", nomad_path.display()),
+            nomad_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (nomad fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Nomad Workload Daemon",
+            "/etc/systemd/system/nomad.service.d/http-proxy.conf & /etc/default/nomad",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -14058,5 +14579,63 @@ HTTPS_PROXY="http://10.0.0.2:8080"
         let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
         assert_eq!(parse_k0s_proxy(input_comment), None);
         assert_eq!(parse_k0s_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_rke2_proxy() {
+        let systemd_dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+Environment="CONTAINERD_HTTP_PROXY=http://127.0.0.1:7890"
+Environment="NO_PROXY=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,localhost"
+"#;
+        assert_eq!(
+            parse_rke2_proxy(systemd_dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let env_file = r#"
+# /etc/rancher/rke2/rke2.env
+HTTP_PROXY="http://10.0.0.1:8080"
+HTTPS_PROXY="http://10.0.0.1:8080"
+CONTAINERD_HTTP_PROXY="http://10.0.0.1:8080"
+"#;
+        assert_eq!(
+            parse_rke2_proxy(env_file),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_rke2_proxy(input_comment), None);
+        assert_eq!(parse_rke2_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_nomad_proxy() {
+        let systemd_dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:8118"
+Environment="HTTPS_PROXY=http://127.0.0.1:8118"
+Environment="NO_PROXY=10.0.0.0/8,172.16.0.0/12,127.0.0.1,localhost"
+"#;
+        assert_eq!(
+            parse_nomad_proxy(systemd_dropin),
+            Some("http://127.0.0.1:8118".to_string())
+        );
+
+        let env_file = r#"
+# /etc/default/nomad
+HTTP_PROXY="http://10.0.0.5:3128"
+HTTPS_PROXY="http://10.0.0.5:3128"
+"#;
+        assert_eq!(
+            parse_nomad_proxy(env_file),
+            Some("http://10.0.0.5:3128".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_nomad_proxy(input_comment), None);
+        assert_eq!(parse_nomad_proxy(""), None);
     }
 }

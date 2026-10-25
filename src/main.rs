@@ -269,7 +269,13 @@ enum Commands {
         /// Also configure k0s zero-friction Kubernetes daemon proxy (/etc/systemd/system/k0scontroller.service.d/http-proxy.conf / /etc/default/k0scontroller)
         #[arg(long, visible_alias = "mirantis-k8s")]
         k0s: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, and k0s proxy
+        /// Also configure RKE2 (Rancher Kubernetes Engine 2) daemon proxy (/etc/rancher/rke2/rke2.env / /etc/systemd/system/rke2-server.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "rke2-server", visible_alias = "rke2-agent")]
+        rke2: bool,
+        /// Also configure Nomad (HashiCorp Nomad Workload Daemon) proxy (/etc/systemd/system/nomad.service.d/http-proxy.conf / /etc/default/nomad)
+        #[arg(long, visible_alias = "nomadd")]
+        nomad: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, and nomad proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -482,7 +488,13 @@ enum Commands {
         /// Also unset k0s zero-friction Kubernetes daemon proxy (/etc/systemd/system/k0scontroller.service.d/http-proxy.conf / /etc/default/k0scontroller)
         #[arg(long, visible_alias = "mirantis-k8s")]
         k0s: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, and k0s proxy
+        /// Also unset RKE2 (Rancher Kubernetes Engine 2) daemon proxy (/etc/rancher/rke2/rke2.env / /etc/systemd/system/rke2-server.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "rke2-server", visible_alias = "rke2-agent")]
+        rke2: bool,
+        /// Also unset Nomad (HashiCorp Nomad Workload Daemon) proxy (/etc/systemd/system/nomad.service.d/http-proxy.conf / /etc/default/nomad)
+        #[arg(long, visible_alias = "nomadd")]
+        nomad: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, and nomad proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -594,6 +606,8 @@ async fn main() -> Result<()> {
             k3s,
             microk8s,
             k0s,
+            rke2,
+            nomad,
             all,
             shell,
         }) => {
@@ -667,6 +681,8 @@ async fn main() -> Result<()> {
                 k3s,
                 microk8s,
                 k0s,
+                rke2,
+                nomad,
                 all,
                 shell.as_deref(),
             )
@@ -741,6 +757,8 @@ async fn main() -> Result<()> {
             k3s,
             microk8s,
             k0s,
+            rke2,
+            nomad,
             all,
             shell,
         }) => {
@@ -813,6 +831,8 @@ async fn main() -> Result<()> {
                 k3s,
                 microk8s,
                 k0s,
+                rke2,
+                nomad,
                 all,
                 shell.as_deref(),
             )?;
@@ -2459,6 +2479,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { k0s, .. }) => {
                 assert!(k0s);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_rke2() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--rke2"]).unwrap();
+        match cli.command {
+            Some(Commands::On { rke2, .. }) => {
+                assert!(rke2);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--rke2-server"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { rke2, .. }) => {
+                assert!(rke2);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_rke2() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--rke2"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { rke2, .. }) => {
+                assert!(rke2);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_nomad() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--nomad"]).unwrap();
+        match cli.command {
+            Some(Commands::On { nomad, .. }) => {
+                assert!(nomad);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--nomadd"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { nomad, .. }) => {
+                assert!(nomad);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_nomad() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--nomad"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { nomad, .. }) => {
+                assert!(nomad);
             }
             _ => panic!("Expected Off command"),
         }
