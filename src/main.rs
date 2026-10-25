@@ -221,7 +221,13 @@ enum Commands {
         /// Also configure Spack scientific package manager proxy (~/.spack/config.yaml)
         #[arg(long)]
         spack: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, and spack proxy
+        /// Also configure MacPorts package manager proxy (~/.macports/macports.conf)
+        #[arg(long)]
+        macports: bool,
+        /// Also configure APT package manager proxy (/etc/apt/apt.conf.d/99proxydoc.conf)
+        #[arg(long)]
+        apt: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, and apt proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -386,7 +392,13 @@ enum Commands {
         /// Also unset Spack scientific package manager proxy (~/.spack/config.yaml)
         #[arg(long)]
         spack: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, and spack proxy
+        /// Also unset MacPorts package manager proxy (~/.macports/macports.conf)
+        #[arg(long)]
+        macports: bool,
+        /// Also unset APT package manager proxy (/etc/apt/apt.conf.d/99proxydoc.conf)
+        #[arg(long)]
+        apt: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, and apt proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -482,6 +494,8 @@ async fn main() -> Result<()> {
             colima,
             minikube,
             spack,
+            macports,
+            apt,
             all,
             shell,
         }) => {
@@ -539,6 +553,8 @@ async fn main() -> Result<()> {
                 colima,
                 minikube,
                 spack,
+                macports,
+                apt,
                 all,
                 shell.as_deref(),
             )
@@ -597,6 +613,8 @@ async fn main() -> Result<()> {
             colima,
             minikube,
             spack,
+            macports,
+            apt,
             all,
             shell,
         }) => {
@@ -653,6 +671,8 @@ async fn main() -> Result<()> {
                 colima,
                 minikube,
                 spack,
+                macports,
+                apt,
                 all,
                 shell.as_deref(),
             )?;
@@ -1915,6 +1935,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { spack, .. }) => {
                 assert!(spack);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_macports() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--macports"]).unwrap();
+        match cli.command {
+            Some(Commands::On { macports, .. }) => {
+                assert!(macports);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_macports() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--macports"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { macports, .. }) => {
+                assert!(macports);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_apt() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--apt"]).unwrap();
+        match cli.command {
+            Some(Commands::On { apt, .. }) => {
+                assert!(apt);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_apt() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--apt"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { apt, .. }) => {
+                assert!(apt);
             }
             _ => panic!("Expected Off command"),
         }

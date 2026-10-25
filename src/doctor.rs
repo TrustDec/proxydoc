@@ -4936,6 +4936,208 @@ pub fn get_spack_proxy() -> Option<(String, PathBuf)> {
     Some((proxy, p))
 }
 
+pub fn get_macports_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(mp_conf) = std::env::var("MACPORTS_CONF") {
+        let p = PathBuf::from(mp_conf.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_conf = home.join(".macports").join("macports.conf");
+        if user_conf.exists() && !paths.contains(&user_conf) {
+            paths.push(user_conf);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/opt/local/etc/macports/macports.conf"),
+        PathBuf::from("/opt/macports/etc/macports/macports.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_macports_config_path() -> Option<PathBuf> {
+    let paths = get_macports_config_paths();
+    paths.into_iter().next()
+}
+
+pub fn get_macports_write_path() -> PathBuf {
+    if let Some(p) = get_macports_config_path() {
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".macports").join("macports.conf");
+    }
+    PathBuf::from("/opt/local/etc/macports/macports.conf")
+}
+
+pub fn parse_macports_proxy(content: &str) -> Option<String> {
+    let mut candidate = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = trim.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let key = parts[0].to_ascii_lowercase();
+            if key == "proxy_http" || key == "proxy_https" || key == "proxy_ftp" {
+                let val = parts[1].trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() && val != "none" {
+                    candidate = Some(val.to_string());
+                }
+            }
+        }
+    }
+    let cand = candidate?;
+    if cand.starts_with("http://") || cand.starts_with("https://") || cand.starts_with("socks") {
+        Some(cand)
+    } else {
+        Some(format!("http://{}", cand))
+    }
+}
+
+pub fn get_macports_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_macports_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_macports_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_apt_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(apt_conf) = std::env::var("APT_CONFIG") {
+        let p = PathBuf::from(apt_conf.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_conf = home.join(".apt").join("apt.conf");
+        if user_conf.exists() && !paths.contains(&user_conf) {
+            paths.push(user_conf);
+        }
+    }
+    let main_conf = PathBuf::from("/etc/apt/apt.conf");
+    if main_conf.exists() && !paths.contains(&main_conf) {
+        paths.push(main_conf);
+    }
+    let conf_d = PathBuf::from("/etc/apt/apt.conf.d");
+    if conf_d.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&conf_d) {
+            let mut sub_files: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_file())
+                .collect();
+            sub_files.sort();
+            for p in sub_files {
+                if !paths.contains(&p) {
+                    paths.push(p);
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_apt_config_path() -> Option<PathBuf> {
+    let paths = get_apt_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_apt_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_apt_write_path() -> PathBuf {
+    if let Some(p) = get_apt_config_path() {
+        return p;
+    }
+    let conf_d = PathBuf::from("/etc/apt/apt.conf.d");
+    if conf_d.is_dir() {
+        let default_target = conf_d.join("99proxydoc.conf");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&default_target) {
+            drop(f);
+            return default_target;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".apt").join("apt.conf");
+    }
+    PathBuf::from("/etc/apt/apt.conf.d/99proxydoc.conf")
+}
+
+pub fn parse_apt_proxy(content: &str) -> Option<String> {
+    let mut candidate = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("//") || trim.starts_with('#') || trim.starts_with("/*") {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+        if lower.contains("acquire::http::proxy")
+            || lower.contains("acquire::https::proxy")
+            || lower.contains("acquire::socks::proxy")
+        {
+            let val_part = if let Some((_, v)) = trim.split_once(' ') {
+                v
+            } else if let Some((_, v)) = trim.split_once('\t') {
+                v
+            } else if let Some((_, v)) = trim.split_once('=') {
+                v
+            } else {
+                continue;
+            };
+            let cleaned = val_part
+                .trim()
+                .trim_end_matches(';')
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .trim();
+            if !cleaned.is_empty()
+                && cleaned.to_ascii_lowercase() != "direct"
+                && cleaned.to_ascii_lowercase() != "false"
+            {
+                candidate = Some(cleaned.to_string());
+            }
+        }
+    }
+    let cand = candidate?;
+    if cand.starts_with("http://") || cand.starts_with("https://") || cand.starts_with("socks") {
+        Some(cand)
+    } else {
+        Some(format!("http://{}", cand))
+    }
+}
+
+pub fn get_apt_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_apt_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_apt_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
 pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
@@ -7653,6 +7855,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // MacPorts Package Manager Proxy (~/.macports/macports.conf / /opt/local/etc/macports/macports.conf)
+    if let Some((mpproxy, mppath)) = get_macports_proxy() {
+        let ok = verify_proxy_url(&mpproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "MacPorts package manager proxy `{}` in {} is dead! (port install / sync will fail)",
+                mpproxy,
+                mppath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "MacPorts",
+            format!("{} [macports.conf]", mppath.display()),
+            mpproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (port fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "MacPorts",
+            "~/.macports/macports.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // APT (Debian / Ubuntu / WSL / Containers) Package Manager Proxy (/etc/apt/apt.conf.d/* / ~/.apt/apt.conf)
+    if let Some((aptproxy, aptpath)) = get_apt_proxy() {
+        let ok = verify_proxy_url(&aptproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "APT package manager proxy `{}` in {} is dead! (apt update / install will fail)",
+                aptproxy,
+                aptpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "APT",
+            format!("{}", aptpath.display()),
+            aptproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (apt fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "APT",
+            "/etc/apt/apt.conf.d/* & ~/.apt/apt.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -10309,5 +10575,66 @@ network:
 
         let input_empty = "config:\n  connect_timeout: 10\n";
         assert_eq!(parse_spack_proxy(input_empty), None);
+    }
+
+    #[test]
+    fn test_parse_macports_proxy() {
+        let input_conf = r#"
+# MacPorts configuration file
+rsync_server            rsync.macports.org
+proxy_http              http://127.0.0.1:7890
+proxy_https             http://127.0.0.1:7890
+proxy_skip              127.0.0.1, localhost
+"#;
+        assert_eq!(
+            parse_macports_proxy(input_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_socks = "proxy_http socks5://127.0.0.1:1080\n";
+        assert_eq!(
+            parse_macports_proxy(input_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_raw = "proxy_https 127.0.0.1:8888\n";
+        assert_eq!(
+            parse_macports_proxy(input_raw),
+            Some("http://127.0.0.1:8888".to_string())
+        );
+
+        let input_commented = "# proxy_http http://127.0.0.1:7890\n";
+        assert_eq!(parse_macports_proxy(input_commented), None);
+
+        let input_none = "rsync_server rsync.macports.org\n";
+        assert_eq!(parse_macports_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_apt_proxy() {
+        let input_apt = r#"
+// Configured by proxydoc
+Acquire::http::Proxy "http://127.0.0.1:7890";
+Acquire::https::Proxy "http://127.0.0.1:7890";
+"#;
+        assert_eq!(
+            parse_apt_proxy(input_apt),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_socks = "Acquire::http::proxy \"socks5h://127.0.0.1:1080\";\n";
+        assert_eq!(
+            parse_apt_proxy(input_socks),
+            Some("socks5h://127.0.0.1:1080".to_string())
+        );
+
+        let input_direct = "Acquire::http::Proxy \"DIRECT\";\n";
+        assert_eq!(parse_apt_proxy(input_direct), None);
+
+        let input_commented = "// Acquire::http::Proxy \"http://127.0.0.1:7890\";\n";
+        assert_eq!(parse_apt_proxy(input_commented), None);
+
+        let input_none = "APT::Install-Recommends \"0\";\n";
+        assert_eq!(parse_apt_proxy(input_none), None);
     }
 }

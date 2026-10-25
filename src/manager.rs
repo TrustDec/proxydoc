@@ -5077,6 +5077,205 @@ pub fn unset_spack_proxy() -> Result<bool> {
     Ok(false)
 }
 
+pub fn apply_macports_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut http_set = false;
+    let mut https_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            lines.push(line.to_string());
+            continue;
+        }
+        let parts: Vec<&str> = trim.split_whitespace().collect();
+        if !parts.is_empty() {
+            let key = parts[0].to_ascii_lowercase();
+            if key == "proxy_http" {
+                lines.push(format!("proxy_http              {}", proxy_url));
+                http_set = true;
+                continue;
+            } else if key == "proxy_https" {
+                lines.push(format!("proxy_https             {}", proxy_url));
+                https_set = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !http_set {
+        lines.push(format!("proxy_http              {}", proxy_url));
+    }
+    if !https_set {
+        lines.push(format!("proxy_https             {}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_macports_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            lines.push(line.to_string());
+            continue;
+        }
+        let parts: Vec<&str> = trim.split_whitespace().collect();
+        if !parts.is_empty() {
+            let key = parts[0].to_ascii_lowercase();
+            if key == "proxy_http" || key == "proxy_https" || key == "proxy_ftp" {
+                changed = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_macports_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_macports_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_macports_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_macports_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_macports_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_macports_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    if !any_removed {
+        if let Some(path) = crate::doctor::get_macports_config_path() {
+            if path.exists() {
+                let content = std::fs::read_to_string(&path)?;
+                let (new_content, removed) = remove_macports_proxy(&content);
+                if removed {
+                    std::fs::write(&path, new_content)?;
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_apt_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut http_set = false;
+    let mut https_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("//") || trim.starts_with('#') || trim.starts_with("/*") {
+            lines.push(line.to_string());
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+        if lower.contains("acquire::http::proxy") {
+            lines.push(format!("Acquire::http::Proxy \"{}\";", proxy_url));
+            http_set = true;
+            continue;
+        } else if lower.contains("acquire::https::proxy") {
+            lines.push(format!("Acquire::https::Proxy \"{}\";", proxy_url));
+            https_set = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if !http_set {
+        lines.push(format!("Acquire::http::Proxy \"{}\";", proxy_url));
+    }
+    if !https_set {
+        lines.push(format!("Acquire::https::Proxy \"{}\";", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_apt_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("//") || trim.starts_with('#') || trim.starts_with("/*") {
+            lines.push(line.to_string());
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+        if lower.contains("acquire::http::proxy")
+            || lower.contains("acquire::https::proxy")
+            || lower.contains("acquire::socks::proxy")
+        {
+            changed = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_apt_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_apt_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_apt_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_apt_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_apt_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_apt_proxy(&content);
+                if removed {
+                    if new_content.trim().is_empty()
+                        && path.file_name().map_or(false, |n| n == "99proxydoc.conf")
+                    {
+                        let _ = std::fs::remove_file(&path);
+                    } else {
+                        let _ = std::fs::write(&path, new_content);
+                    }
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -5131,6 +5330,8 @@ pub async fn turn_on(
     colima: bool,
     minikube: bool,
     spack: bool,
+    macports: bool,
+    apt: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5184,6 +5385,8 @@ pub async fn turn_on(
     let set_colima = colima || all;
     let set_minikube = minikube || all;
     let set_spack = spack || all;
+    let set_macports = macports || all;
+    let set_apt = apt || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -5865,6 +6068,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_macports {
+        match set_macports_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ MacPorts package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update MacPorts config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_apt {
+        match set_apt_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ APT package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update APT config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -5932,6 +6165,8 @@ pub fn turn_off(
     colima: bool,
     minikube: bool,
     spack: bool,
+    macports: bool,
+    apt: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5985,6 +6220,8 @@ pub fn turn_off(
     let unset_colima = colima || all;
     let unset_minikube = minikube || all;
     let unset_spack = spack || all;
+    let unset_macports = macports || all;
+    let unset_apt = apt || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -6470,6 +6707,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Spack proxy removed from config.yaml".green()),
             Ok(false) => eprintln!("{}", "○ Spack proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Spack proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_macports {
+        match unset_macports_proxy() {
+            Ok(true) => eprintln!("{}", "✔ MacPorts proxy removed from macports.conf".green()),
+            Ok(false) => eprintln!("{}", "○ MacPorts proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset MacPorts proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_apt {
+        match unset_apt_proxy() {
+            Ok(true) => eprintln!("{}", "✔ APT proxy removed from apt config".green()),
+            Ok(false) => eprintln!("{}", "○ APT proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset APT proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -7632,5 +7885,45 @@ contexts: []
         assert!(removed);
         assert!(!cleaned.contains("proxy:"));
         assert!(cleaned.contains("connect_timeout: 10"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_macports_proxy() {
+        let initial = "# MacPorts configuration file\nrsync_server rsync.macports.org\n";
+        let with_proxy = apply_macports_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy_http              http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("proxy_https             http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("rsync_server rsync.macports.org"));
+
+        // Replace proxy
+        let updated = apply_macports_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("proxy_http              socks5://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_macports_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy_http"));
+        assert!(!cleaned.contains("proxy_https"));
+        assert!(cleaned.contains("rsync_server rsync.macports.org"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_apt_proxy() {
+        let initial = "// APT configuration\nAPT::Install-Recommends \"0\";\n";
+        let with_proxy = apply_apt_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("Acquire::http::Proxy \"http://127.0.0.1:7890\";"));
+        assert!(with_proxy.contains("Acquire::https::Proxy \"http://127.0.0.1:7890\";"));
+        assert!(with_proxy.contains("APT::Install-Recommends \"0\";"));
+
+        // Replace proxy
+        let updated = apply_apt_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("Acquire::http::Proxy \"socks5://127.0.0.1:1080\";"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_apt_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("Acquire::http::Proxy"));
+        assert!(!cleaned.contains("Acquire::https::Proxy"));
+        assert!(cleaned.contains("APT::Install-Recommends \"0\";"));
     }
 }
