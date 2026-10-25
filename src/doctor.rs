@@ -8597,6 +8597,557 @@ pub fn get_gitlab_runner_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_actions_runner_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("ACTIONS_RUNNER_DIR") {
+        let p_proxy = PathBuf::from(dir.trim()).join(".proxy");
+        if p_proxy.exists() {
+            paths.push(p_proxy);
+        }
+        let p_env = PathBuf::from(dir.trim()).join(".env");
+        if p_env.exists() && !paths.contains(&p_env) {
+            paths.push(p_env);
+        }
+    }
+    if let Ok(file) = std::env::var("ACTIONS_RUNNER_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("ACTIONS_RUNNER_ENV_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join("actions-runner").join(".proxy"),
+            home.join("actions-runner").join(".env"),
+            home.join(".actions-runner").join(".proxy"),
+            home.join(".actions-runner").join(".env"),
+            home.join(".config").join("systemd").join("user").join("actions-runner.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("actions.runner.service.d").join("http-proxy.conf"),
+            home.join(".config").join("actions-runner").join("actions-runner.env"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/actions-runner/.proxy"),
+        PathBuf::from("/actions-runner/.env"),
+        PathBuf::from("/opt/actions-runner/.proxy"),
+        PathBuf::from("/opt/actions-runner/.env"),
+        PathBuf::from("/var/lib/actions-runner/.proxy"),
+        PathBuf::from("/var/lib/actions-runner/.env"),
+        PathBuf::from("/etc/actions-runner/.proxy"),
+        PathBuf::from("/etc/actions-runner/.env"),
+        PathBuf::from("/etc/systemd/system/actions-runner.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/actions.runner.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/actions-runner"),
+        PathBuf::from("/etc/sysconfig/actions-runner"),
+        PathBuf::from("/etc/systemd/system/actions-runner.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_actions_runner_config_path() -> Option<PathBuf> {
+    let paths = get_actions_runner_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_actions_runner_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_actions_runner_write_path() -> PathBuf {
+    if let Some(p) = get_actions_runner_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("ACTIONS_RUNNER_DIR") {
+        return PathBuf::from(dir.trim()).join(".proxy");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let runner_dir = home.join("actions-runner");
+        if runner_dir.is_dir() {
+            return runner_dir.join(".proxy");
+        }
+        let dot_runner_dir = home.join(".actions-runner");
+        if dot_runner_dir.is_dir() {
+            return dot_runner_dir.join(".proxy");
+        }
+    }
+    let opt_dir = PathBuf::from("/opt/actions-runner");
+    if opt_dir.is_dir() {
+        return opt_dir.join(".proxy");
+    }
+    let root_runner = PathBuf::from("/actions-runner");
+    if root_runner.is_dir() {
+        return root_runner.join(".proxy");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/actions-runner.service.d");
+    if dropin_dir.is_dir() {
+        let f = dropin_dir.join("http-proxy.conf");
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&f)
+        {
+            drop(file);
+            return f;
+        }
+    }
+    let default_runner = PathBuf::from("/etc/default/actions-runner");
+    if default_runner.exists() {
+        return default_runner;
+    }
+    let sysconfig_runner = PathBuf::from("/etc/sysconfig/actions-runner");
+    if sysconfig_runner.exists() {
+        return sysconfig_runner;
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join("actions-runner").join(".proxy");
+    }
+    PathBuf::from("/actions-runner/.proxy")
+}
+
+pub fn parse_actions_runner_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if trim.is_empty() {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+
+        // Systemd drop-in format: Environment="HTTP_PROXY=..."
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "actions_runner_proxy"
+                        || k_low == "actions_runner_http_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Environment format: HTTP_PROXY=... / HTTPS_PROXY=... / ACTIONS_RUNNER_PROXY=...
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "actions_runner_proxy"
+                || key == "actions_runner_http_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // GitHub Actions Runner .proxy format: single URL line
+        if trim.starts_with("http://")
+            || trim.starts_with("https://")
+            || trim.starts_with("socks://")
+            || trim.starts_with("socks5://")
+        {
+            return Some(trim.to_string());
+        }
+    }
+    None
+}
+
+pub fn get_actions_runner_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_actions_runner_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_actions_runner_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ACTIONS_RUNNER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ACTIONS_RUNNER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ACTIONS_RUNNER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ACTIONS_RUNNER_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_jenkins_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("JENKINS_HOME") {
+        let p = PathBuf::from(dir.trim()).join("proxy.xml");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("JENKINS_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("JENKINS_ENV_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_xml = home.join(".jenkins").join("proxy.xml");
+        if user_xml.exists() && !paths.contains(&user_xml) {
+            paths.push(user_xml);
+        }
+        let user_dropin = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("jenkins.service.d")
+            .join("http-proxy.conf");
+        if user_dropin.exists() && !paths.contains(&user_dropin) {
+            paths.push(user_dropin);
+        }
+        let user_env = home.join(".config").join("jenkins").join("jenkins.env");
+        if user_env.exists() && !paths.contains(&user_env) {
+            paths.push(user_env);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/var/lib/jenkins/proxy.xml"),
+        PathBuf::from("/etc/systemd/system/jenkins.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/jenkins-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/jenkins"),
+        PathBuf::from("/etc/sysconfig/jenkins"),
+        PathBuf::from("/etc/systemd/system/jenkins.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_jenkins_config_path() -> Option<PathBuf> {
+    let paths = get_jenkins_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_jenkins_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_jenkins_write_path() -> PathBuf {
+    if let Some(p) = get_jenkins_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("JENKINS_HOME") {
+        return PathBuf::from(dir.trim()).join("proxy.xml");
+    }
+    let var_jenkins = PathBuf::from("/var/lib/jenkins");
+    if var_jenkins.is_dir() {
+        return var_jenkins.join("proxy.xml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/jenkins.service.d");
+    if dropin_dir.is_dir() {
+        let f = dropin_dir.join("http-proxy.conf");
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&f)
+        {
+            drop(file);
+            return f;
+        }
+    }
+    let default_jenkins = PathBuf::from("/etc/default/jenkins");
+    if default_jenkins.exists() {
+        return default_jenkins;
+    }
+    let sysconfig_jenkins = PathBuf::from("/etc/sysconfig/jenkins");
+    if sysconfig_jenkins.exists() {
+        return sysconfig_jenkins;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_xml = home.join(".jenkins").join("proxy.xml");
+        if let Some(parent) = user_xml.parent() {
+            if parent.is_dir() {
+                return user_xml;
+            }
+        }
+    }
+    PathBuf::from("/var/lib/jenkins/proxy.xml")
+}
+
+pub fn parse_jenkins_proxy(content: &str) -> Option<String> {
+    // 1. Check Jenkins XML format (proxy.xml)
+    if content.contains("<proxy>") || content.contains("<name>") || content.contains("<proxyHost>") {
+        let mut host = String::new();
+        let mut port = 8080u16;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            if let Some(h) = trim
+                .strip_prefix("<name>")
+                .and_then(|s| s.strip_suffix("</name>"))
+                .or_else(|| trim.strip_prefix("<proxyHost>").and_then(|s| s.strip_suffix("</proxyHost>")))
+            {
+                let h_trim = h.trim();
+                if !h_trim.is_empty() {
+                    host = h_trim.to_string();
+                }
+            }
+            if let Some(p) = trim
+                .strip_prefix("<port>")
+                .and_then(|s| s.strip_suffix("</port>"))
+                .or_else(|| trim.strip_prefix("<proxyPort>").and_then(|s| s.strip_suffix("</proxyPort>")))
+            {
+                if let Ok(parsed) = p.trim().parse::<u16>() {
+                    port = parsed;
+                }
+            }
+        }
+        if !host.is_empty() {
+            return Some(if host.starts_with("http://")
+                || host.starts_with("https://")
+                || host.starts_with("socks")
+            {
+                host
+            } else {
+                format!("http://{}:{}", host, port)
+            });
+        }
+    }
+
+    // 2. Check Java arguments format (-Dhttp.proxyHost=... -Dhttp.proxyPort=...)
+    if content.contains("-Dhttp.proxyHost=") || content.contains("-Dhttps.proxyHost=") {
+        let mut host = String::new();
+        let mut port = 8080u16;
+        for token in content.split_whitespace() {
+            let token_clean = token.trim_matches('"').trim_matches('\'');
+            if let Some(val) = token_clean.strip_prefix("-Dhttp.proxyHost=") {
+                let h = val.trim();
+                if !h.is_empty() {
+                    host = h.to_string();
+                }
+            } else if let Some(val) = token_clean.strip_prefix("-Dhttps.proxyHost=") {
+                if host.is_empty() {
+                    let h = val.trim();
+                    if !h.is_empty() {
+                        host = h.to_string();
+                    }
+                }
+            } else if let Some(val) = token_clean.strip_prefix("-Dhttp.proxyPort=") {
+                if let Ok(p) = val.trim().parse::<u16>() {
+                    port = p;
+                }
+            } else if let Some(val) = token_clean.strip_prefix("-Dhttps.proxyPort=") {
+                if let Ok(p) = val.trim().parse::<u16>() {
+                    port = p;
+                }
+            }
+        }
+        if !host.is_empty() {
+            return Some(if host.starts_with("http://")
+                || host.starts_with("https://")
+                || host.starts_with("socks")
+            {
+                host
+            } else {
+                format!("http://{}:{}", host, port)
+            });
+        }
+    }
+
+    // 3. Systemd drop-in or env format
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "jenkins_http_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "jenkins_http_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_jenkins_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_jenkins_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_jenkins_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("JENKINS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JENKINS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("JENKINS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JENKINS_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -11866,6 +12417,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "GitLab Runner CI Daemon",
             "/etc/gitlab-runner/config.toml & /etc/systemd/system/gitlab-runner.service.d/http-proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // GitHub Actions Runner (CI/CD Daemon) Proxy (~/.actions-runner/.proxy / .env / /etc/systemd/system/actions-runner.service.d/http-proxy.conf)
+    if let Some((runner_proxy, runner_path)) = get_actions_runner_proxy() {
+        let ok = verify_proxy_url(&runner_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "GitHub Actions Runner daemon proxy `{}` in {} is dead! (Runner job execution and workflow artifact actions will fail)",
+                runner_proxy,
+                runner_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "GitHub Actions Runner CI",
+            format!("{}", runner_path.display()),
+            runner_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (actions-runner fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "GitHub Actions Runner CI",
+            "~/.actions-runner/.proxy & /etc/systemd/system/actions-runner.service.d/http-proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Jenkins CI Automation Daemon Proxy (~/.jenkins/proxy.xml / /etc/default/jenkins / /etc/systemd/system/jenkins.service.d/http-proxy.conf)
+    if let Some((jenkins_proxy, jenkins_path)) = get_jenkins_proxy() {
+        let ok = verify_proxy_url(&jenkins_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Jenkins CI automation daemon proxy `{}` in {} is dead! (Jenkins plugin updates and build stage downloads will fail)",
+                jenkins_proxy,
+                jenkins_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Jenkins CI Daemon",
+            format!("{}", jenkins_path.display()),
+            jenkins_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (jenkins fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Jenkins CI Daemon",
+            "~/.jenkins/proxy.xml & /etc/systemd/system/jenkins.service.d/http-proxy.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -15247,5 +15862,82 @@ CI_SERVER_PROXY="http://10.0.0.3:8080"
         let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
         assert_eq!(parse_gitlab_runner_proxy(input_comment), None);
         assert_eq!(parse_gitlab_runner_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_actions_runner_proxy() {
+        // Standard .proxy file format (single-line url)
+        let proxy_file = "http://127.0.0.1:8118\n";
+        assert_eq!(
+            parse_actions_runner_proxy(proxy_file),
+            Some("http://127.0.0.1:8118".to_string())
+        );
+
+        // Systemd drop-in format
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+Environment="NO_PROXY=localhost,127.0.0.1"
+"#;
+        assert_eq!(
+            parse_actions_runner_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        // .env file format
+        let env_file = r#"
+# runner .env
+http_proxy=http://10.0.0.10:3128
+https_proxy=http://10.0.0.10:3128
+no_proxy=localhost,127.0.0.1
+"#;
+        assert_eq!(
+            parse_actions_runner_proxy(env_file),
+            Some("http://10.0.0.10:3128".to_string())
+        );
+
+        let input_comment = "# http_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_actions_runner_proxy(input_comment), None);
+        assert_eq!(parse_actions_runner_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_jenkins_proxy() {
+        // Jenkins native proxy.xml
+        let xml_file = r#"<?xml version='1.1' encoding='UTF-8'?>
+<proxy>
+  <name>127.0.0.1</name>
+  <port>8118</port>
+  <noProxyHost>localhost</noProxyHost>
+</proxy>
+"#;
+        assert_eq!(
+            parse_jenkins_proxy(xml_file),
+            Some("http://127.0.0.1:8118".to_string())
+        );
+
+        // Java arguments in /etc/default/jenkins
+        let default_env = r#"
+JAVA_ARGS="-Djava.awt.headless=true -Dhttp.proxyHost=10.0.0.15 -Dhttp.proxyPort=8080"
+"#;
+        assert_eq!(
+            parse_jenkins_proxy(default_env),
+            Some("http://10.0.0.15:8080".to_string())
+        );
+
+        // Systemd drop-in format
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_jenkins_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# Environment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_jenkins_proxy(input_comment), None);
+        assert_eq!(parse_jenkins_proxy(""), None);
     }
 }

@@ -402,6 +402,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "GitHub Actions Runners",
         "https://github.com/actions/runner/releases",
     ),
+    (
+        "Amazon ECR Public",
+        "https://public.ecr.aws",
+    ),
+    (
+        "Google Container Registry (GCR)",
+        "https://gcr.io/v2/",
+    ),
+    (
+        "Microsoft Container Registry (MCR)",
+        "https://mcr.microsoft.com/v2/",
+    ),
+    (
+        "Rocky Linux CDN",
+        "https://download.rockylinux.org",
+    ),
+    (
+        "Jenkins Update Center",
+        "https://updates.jenkins.io/update-center.json",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1037,6 +1057,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "GitHub Actions Runners"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Amazon ECR Public"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Google Container Registry (GCR)"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Microsoft Container Registry (MCR)"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Rocky Linux CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Jenkins Update Center"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

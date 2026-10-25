@@ -281,7 +281,13 @@ enum Commands {
         /// Also configure GitLab Runner (CI/CD Workload Daemon) proxy (/etc/gitlab-runner/config.toml / /etc/systemd/system/gitlab-runner.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "gitlab-ci", visible_alias = "gl-runner")]
         gitlab_runner: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, and gitlab-runner proxy
+        /// Also configure GitHub Actions Runner (CI/CD Daemon) proxy (~/.actions-runner/.proxy / .env / /etc/systemd/system/actions-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "runner", visible_alias = "actions-runner", visible_alias = "gh-runner")]
+        actions_runner: bool,
+        /// Also configure Jenkins CI Automation daemon proxy (~/.jenkins/proxy.xml / /etc/default/jenkins / /etc/systemd/system/jenkins.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "jenkins-ci", visible_alias = "jenkins-agent")]
+        jenkins: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, and jenkins proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -506,7 +512,13 @@ enum Commands {
         /// Also unset GitLab Runner (CI/CD Workload Daemon) proxy (/etc/gitlab-runner/config.toml / /etc/systemd/system/gitlab-runner.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "gitlab-ci", visible_alias = "gl-runner")]
         gitlab_runner: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, and gitlab-runner proxy
+        /// Also unset GitHub Actions Runner (CI/CD Daemon) proxy (~/.actions-runner/.proxy / .env / /etc/systemd/system/actions-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "runner", visible_alias = "actions-runner", visible_alias = "gh-runner")]
+        actions_runner: bool,
+        /// Also unset Jenkins CI Automation daemon proxy (~/.jenkins/proxy.xml / /etc/default/jenkins / /etc/systemd/system/jenkins.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "jenkins-ci", visible_alias = "jenkins-agent")]
+        jenkins: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, and jenkins proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -622,6 +634,8 @@ async fn main() -> Result<()> {
             nomad,
             kubelet,
             gitlab_runner,
+            actions_runner,
+            jenkins,
             all,
             shell,
         }) => {
@@ -699,6 +713,8 @@ async fn main() -> Result<()> {
                 nomad,
                 kubelet,
                 gitlab_runner,
+                actions_runner,
+                jenkins,
                 all,
                 shell.as_deref(),
             )
@@ -777,6 +793,8 @@ async fn main() -> Result<()> {
             nomad,
             kubelet,
             gitlab_runner,
+            actions_runner,
+            jenkins,
             all,
             shell,
         }) => {
@@ -853,6 +871,8 @@ async fn main() -> Result<()> {
                 nomad,
                 kubelet,
                 gitlab_runner,
+                actions_runner,
+                jenkins,
                 all,
                 shell.as_deref(),
             )?;
@@ -2627,6 +2647,74 @@ mod tests {
         match cli.command {
             Some(Commands::Off { gitlab_runner, .. }) => {
                 assert!(gitlab_runner);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_actions_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--actions-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::On { actions_runner, .. }) => {
+                assert!(actions_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--runner"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { actions_runner, .. }) => {
+                assert!(actions_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--gh-runner"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { actions_runner, .. }) => {
+                assert!(actions_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_actions_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--actions-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { actions_runner, .. }) => {
+                assert!(actions_runner);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_jenkins() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--jenkins"]).unwrap();
+        match cli.command {
+            Some(Commands::On { jenkins, .. }) => {
+                assert!(jenkins);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--jenkins-ci"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { jenkins, .. }) => {
+                assert!(jenkins);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_jenkins() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--jenkins"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { jenkins, .. }) => {
+                assert!(jenkins);
             }
             _ => panic!("Expected Off command"),
         }

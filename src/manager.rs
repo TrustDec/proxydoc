@@ -8386,6 +8386,493 @@ pub fn unset_gitlab_runner_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_actions_runner_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    // Systemd drop-in format: contains [Service] or Environment=
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "all_proxy" || k_low == "actions_runner_proxy" || k_low == "actions_runner_http_proxy" {
+                        lines.push(format!("Environment=\"ACTIONS_RUNNER_PROXY={}\"", proxy_url));
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Key-value .env format: contains http_proxy=, https_proxy=, etc.
+    let has_kv = content.lines().any(|l| {
+        let t = l.trim().to_ascii_lowercase();
+        t.starts_with("http_proxy=") || t.starts_with("https_proxy=") || t.starts_with("actions_runner_proxy=")
+    });
+
+    if has_kv {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            if let Some((k, _)) = trim.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("http_proxy={}", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("https_proxy={}", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "no_proxy" {
+                    lines.push(format!("no_proxy={}", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                } else if k_low == "actions_runner_proxy" {
+                    lines.push(format!("ACTIONS_RUNNER_PROXY={}", proxy_url));
+                    continue;
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("http_proxy={}", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("https_proxy={}", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("no_proxy={}", no_proxy_def));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    // Default GitHub Actions Runner `.proxy` file format: single URL line!
+    format!("{}\n", proxy_url)
+}
+
+pub fn remove_actions_runner_proxy(content: &str) -> (String, bool) {
+    let trim = content.trim();
+    if trim.is_empty() {
+        return (String::new(), false);
+    }
+
+    // If it's a plain .proxy single-line URL
+    if trim.starts_with("http://")
+        || trim.starts_with("https://")
+        || trim.starts_with("socks://")
+        || trim.starts_with("socks5://")
+    {
+        return (String::new(), true);
+    }
+
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "actions_runner_proxy"
+                    || k_low == "actions_runner_http_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "actions_runner_proxy"
+                || key == "actions_runner_http_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_actions_runner_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_actions_runner_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_actions_runner_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_actions_runner_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_actions_runner_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_actions_runner_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_jenkins_proxy(content: &str, proxy_url: &str) -> String {
+    let (host, port) = extract_host_port(proxy_url);
+
+    // 1. XML proxy.xml format
+    let is_xml = content.trim().is_empty()
+        || content.contains("<proxy")
+        || content.contains("<?xml")
+        || (!content.contains("[Service]") && !content.contains("JAVA_ARGS=") && !content.contains("http_proxy="));
+
+    if is_xml {
+        if content.contains("<proxy>") {
+            let mut lines = Vec::new();
+            let mut replaced_name = false;
+            let mut replaced_port = false;
+
+            for line in content.lines() {
+                let trim = line.trim();
+                if trim.starts_with("<name>") && trim.ends_with("</name>") {
+                    lines.push(format!("  <name>{}</name>", host));
+                    replaced_name = true;
+                    continue;
+                }
+                if trim.starts_with("<proxyHost>") && trim.ends_with("</proxyHost>") {
+                    lines.push(format!("  <proxyHost>{}</proxyHost>", host));
+                    replaced_name = true;
+                    continue;
+                }
+                if trim.starts_with("<port>") && trim.ends_with("</port>") {
+                    lines.push(format!("  <port>{}</port>", port));
+                    replaced_port = true;
+                    continue;
+                }
+                if trim.starts_with("<proxyPort>") && trim.ends_with("</proxyPort>") {
+                    lines.push(format!("  <proxyPort>{}</proxyPort>", port));
+                    replaced_port = true;
+                    continue;
+                }
+                lines.push(line.to_string());
+            }
+
+            if !replaced_name || !replaced_port {
+                return format!(
+                    "<?xml version='1.1' encoding='UTF-8'?>\n<proxy>\n  <name>{}</name>\n  <port>{}</port>\n  <noProxyHost>localhost\n127.0.0.1</noProxyHost>\n</proxy>\n",
+                    host, port
+                );
+            }
+            return lines.join("\n") + "\n";
+        }
+
+        return format!(
+            "<?xml version='1.1' encoding='UTF-8'?>\n<proxy>\n  <name>{}</name>\n  <port>{}</port>\n  <noProxyHost>localhost\n127.0.0.1</noProxyHost>\n</proxy>\n",
+            host, port
+        );
+    }
+
+    // 2. Systemd drop-in format
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let no_proxy_def = "localhost,127.0.0.1,.local";
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // 3. JAVA_ARGS / Environment format in /etc/default/jenkins or /etc/sysconfig/jenkins
+    let mut lines = Vec::new();
+    let mut handled_java_args = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with("JAVA_ARGS=") || trim.starts_with("JENKINS_JAVA_OPTIONS=") {
+            let (prefix, val) = trim.split_once('=').unwrap();
+            let clean_val = val.trim().trim_matches('"').trim_matches('\'');
+            let filtered_words: Vec<&str> = clean_val
+                .split_whitespace()
+                .filter(|w| {
+                    !w.starts_with("-Dhttp.proxyHost=")
+                        && !w.starts_with("-Dhttp.proxyPort=")
+                        && !w.starts_with("-Dhttps.proxyHost=")
+                        && !w.starts_with("-Dhttps.proxyPort=")
+                        && !w.starts_with("-Dhttp.nonProxyHosts=")
+                })
+                .collect();
+            let mut words = filtered_words;
+            let host_arg = format!("-Dhttp.proxyHost={}", host);
+            let port_arg = format!("-Dhttp.proxyPort={}", port);
+            let https_host_arg = format!("-Dhttps.proxyHost={}", host);
+            let https_port_arg = format!("-Dhttps.proxyPort={}", port);
+            let non_proxy_arg = "-Dhttp.nonProxyHosts=\"localhost|127.0.0.1\"".to_string();
+
+            words.push(&host_arg);
+            words.push(&port_arg);
+            words.push(&https_host_arg);
+            words.push(&https_port_arg);
+            words.push(&non_proxy_arg);
+
+            lines.push(format!("{}=\"{}\"", prefix, words.join(" ")));
+            handled_java_args = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if !handled_java_args {
+        lines.push(format!(
+            "JAVA_ARGS=\"-Dhttp.proxyHost={} -Dhttp.proxyPort={} -Dhttps.proxyHost={} -Dhttps.proxyPort={}\"",
+            host, port, host, port
+        ));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_jenkins_proxy(content: &str) -> (String, bool) {
+    if content.contains("<proxy>") {
+        return ("<?xml version='1.1' encoding='UTF-8'?>\n<proxy/>\n".to_string(), true);
+    }
+
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "jenkins_http_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if trim.starts_with("JAVA_ARGS=") || trim.starts_with("JENKINS_JAVA_OPTIONS=") {
+            if trim.contains("-Dhttp.proxyHost=") || trim.contains("-Dhttps.proxyHost=") {
+                let (prefix, val) = trim.split_once('=').unwrap();
+                let clean_val = val.trim().trim_matches('"').trim_matches('\'');
+                let filtered_words: Vec<&str> = clean_val
+                    .split_whitespace()
+                    .filter(|w| {
+                        !w.starts_with("-Dhttp.proxyHost=")
+                            && !w.starts_with("-Dhttp.proxyPort=")
+                            && !w.starts_with("-Dhttps.proxyHost=")
+                            && !w.starts_with("-Dhttps.proxyPort=")
+                            && !w.starts_with("-Dhttp.nonProxyHosts=")
+                    })
+                    .collect();
+                lines.push(format!("{}=\"{}\"", prefix, filtered_words.join(" ")));
+                changed = true;
+                continue;
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "jenkins_http_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_jenkins_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_jenkins_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_jenkins_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_jenkins_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_jenkins_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_jenkins_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -8460,6 +8947,8 @@ pub async fn turn_on(
     nomad: bool,
     kubelet: bool,
     gitlab_runner: bool,
+    actions_runner: bool,
+    jenkins: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -8533,6 +9022,8 @@ pub async fn turn_on(
     let set_nomad = nomad || all;
     let set_kubelet = kubelet || all;
     let set_gitlab_runner = gitlab_runner || all;
+    let set_actions_runner = actions_runner || all;
+    let set_jenkins = jenkins || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -9514,6 +10005,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_actions_runner {
+        match set_actions_runner_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ GitHub Actions Runner CI daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update GitHub Actions Runner daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_jenkins {
+        match set_jenkins_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Jenkins CI automation daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Jenkins daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -9601,6 +10122,8 @@ pub fn turn_off(
     nomad: bool,
     kubelet: bool,
     gitlab_runner: bool,
+    actions_runner: bool,
+    jenkins: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -9674,6 +10197,8 @@ pub fn turn_off(
     let unset_nomad = nomad || all;
     let unset_kubelet = kubelet || all;
     let unset_gitlab_runner = gitlab_runner || all;
+    let unset_actions_runner = actions_runner || all;
+    let unset_jenkins = jenkins || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -10319,6 +10844,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ GitLab Runner daemon proxy removed from service/environment config".green()),
             Ok(false) => eprintln!("{}", "○ GitLab Runner proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset GitLab Runner daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_actions_runner {
+        match unset_actions_runner_proxy() {
+            Ok(true) => eprintln!("{}", "✔ GitHub Actions Runner daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ GitHub Actions Runner proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset GitHub Actions Runner daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_jenkins {
+        match unset_jenkins_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Jenkins CI daemon proxy removed from service/environment config".green()),
+            Ok(false) => eprintln!("{}", "○ Jenkins proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Jenkins daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -12031,6 +12572,67 @@ check_interval = 0
         let dropin_updated = apply_gitlab_runner_proxy(dropin_initial, "socks5://127.0.0.1:1080");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=socks5://127.0.0.1:1080\""));
         let (dropin_cleaned, dropin_removed) = remove_gitlab_runner_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_actions_runner_proxy() {
+        // Standard single line .proxy file
+        let proxy_initial = "http://127.0.0.1:7890\n";
+        let updated = apply_actions_runner_proxy(proxy_initial, "http://127.0.0.1:8080");
+        assert_eq!(updated.trim(), "http://127.0.0.1:8080");
+        let (cleaned, removed) = remove_actions_runner_proxy(&updated);
+        assert!(removed);
+        assert!(cleaned.is_empty());
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_actions_runner_proxy(dropin_initial, "socks5://127.0.0.1:1080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=socks5://127.0.0.1:1080\""));
+        let (dropin_cleaned, dropin_removed) = remove_actions_runner_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+
+        // .env file format
+        let env_initial = "http_proxy=http://127.0.0.1:7890\nhttps_proxy=http://127.0.0.1:7890\n";
+        let env_updated = apply_actions_runner_proxy(env_initial, "http://127.0.0.1:8118");
+        assert!(env_updated.contains("http_proxy=http://127.0.0.1:8118"));
+        assert!(env_updated.contains("https_proxy=http://127.0.0.1:8118"));
+        let (env_cleaned, env_removed) = remove_actions_runner_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("http_proxy="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_jenkins_proxy() {
+        // XML proxy.xml
+        let xml_initial = r#"<?xml version='1.1' encoding='UTF-8'?>
+<proxy>
+  <name>127.0.0.1</name>
+  <port>7890</port>
+</proxy>
+"#;
+        let xml_updated = apply_jenkins_proxy(xml_initial, "http://10.0.0.10:8080");
+        assert!(xml_updated.contains("<name>10.0.0.10</name>"));
+        assert!(xml_updated.contains("<port>8080</port>"));
+        let (xml_cleaned, xml_removed) = remove_jenkins_proxy(&xml_updated);
+        assert!(xml_removed);
+        assert!(xml_cleaned.contains("<proxy/>"));
+
+        // Java args format
+        let args_initial = "JAVA_ARGS=\"-Djava.awt.headless=true -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890\"\n";
+        let args_updated = apply_jenkins_proxy(args_initial, "http://127.0.0.1:8118");
+        assert!(args_updated.contains("-Dhttp.proxyPort=8118"));
+        let (args_cleaned, args_removed) = remove_jenkins_proxy(&args_updated);
+        assert!(args_removed);
+        assert!(!args_cleaned.contains("-Dhttp.proxyPort="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_jenkins_proxy(dropin_initial, "http://127.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_jenkins_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
     }
