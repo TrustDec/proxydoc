@@ -8873,6 +8873,391 @@ pub fn unset_jenkins_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_buildkite_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "all_proxy" || k_low == "buildkite_agent_proxy" || k_low == "buildkite_proxy" {
+                        lines.push(format!("Environment=\"BUILDKITE_AGENT_PROXY={}\"", proxy_url));
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Standard buildkite-agent.cfg format: proxy="url"
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "proxy" || key == "http-proxy" || key == "buildkite_agent_proxy" || key == "http_proxy" {
+                lines.push(format!("proxy=\"{}\"", proxy_url));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy {
+        lines.push(format!("proxy=\"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_buildkite_agent_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                    || k_low == "buildkite_agent_proxy"
+                    || k_low == "buildkite_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "proxy"
+                || key == "http-proxy"
+                || key == "buildkite_agent_proxy"
+                || key == "buildkite_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_buildkite_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_buildkite_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_buildkite_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_buildkite_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_buildkite_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_buildkite_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_woodpecker_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "woodpecker_http_proxy" || k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "woodpecker_https_proxy" || k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "woodpecker_no_proxy" || k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Standard agent.conf or /etc/default/woodpecker-agent: WOODPECKER_HTTP_PROXY="url"
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_no = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "woodpecker_http_proxy" || key == "woodpecker_agent_http_proxy" || key == "http_proxy" {
+                lines.push(format!("WOODPECKER_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "woodpecker_https_proxy" || key == "woodpecker_agent_https_proxy" || key == "https_proxy" {
+                lines.push(format!("WOODPECKER_HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "woodpecker_no_proxy" || key == "no_proxy" {
+                lines.push(format!("WOODPECKER_NO_PROXY=\"{}\"", no_proxy_def));
+                replaced_no = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        lines.push(format!("WOODPECKER_HTTP_PROXY=\"{}\"", proxy_url));
+    }
+    if !replaced_https {
+        lines.push(format!("WOODPECKER_HTTPS_PROXY=\"{}\"", proxy_url));
+    }
+    if !replaced_no {
+        lines.push(format!("WOODPECKER_NO_PROXY=\"{}\"", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_woodpecker_agent_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "woodpecker_http_proxy"
+                    || k_low == "woodpecker_agent_http_proxy"
+                    || k_low == "woodpecker_https_proxy"
+                    || k_low == "woodpecker_no_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "woodpecker_http_proxy"
+                || key == "woodpecker_agent_http_proxy"
+                || key == "woodpecker_https_proxy"
+                || key == "woodpecker_no_proxy"
+                || key == "woodpecker_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_woodpecker_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_woodpecker_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_woodpecker_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_woodpecker_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_woodpecker_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_woodpecker_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -8949,6 +9334,8 @@ pub async fn turn_on(
     gitlab_runner: bool,
     actions_runner: bool,
     jenkins: bool,
+    buildkite_agent: bool,
+    woodpecker_agent: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -9024,6 +9411,8 @@ pub async fn turn_on(
     let set_gitlab_runner = gitlab_runner || all;
     let set_actions_runner = actions_runner || all;
     let set_jenkins = jenkins || all;
+    let set_buildkite_agent = buildkite_agent || all;
+    let set_woodpecker_agent = woodpecker_agent || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -10035,6 +10424,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_buildkite_agent {
+        match set_buildkite_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Buildkite Agent CI daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Buildkite Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_woodpecker_agent {
+        match set_woodpecker_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Woodpecker CI runner daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Woodpecker CI runner daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -10124,6 +10543,8 @@ pub fn turn_off(
     gitlab_runner: bool,
     actions_runner: bool,
     jenkins: bool,
+    buildkite_agent: bool,
+    woodpecker_agent: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -10199,6 +10620,8 @@ pub fn turn_off(
     let unset_gitlab_runner = gitlab_runner || all;
     let unset_actions_runner = actions_runner || all;
     let unset_jenkins = jenkins || all;
+    let unset_buildkite_agent = buildkite_agent || all;
+    let unset_woodpecker_agent = woodpecker_agent || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -10860,6 +11283,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Jenkins CI daemon proxy removed from service/environment config".green()),
             Ok(false) => eprintln!("{}", "○ Jenkins proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Jenkins daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_buildkite_agent {
+        match unset_buildkite_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Buildkite Agent CI daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Buildkite Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Buildkite Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_woodpecker_agent {
+        match unset_woodpecker_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Woodpecker CI runner daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Woodpecker CI runner proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Woodpecker CI runner daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -12633,6 +13072,44 @@ check_interval = 0
         let dropin_updated = apply_jenkins_proxy(dropin_initial, "http://127.0.0.1:8080");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:8080\""));
         let (dropin_cleaned, dropin_removed) = remove_jenkins_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_buildkite_agent_proxy() {
+        // Standard buildkite-agent.cfg format
+        let cfg_initial = "# buildkite config\ntags=\"queue=default\"\n";
+        let cfg_updated = apply_buildkite_agent_proxy(cfg_initial, "http://127.0.0.1:7890");
+        assert!(cfg_updated.contains("proxy=\"http://127.0.0.1:7890\""));
+        let (cfg_cleaned, cfg_removed) = remove_buildkite_agent_proxy(&cfg_updated);
+        assert!(cfg_removed);
+        assert!(!cfg_cleaned.contains("proxy="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:8080\"\n";
+        let dropin_updated = apply_buildkite_agent_proxy(dropin_initial, "http://127.0.0.1:9090");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:9090\""));
+        let (dropin_cleaned, dropin_removed) = remove_buildkite_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_woodpecker_agent_proxy() {
+        // Standard agent.conf format
+        let conf_initial = "WOODPECKER_SERVER=\"grpc://woodpecker:9000\"\n";
+        let conf_updated = apply_woodpecker_agent_proxy(conf_initial, "http://127.0.0.1:8118");
+        assert!(conf_updated.contains("WOODPECKER_HTTP_PROXY=\"http://127.0.0.1:8118\""));
+        let (conf_cleaned, conf_removed) = remove_woodpecker_agent_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("WOODPECKER_HTTP_PROXY="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_woodpecker_agent_proxy(dropin_initial, "http://10.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_woodpecker_agent_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
     }

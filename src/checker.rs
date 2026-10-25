@@ -422,6 +422,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Jenkins Update Center",
         "https://updates.jenkins.io/update-center.json",
     ),
+    (
+        "Buildkite API",
+        "https://api.buildkite.com/v2",
+    ),
+    (
+        "AlmaLinux CDN",
+        "https://repo.almalinux.org",
+    ),
+    (
+        "Oracle Linux CDN",
+        "https://yum.oracle.com",
+    ),
+    (
+        "Woodpecker CI",
+        "https://woodpecker-ci.org",
+    ),
+    (
+        "OpenSUSE CDN",
+        "https://download.opensuse.org",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {

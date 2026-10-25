@@ -9148,6 +9148,368 @@ pub fn get_jenkins_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_buildkite_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("BUILDKITE_AGENT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("BUILDKITE_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".buildkite-agent").join("buildkite-agent.cfg"),
+            home.join(".config").join("buildkite-agent").join("buildkite-agent.cfg"),
+            home.join(".config").join("systemd").join("user").join("buildkite-agent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/buildkite-agent/buildkite-agent.cfg"),
+        PathBuf::from("/opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg"),
+        PathBuf::from("/usr/local/etc/buildkite-agent/buildkite-agent.cfg"),
+        PathBuf::from("/etc/systemd/system/buildkite-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/buildkite-agent"),
+        PathBuf::from("/etc/sysconfig/buildkite-agent"),
+        PathBuf::from("/etc/systemd/system/buildkite-agent.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_buildkite_agent_config_path() -> Option<PathBuf> {
+    let paths = get_buildkite_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_buildkite_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_buildkite_agent_write_path() -> PathBuf {
+    if let Some(p) = get_buildkite_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("BUILDKITE_AGENT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_dir = PathBuf::from("/etc/buildkite-agent");
+    if etc_dir.is_dir() {
+        return etc_dir.join("buildkite-agent.cfg");
+    }
+    let brew_dir = PathBuf::from("/opt/homebrew/etc/buildkite-agent");
+    if brew_dir.is_dir() {
+        return brew_dir.join("buildkite-agent.cfg");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/buildkite-agent.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".buildkite-agent").join("buildkite-agent.cfg");
+    }
+    PathBuf::from("/etc/buildkite-agent/buildkite-agent.cfg")
+}
+
+pub fn parse_buildkite_agent_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "buildkite_agent_proxy"
+                        || k_low == "buildkite_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // key=value format (buildkite-agent.cfg or default env)
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "proxy"
+                || key == "http-proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "buildkite_agent_proxy"
+                || key == "buildkite_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+    None
+}
+
+pub fn get_buildkite_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_buildkite_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_buildkite_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("BUILDKITE_AGENT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BUILDKITE_AGENT_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BUILDKITE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BUILDKITE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_woodpecker_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("WOODPECKER_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("WOODPECKER_AGENT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".woodpecker").join("agent.conf"),
+            home.join(".config").join("woodpecker").join("agent.conf"),
+            home.join(".config").join("systemd").join("user").join("woodpecker-agent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/woodpecker/agent.conf"),
+        PathBuf::from("/etc/woodpecker/woodpecker-agent.conf"),
+        PathBuf::from("/etc/woodpecker/woodpecker.conf"),
+        PathBuf::from("/etc/systemd/system/woodpecker-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/woodpecker.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/woodpecker-agent"),
+        PathBuf::from("/etc/sysconfig/woodpecker-agent"),
+        PathBuf::from("/etc/systemd/system/woodpecker-agent.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_woodpecker_agent_config_path() -> Option<PathBuf> {
+    let paths = get_woodpecker_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_woodpecker_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_woodpecker_agent_write_path() -> PathBuf {
+    if let Some(p) = get_woodpecker_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("WOODPECKER_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_dir = PathBuf::from("/etc/woodpecker");
+    if etc_dir.is_dir() {
+        return etc_dir.join("agent.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/woodpecker-agent.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".woodpecker").join("agent.conf");
+    }
+    PathBuf::from("/etc/woodpecker/agent.conf")
+}
+
+pub fn parse_woodpecker_agent_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "woodpecker_http_proxy"
+                        || k_low == "woodpecker_agent_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // key=value format (agent.conf or /etc/default/woodpecker-agent)
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "woodpecker_http_proxy"
+                || key == "woodpecker_agent_http_proxy"
+                || key == "woodpecker_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+    None
+}
+
+pub fn get_woodpecker_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_woodpecker_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_woodpecker_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("WOODPECKER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WOODPECKER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("WOODPECKER_AGENT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WOODPECKER_AGENT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -12481,6 +12843,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Jenkins CI Daemon",
             "~/.jenkins/proxy.xml & /etc/systemd/system/jenkins.service.d/http-proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Buildkite Agent CI/CD Daemon Proxy (~/.buildkite-agent/buildkite-agent.cfg / /etc/buildkite-agent/buildkite-agent.cfg / /etc/systemd/system/buildkite-agent.service.d/http-proxy.conf)
+    if let Some((bk_proxy, bk_path)) = get_buildkite_agent_proxy() {
+        let ok = verify_proxy_url(&bk_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Buildkite Agent CI daemon proxy `{}` in {} is dead! (Pipeline job execution and step downloads will fail)",
+                bk_proxy,
+                bk_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Buildkite Agent CI",
+            format!("{}", bk_path.display()),
+            bk_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (buildkite-agent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Buildkite Agent CI",
+            "~/.buildkite-agent/buildkite-agent.cfg & /etc/buildkite-agent/buildkite-agent.cfg",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Woodpecker CI Runner Daemon Proxy (~/.woodpecker/agent.conf / /etc/woodpecker/agent.conf / /etc/systemd/system/woodpecker-agent.service.d/http-proxy.conf)
+    if let Some((wp_proxy, wp_path)) = get_woodpecker_agent_proxy() {
+        let ok = verify_proxy_url(&wp_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Woodpecker CI runner daemon proxy `{}` in {} is dead! (Pipeline execution and clone stages will fail)",
+                wp_proxy,
+                wp_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Woodpecker CI Runner",
+            format!("{}", wp_path.display()),
+            wp_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (woodpecker-agent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Woodpecker CI Runner",
+            "~/.woodpecker/agent.conf & /etc/woodpecker/agent.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -15939,5 +16365,60 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# Environment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
         assert_eq!(parse_jenkins_proxy(input_comment), None);
         assert_eq!(parse_jenkins_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_buildkite_agent_proxy() {
+        // Standard buildkite-agent.cfg key=value
+        let cfg_file = r#"
+# Buildkite agent config
+proxy="http://127.0.0.1:7890"
+tags="queue=default"
+"#;
+        assert_eq!(
+            parse_buildkite_agent_proxy(cfg_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        // Systemd drop-in format
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.10:3128"
+"#;
+        assert_eq!(
+            parse_buildkite_agent_proxy(dropin),
+            Some("http://10.0.0.10:3128".to_string())
+        );
+
+        let input_comment = "# proxy=\"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_buildkite_agent_proxy(input_comment), None);
+        assert_eq!(parse_buildkite_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_woodpecker_agent_proxy() {
+        // Standard agent.conf
+        let conf_file = r#"
+WOODPECKER_HTTP_PROXY="http://127.0.0.1:8118"
+WOODPECKER_SERVER="grpc://woodpecker:9000"
+"#;
+        assert_eq!(
+            parse_woodpecker_agent_proxy(conf_file),
+            Some("http://127.0.0.1:8118".to_string())
+        );
+
+        // Systemd drop-in format
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_woodpecker_agent_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# WOODPECKER_HTTP_PROXY=\"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_woodpecker_agent_proxy(input_comment), None);
+        assert_eq!(parse_woodpecker_agent_proxy(""), None);
     }
 }

@@ -287,7 +287,13 @@ enum Commands {
         /// Also configure Jenkins CI Automation daemon proxy (~/.jenkins/proxy.xml / /etc/default/jenkins / /etc/systemd/system/jenkins.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "jenkins-ci", visible_alias = "jenkins-agent")]
         jenkins: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, and jenkins proxy
+        /// Also configure Buildkite Agent (CI/CD Hybrid Runner Daemon) proxy (~/.buildkite-agent/buildkite-agent.cfg / /etc/buildkite-agent/buildkite-agent.cfg / /etc/systemd/system/buildkite-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "buildkite", visible_alias = "bk-agent")]
+        buildkite_agent: bool,
+        /// Also configure Woodpecker CI Runner (CI Pipeline Daemon) proxy (/etc/woodpecker/agent.conf / /etc/default/woodpecker-agent / /etc/systemd/system/woodpecker-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "woodpecker", visible_alias = "wp-agent")]
+        woodpecker_agent: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, and woodpecker-agent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -518,7 +524,13 @@ enum Commands {
         /// Also unset Jenkins CI Automation daemon proxy (~/.jenkins/proxy.xml / /etc/default/jenkins / /etc/systemd/system/jenkins.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "jenkins-ci", visible_alias = "jenkins-agent")]
         jenkins: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, and jenkins proxy
+        /// Also unset Buildkite Agent (CI/CD Hybrid Runner Daemon) proxy (~/.buildkite-agent/buildkite-agent.cfg / /etc/buildkite-agent/buildkite-agent.cfg / /etc/systemd/system/buildkite-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "buildkite", visible_alias = "bk-agent")]
+        buildkite_agent: bool,
+        /// Also unset Woodpecker CI Runner (CI Pipeline Daemon) proxy (/etc/woodpecker/agent.conf / /etc/default/woodpecker-agent / /etc/systemd/system/woodpecker-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "woodpecker", visible_alias = "wp-agent")]
+        woodpecker_agent: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, and woodpecker-agent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -636,6 +648,8 @@ async fn main() -> Result<()> {
             gitlab_runner,
             actions_runner,
             jenkins,
+            buildkite_agent,
+            woodpecker_agent,
             all,
             shell,
         }) => {
@@ -715,6 +729,8 @@ async fn main() -> Result<()> {
                 gitlab_runner,
                 actions_runner,
                 jenkins,
+                buildkite_agent,
+                woodpecker_agent,
                 all,
                 shell.as_deref(),
             )
@@ -795,6 +811,8 @@ async fn main() -> Result<()> {
             gitlab_runner,
             actions_runner,
             jenkins,
+            buildkite_agent,
+            woodpecker_agent,
             all,
             shell,
         }) => {
@@ -873,6 +891,8 @@ async fn main() -> Result<()> {
                 gitlab_runner,
                 actions_runner,
                 jenkins,
+                buildkite_agent,
+                woodpecker_agent,
                 all,
                 shell.as_deref(),
             )?;
@@ -2715,6 +2735,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { jenkins, .. }) => {
                 assert!(jenkins);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_buildkite_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--buildkite-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { buildkite_agent, .. }) => {
+                assert!(buildkite_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--buildkite"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { buildkite_agent, .. }) => {
+                assert!(buildkite_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--bk-agent"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { buildkite_agent, .. }) => {
+                assert!(buildkite_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_buildkite_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--buildkite-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { buildkite_agent, .. }) => {
+                assert!(buildkite_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_woodpecker_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--woodpecker-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { woodpecker_agent, .. }) => {
+                assert!(woodpecker_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--woodpecker"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { woodpecker_agent, .. }) => {
+                assert!(woodpecker_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--wp-agent"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { woodpecker_agent, .. }) => {
+                assert!(woodpecker_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_woodpecker_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--woodpecker-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { woodpecker_agent, .. }) => {
+                assert!(woodpecker_agent);
             }
             _ => panic!("Expected Off command"),
         }
