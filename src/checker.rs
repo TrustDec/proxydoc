@@ -442,6 +442,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "OpenSUSE CDN",
         "https://download.opensuse.org",
     ),
+    (
+        "Drone CI",
+        "https://drone.io",
+    ),
+    (
+        "Codeberg API",
+        "https://codeberg.org/api/v1/version",
+    ),
+    (
+        "Gitea Releases",
+        "https://dl.gitea.com",
+    ),
+    (
+        "Void Linux CDN",
+        "https://repo-default.voidlinux.org",
+    ),
+    (
+        "FreeBSD Pkg CDN",
+        "https://pkg.freebsd.org",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1092,6 +1112,36 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Jenkins Update Center"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Buildkite API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "AlmaLinux CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Oracle Linux CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Woodpecker CI"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenSUSE CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Drone CI"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Codeberg API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Gitea Releases"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Void Linux CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FreeBSD Pkg CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

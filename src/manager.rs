@@ -9258,6 +9258,503 @@ pub fn unset_woodpecker_agent_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_drone_runner_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "drone_http_proxy" || k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "drone_https_proxy" || k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "drone_no_proxy" || k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Standard config or /etc/default/drone-runner: DRONE_HTTP_PROXY="url"
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_no = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "drone_http_proxy" || key == "drone_runner_http_proxy" || key == "http_proxy" {
+                lines.push(format!("DRONE_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "drone_https_proxy" || key == "drone_runner_https_proxy" || key == "https_proxy" {
+                lines.push(format!("DRONE_HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "drone_no_proxy" || key == "no_proxy" {
+                lines.push(format!("DRONE_NO_PROXY=\"{}\"", no_proxy_def));
+                replaced_no = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        lines.push(format!("DRONE_HTTP_PROXY=\"{}\"", proxy_url));
+    }
+    if !replaced_https {
+        lines.push(format!("DRONE_HTTPS_PROXY=\"{}\"", proxy_url));
+    }
+    if !replaced_no {
+        lines.push(format!("DRONE_NO_PROXY=\"{}\"", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_drone_runner_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "drone_http_proxy"
+                    || k_low == "drone_https_proxy"
+                    || k_low == "drone_no_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "drone_http_proxy"
+                || key == "drone_runner_http_proxy"
+                || key == "drone_https_proxy"
+                || key == "drone_runner_https_proxy"
+                || key == "drone_no_proxy"
+                || key == "drone_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_drone_runner_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_drone_runner_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_drone_runner_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_drone_runner_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_drone_runner_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_drone_runner_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_act_runner_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "act_runner_http_proxy" || k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "act_runner_https_proxy" || k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "act_runner_no_proxy" || k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Default env file (e.g. /etc/default/act-runner) if it has equals sign but no runner:
+    if content.lines().any(|l| l.contains('=') && !l.trim().starts_with('#')) && !content.contains("runner:") {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+        for line in content.lines() {
+            let trim = line.trim();
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+                if key == "act_runner_http_proxy" || key == "http_proxy" {
+                    lines.push(format!("ACT_RUNNER_HTTP_PROXY=\"{}\"", proxy_url));
+                    replaced = true;
+                    continue;
+                }
+            }
+            lines.push(line.to_string());
+        }
+        if !replaced {
+            lines.push(format!("ACT_RUNNER_HTTP_PROXY=\"{}\"", proxy_url));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format: config.yaml / .runner
+    let mut lines = Vec::new();
+    let mut in_runner = false;
+    let mut in_envs = false;
+    let mut envs_found = false;
+    let mut runner_found = false;
+    let mut http_set = false;
+    let mut https_set = false;
+    let mut no_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if trim == "runner:" || trim.starts_with("runner:") {
+            in_runner = true;
+            runner_found = true;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_runner && (line.starts_with("  envs:") || trim == "envs:" || trim.starts_with("envs:")) {
+            in_envs = true;
+            envs_found = true;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        // Exiting runner or envs section
+        if in_envs && !line.starts_with("    ") && !trim.is_empty() {
+            if !http_set {
+                lines.push(format!("    http_proxy: \"{}\"", proxy_url));
+                http_set = true;
+            }
+            if !https_set {
+                lines.push(format!("    https_proxy: \"{}\"", proxy_url));
+                https_set = true;
+            }
+            if !no_set {
+                lines.push(format!("    no_proxy: \"{}\"", no_proxy_def));
+                no_set = true;
+            }
+            in_envs = false;
+            if !line.starts_with("  ") {
+                in_runner = false;
+            }
+        } else if in_runner && !in_envs && !line.starts_with("  ") && !trim.is_empty() {
+            in_runner = false;
+        }
+
+        if in_envs {
+            if let Some((k, _)) = trim.split_once(':') {
+                let key = k.trim().to_lowercase();
+                if key == "http_proxy" {
+                    lines.push(format!("    http_proxy: \"{}\"", proxy_url));
+                    http_set = true;
+                    continue;
+                } else if key == "https_proxy" {
+                    lines.push(format!("    https_proxy: \"{}\"", proxy_url));
+                    https_set = true;
+                    continue;
+                } else if key == "no_proxy" {
+                    lines.push(format!("    no_proxy: \"{}\"", no_proxy_def));
+                    no_set = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_envs {
+        if !http_set {
+            lines.push(format!("    http_proxy: \"{}\"", proxy_url));
+        }
+        if !https_set {
+            lines.push(format!("    https_proxy: \"{}\"", proxy_url));
+        }
+        if !no_set {
+            lines.push(format!("    no_proxy: \"{}\"", no_proxy_def));
+        }
+    } else if runner_found && !envs_found {
+        // runner: was present but no envs:
+        let mut new_lines = Vec::new();
+        for line in lines {
+            new_lines.push(line.clone());
+            if line.trim() == "runner:" || line.trim().starts_with("runner:") {
+                new_lines.push("  envs:".to_string());
+                new_lines.push(format!("    http_proxy: \"{}\"", proxy_url));
+                new_lines.push(format!("    https_proxy: \"{}\"", proxy_url));
+                new_lines.push(format!("    no_proxy: \"{}\"", no_proxy_def));
+            }
+        }
+        lines = new_lines;
+    } else if !runner_found {
+        lines.push("runner:".to_string());
+        lines.push("  envs:".to_string());
+        lines.push(format!("    http_proxy: \"{}\"", proxy_url));
+        lines.push(format!("    https_proxy: \"{}\"", proxy_url));
+        lines.push(format!("    no_proxy: \"{}\"", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_act_runner_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "act_runner_http_proxy"
+                    || k_low == "act_runner_https_proxy"
+                    || k_low == "act_runner_no_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once(':') {
+            let key = k.trim().to_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+                || key == "act_runner_http_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "act_runner_http_proxy"
+                || key == "act_runner_https_proxy"
+                || key == "act_runner_no_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_act_runner_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_act_runner_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_act_runner_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_act_runner_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_act_runner_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_act_runner_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -9336,6 +9833,8 @@ pub async fn turn_on(
     jenkins: bool,
     buildkite_agent: bool,
     woodpecker_agent: bool,
+    drone_runner: bool,
+    act_runner: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -9413,6 +9912,8 @@ pub async fn turn_on(
     let set_jenkins = jenkins || all;
     let set_buildkite_agent = buildkite_agent || all;
     let set_woodpecker_agent = woodpecker_agent || all;
+    let set_drone_runner = drone_runner || all;
+    let set_act_runner = act_runner || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -10454,6 +10955,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_drone_runner {
+        match set_drone_runner_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Drone CI runner daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Drone CI runner daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_act_runner {
+        match set_act_runner_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Gitea/Forgejo Actions Runner daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Gitea/Forgejo Actions Runner daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -10545,6 +11076,8 @@ pub fn turn_off(
     jenkins: bool,
     buildkite_agent: bool,
     woodpecker_agent: bool,
+    drone_runner: bool,
+    act_runner: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -10622,6 +11155,8 @@ pub fn turn_off(
     let unset_jenkins = jenkins || all;
     let unset_buildkite_agent = buildkite_agent || all;
     let unset_woodpecker_agent = woodpecker_agent || all;
+    let unset_drone_runner = drone_runner || all;
+    let unset_act_runner = act_runner || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -11299,6 +11834,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Woodpecker CI runner daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Woodpecker CI runner proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Woodpecker CI runner daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_drone_runner {
+        match unset_drone_runner_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Drone CI runner daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Drone CI runner proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Drone CI runner daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_act_runner {
+        match unset_act_runner_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Gitea/Forgejo Actions Runner daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Gitea/Forgejo Actions Runner proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Gitea/Forgejo Actions Runner daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -13110,6 +13661,45 @@ check_interval = 0
         let dropin_updated = apply_woodpecker_agent_proxy(dropin_initial, "http://10.0.0.1:8080");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
         let (dropin_cleaned, dropin_removed) = remove_woodpecker_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_drone_runner_proxy() {
+        // Standard config format
+        let conf_initial = "DRONE_RPC_SERVER=\"https://drone.internal\"\n";
+        let conf_updated = apply_drone_runner_proxy(conf_initial, "http://127.0.0.1:8118");
+        assert!(conf_updated.contains("DRONE_HTTP_PROXY=\"http://127.0.0.1:8118\""));
+        let (conf_cleaned, conf_removed) = remove_drone_runner_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("DRONE_HTTP_PROXY="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_drone_runner_proxy(dropin_initial, "http://10.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_drone_runner_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_act_runner_proxy() {
+        // YAML config format
+        let yaml_initial = "runner:\n  file: .runner\n";
+        let yaml_updated = apply_act_runner_proxy(yaml_initial, "http://127.0.0.1:7890");
+        assert!(yaml_updated.contains("envs:"));
+        assert!(yaml_updated.contains("http_proxy: \"http://127.0.0.1:7890\""));
+        let (yaml_cleaned, yaml_removed) = remove_act_runner_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("http_proxy:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_act_runner_proxy(dropin_initial, "http://10.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_act_runner_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
     }

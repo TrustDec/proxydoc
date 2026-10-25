@@ -293,7 +293,13 @@ enum Commands {
         /// Also configure Woodpecker CI Runner (CI Pipeline Daemon) proxy (/etc/woodpecker/agent.conf / /etc/default/woodpecker-agent / /etc/systemd/system/woodpecker-agent.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "woodpecker", visible_alias = "wp-agent")]
         woodpecker_agent: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, and woodpecker-agent proxy
+        /// Also configure Drone CI Runner (CI Pipeline Daemon) proxy (/etc/drone-runner/config / /etc/default/drone-runner / /etc/systemd/system/drone-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "drone", visible_alias = "drone-ci")]
+        drone_runner: bool,
+        /// Also configure Gitea & Forgejo Actions Runner (act_runner CI daemon) proxy (/etc/act_runner/config.yaml / ~/.act_runner/config.yaml / /etc/systemd/system/act-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "act", visible_alias = "gitea-runner", visible_alias = "forgejo-runner")]
+        act_runner: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, and act-runner proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -530,7 +536,13 @@ enum Commands {
         /// Also unset Woodpecker CI Runner (CI Pipeline Daemon) proxy (/etc/woodpecker/agent.conf / /etc/default/woodpecker-agent / /etc/systemd/system/woodpecker-agent.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "woodpecker", visible_alias = "wp-agent")]
         woodpecker_agent: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, and woodpecker-agent proxy
+        /// Also unset Drone CI Runner (CI Pipeline Daemon) proxy (/etc/drone-runner/config / /etc/default/drone-runner / /etc/systemd/system/drone-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "drone", visible_alias = "drone-ci")]
+        drone_runner: bool,
+        /// Also unset Gitea & Forgejo Actions Runner (act_runner CI daemon) proxy (/etc/act_runner/config.yaml / ~/.act_runner/config.yaml / /etc/systemd/system/act-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "act", visible_alias = "gitea-runner", visible_alias = "forgejo-runner")]
+        act_runner: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, and act-runner proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -650,6 +662,8 @@ async fn main() -> Result<()> {
             jenkins,
             buildkite_agent,
             woodpecker_agent,
+            drone_runner,
+            act_runner,
             all,
             shell,
         }) => {
@@ -731,6 +745,8 @@ async fn main() -> Result<()> {
                 jenkins,
                 buildkite_agent,
                 woodpecker_agent,
+                drone_runner,
+                act_runner,
                 all,
                 shell.as_deref(),
             )
@@ -813,6 +829,8 @@ async fn main() -> Result<()> {
             jenkins,
             buildkite_agent,
             woodpecker_agent,
+            drone_runner,
+            act_runner,
             all,
             shell,
         }) => {
@@ -893,6 +911,8 @@ async fn main() -> Result<()> {
                 jenkins,
                 buildkite_agent,
                 woodpecker_agent,
+                drone_runner,
+                act_runner,
                 all,
                 shell.as_deref(),
             )?;
@@ -2811,6 +2831,90 @@ mod tests {
         match cli.command {
             Some(Commands::Off { woodpecker_agent, .. }) => {
                 assert!(woodpecker_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_drone_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--drone-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::On { drone_runner, .. }) => {
+                assert!(drone_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--drone"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { drone_runner, .. }) => {
+                assert!(drone_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--drone-ci"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { drone_runner, .. }) => {
+                assert!(drone_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_drone_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--drone-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { drone_runner, .. }) => {
+                assert!(drone_runner);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_act_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--act-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::On { act_runner, .. }) => {
+                assert!(act_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--act"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { act_runner, .. }) => {
+                assert!(act_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--gitea-runner"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { act_runner, .. }) => {
+                assert!(act_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--forgejo-runner"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { act_runner, .. }) => {
+                assert!(act_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_act_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--act-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { act_runner, .. }) => {
+                assert!(act_runner);
             }
             _ => panic!("Expected Off command"),
         }
