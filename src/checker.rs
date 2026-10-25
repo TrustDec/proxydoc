@@ -218,6 +218,14 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ("Trigger.dev Cloud", "https://api.trigger.dev/healthcheck"),
     ("Civitai API", "https://civitai.com/api/v1/models"),
     ("Axiom API", "https://api.axiom.co/v1/datasets"),
+    ("Stripe API", "https://api.stripe.com/v1/charges"),
+    (
+        "Cloudflare API",
+        "https://api.cloudflare.com/client/v4/user/tokens/verify",
+    ),
+    ("Dub.co API", "https://api.dub.co"),
+    ("Koyeb Cloud API", "https://api.koyeb.com/v1/account"),
+    ("Novu API", "https://api.novu.co/v1/health-check"),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -788,6 +796,11 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Trigger.dev Cloud"));
         assert!(standard.iter().any(|(name, _)| *name == "Civitai API"));
         assert!(standard.iter().any(|(name, _)| *name == "Axiom API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Stripe API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Cloudflare API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Dub.co API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Koyeb Cloud API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Novu API"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

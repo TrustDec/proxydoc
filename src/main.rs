@@ -227,7 +227,13 @@ enum Commands {
         /// Also configure APT package manager proxy (/etc/apt/apt.conf.d/99proxydoc.conf)
         #[arg(long)]
         apt: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, and apt proxy
+        /// Also configure DNF & YUM package manager proxy (/etc/dnf/dnf.conf)
+        #[arg(long)]
+        dnf: bool,
+        /// Also configure Zypper package manager proxy (/etc/zypp/zypp.conf)
+        #[arg(long)]
+        zypper: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, and zypper proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -398,7 +404,13 @@ enum Commands {
         /// Also unset APT package manager proxy (/etc/apt/apt.conf.d/99proxydoc.conf)
         #[arg(long)]
         apt: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, and apt proxy
+        /// Also unset DNF & YUM package manager proxy (/etc/dnf/dnf.conf)
+        #[arg(long)]
+        dnf: bool,
+        /// Also unset Zypper package manager proxy (/etc/zypp/zypp.conf)
+        #[arg(long)]
+        zypper: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, and zypper proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -496,6 +508,8 @@ async fn main() -> Result<()> {
             spack,
             macports,
             apt,
+            dnf,
+            zypper,
             all,
             shell,
         }) => {
@@ -555,6 +569,8 @@ async fn main() -> Result<()> {
                 spack,
                 macports,
                 apt,
+                dnf,
+                zypper,
                 all,
                 shell.as_deref(),
             )
@@ -615,6 +631,8 @@ async fn main() -> Result<()> {
             spack,
             macports,
             apt,
+            dnf,
+            zypper,
             all,
             shell,
         }) => {
@@ -673,6 +691,8 @@ async fn main() -> Result<()> {
                 spack,
                 macports,
                 apt,
+                dnf,
+                zypper,
                 all,
                 shell.as_deref(),
             )?;
@@ -1979,6 +1999,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { apt, .. }) => {
                 assert!(apt);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_dnf() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--dnf"]).unwrap();
+        match cli.command {
+            Some(Commands::On { dnf, .. }) => {
+                assert!(dnf);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_dnf() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--dnf"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { dnf, .. }) => {
+                assert!(dnf);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_zypper() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--zypper"]).unwrap();
+        match cli.command {
+            Some(Commands::On { zypper, .. }) => {
+                assert!(zypper);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_zypper() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--zypper"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { zypper, .. }) => {
+                assert!(zypper);
             }
             _ => panic!("Expected Off command"),
         }

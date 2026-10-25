@@ -5138,6 +5138,232 @@ pub fn get_apt_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_dnf_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dnf_conf) = std::env::var("DNF_CONF") {
+        let p = PathBuf::from(dnf_conf.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(yum_conf) = std::env::var("YUM_CONF") {
+        let p = PathBuf::from(yum_conf.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_dnf = home.join(".config").join("dnf").join("dnf.conf");
+        if user_dnf.exists() && !paths.contains(&user_dnf) {
+            paths.push(user_dnf);
+        }
+        let user_yum = home.join(".config").join("yum").join("yum.conf");
+        if user_yum.exists() && !paths.contains(&user_yum) {
+            paths.push(user_yum);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/dnf/dnf.conf"),
+        PathBuf::from("/etc/yum.conf"),
+        PathBuf::from("/etc/yum/yum.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let conf_d = PathBuf::from("/etc/dnf/dnf.conf.d");
+    if conf_d.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&conf_d) {
+            let mut sub_files: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && p.extension().map_or(false, |ext| ext == "conf"))
+                .collect();
+            sub_files.sort();
+            for p in sub_files {
+                if !paths.contains(&p) {
+                    paths.push(p);
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_dnf_config_path() -> Option<PathBuf> {
+    let paths = get_dnf_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_dnf_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_dnf_write_path() -> PathBuf {
+    if let Some(p) = get_dnf_config_path() {
+        return p;
+    }
+    let dnf_etc = PathBuf::from("/etc/dnf");
+    if dnf_etc.is_dir() {
+        let default_target = dnf_etc.join("dnf.conf");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&default_target) {
+            drop(f);
+            return default_target;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("dnf").join("dnf.conf");
+    }
+    PathBuf::from("/etc/dnf/dnf.conf")
+}
+
+pub fn parse_dnf_proxy(content: &str) -> Option<String> {
+    let mut candidate = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            if k.trim().eq_ignore_ascii_case("proxy") {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && !val.eq_ignore_ascii_case("_none_")
+                    && val != "0"
+                {
+                    candidate = Some(val.to_string());
+                }
+            }
+        }
+    }
+    let cand = candidate?;
+    if cand.starts_with("http://") || cand.starts_with("https://") || cand.starts_with("socks") {
+        Some(cand)
+    } else {
+        Some(format!("http://{}", cand))
+    }
+}
+
+pub fn get_dnf_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_dnf_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_dnf_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
+pub fn get_zypper_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(zypp_conf) = std::env::var("ZYPP_CONF") {
+        let p = PathBuf::from(zypp_conf.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_zypp = home.join(".zypp").join("zypp.conf");
+        if user_zypp.exists() && !paths.contains(&user_zypp) {
+            paths.push(user_zypp);
+        }
+        let user_cfg = home.join(".config").join("zypp").join("zypp.conf");
+        if user_cfg.exists() && !paths.contains(&user_cfg) {
+            paths.push(user_cfg);
+        }
+    }
+    let system_conf = PathBuf::from("/etc/zypp/zypp.conf");
+    if system_conf.exists() && !paths.contains(&system_conf) {
+        paths.push(system_conf);
+    }
+    paths
+}
+
+pub fn get_zypper_config_path() -> Option<PathBuf> {
+    let paths = get_zypper_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_zypper_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_zypper_write_path() -> PathBuf {
+    if let Some(p) = get_zypper_config_path() {
+        return p;
+    }
+    let zypp_etc = PathBuf::from("/etc/zypp");
+    if zypp_etc.is_dir() {
+        let default_target = zypp_etc.join("zypp.conf");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&default_target) {
+            drop(f);
+            return default_target;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".zypp").join("zypp.conf");
+    }
+    PathBuf::from("/etc/zypp/zypp.conf")
+}
+
+pub fn parse_zypper_proxy(content: &str) -> Option<String> {
+    let mut candidate = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "proxy"
+                || key == "proxy.http"
+                || key == "proxy.https"
+                || key == "http_proxy"
+                || key == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && !val.eq_ignore_ascii_case("_none_")
+                    && val != "0"
+                {
+                    candidate = Some(val.to_string());
+                }
+            }
+        }
+    }
+    let cand = candidate?;
+    if cand.starts_with("http://") || cand.starts_with("https://") || cand.starts_with("socks") {
+        Some(cand)
+    } else {
+        Some(format!("http://{}", cand))
+    }
+}
+
+pub fn get_zypper_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_zypper_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_zypper_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
 pub fn get_helm_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(helm_home) = std::env::var("HELM_CONFIG_HOME") {
@@ -7919,6 +8145,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         ));
     }
 
+    // DNF & YUM (Fedora / RHEL / CentOS / Rocky / Alma / Amazon Linux) Package Manager Proxy (/etc/dnf/dnf.conf / /etc/yum.conf)
+    if let Some((dnfproxy, dnfpath)) = get_dnf_proxy() {
+        let ok = verify_proxy_url(&dnfproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "DNF/YUM package manager proxy `{}` in {} is dead! (dnf/yum update/install will fail)",
+                dnfproxy,
+                dnfpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "DNF / YUM",
+            format!("{}", dnfpath.display()),
+            dnfproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (dnf fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "DNF / YUM",
+            "/etc/dnf/dnf.conf & ~/.config/dnf/dnf.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Zypper (openSUSE / SLES) Package Manager Proxy (/etc/zypp/zypp.conf / ~/.zypp/zypp.conf)
+    if let Some((zyppproxy, zypppath)) = get_zypper_proxy() {
+        let ok = verify_proxy_url(&zyppproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Zypper package manager proxy `{}` in {} is dead! (zypper update/install will fail)",
+                zyppproxy,
+                zypppath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Zypper",
+            format!("{}", zypppath.display()),
+            zyppproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (zypper fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Zypper",
+            "/etc/zypp/zypp.conf & ~/.zypp/zypp.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
     // C/C++ vcpkg Asset Caching & Binary Mirrors (X_VCPKG_ASSET_SOURCES & VCPKG_BINARY_SOURCES)
     let vcpkg_vars = [
         ("X_VCPKG_ASSET_SOURCES", "vcpkg asset caching mirror source"),
@@ -10636,5 +10926,73 @@ Acquire::https::Proxy "http://127.0.0.1:7890";
 
         let input_none = "APT::Install-Recommends \"0\";\n";
         assert_eq!(parse_apt_proxy(input_none), None);
+    }
+
+    #[test]
+    fn test_parse_dnf_proxy() {
+        let input_dnf = r#"
+[main]
+gpgcheck=1
+installonly_limit=3
+clean_requirements_on_remove=True
+best=False
+skip_if_unavailable=True
+proxy=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_dnf_proxy(input_dnf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_socks = "[main]\nproxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(
+            parse_dnf_proxy(input_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_no_proto = "[main]\nproxy=127.0.0.1:8888\n";
+        assert_eq!(
+            parse_dnf_proxy(input_no_proto),
+            Some("http://127.0.0.1:8888".to_string())
+        );
+
+        let input_none = "[main]\nproxy=_none_\n";
+        assert_eq!(parse_dnf_proxy(input_none), None);
+
+        let input_commented = "[main]\n# proxy=http://127.0.0.1:7890\n; proxy=http://127.0.0.1:1080\n";
+        assert_eq!(parse_dnf_proxy(input_commented), None);
+
+        let input_clean = "[main]\ngpgcheck=1\n";
+        assert_eq!(parse_dnf_proxy(input_clean), None);
+    }
+
+    #[test]
+    fn test_parse_zypper_proxy() {
+        let input_zypp = r#"
+## Proxy settings
+proxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_zypper_proxy(input_zypp),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_http = "proxy.http = \"socks5h://127.0.0.1:1080\"\n";
+        assert_eq!(
+            parse_zypper_proxy(input_http),
+            Some("socks5h://127.0.0.1:1080".to_string())
+        );
+
+        let input_env_style = "http_proxy = http://proxy.corp.com:8080\n";
+        assert_eq!(
+            parse_zypper_proxy(input_env_style),
+            Some("http://proxy.corp.com:8080".to_string())
+        );
+
+        let input_commented = "# proxy = http://127.0.0.1:7890\n; proxy.http = http://127.0.0.1:7890\n";
+        assert_eq!(parse_zypper_proxy(input_commented), None);
+
+        let input_none = "proxy = none\n";
+        assert_eq!(parse_zypper_proxy(input_none), None);
     }
 }

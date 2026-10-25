@@ -5276,6 +5276,202 @@ pub fn unset_apt_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_dnf_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut in_main = false;
+    let mut proxy_set = false;
+    let mut main_found = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let section = trim[1..trim.len() - 1].trim().to_ascii_lowercase();
+            if in_main && !proxy_set {
+                lines.push(format!("proxy={}", proxy_url));
+                proxy_set = true;
+            }
+            in_main = section == "main";
+            if in_main {
+                main_found = true;
+            }
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_main && !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                if k.trim().eq_ignore_ascii_case("proxy") {
+                    lines.push(format!("proxy={}", proxy_url));
+                    proxy_set = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_main && !proxy_set {
+        lines.push(format!("proxy={}", proxy_url));
+    }
+
+    if !main_found {
+        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[main]".to_string());
+        lines.push(format!("proxy={}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_dnf_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy"
+                    || key == "proxy_username"
+                    || key == "proxy_password"
+                    || key == "proxy_auth_method"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_dnf_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_dnf_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_dnf_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_dnf_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_dnf_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_dnf_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_zypper_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut proxy_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy"
+                    || key == "proxy.http"
+                    || key == "proxy.https"
+                    || key == "http_proxy"
+                    || key == "https_proxy"
+                {
+                    lines.push(format!("proxy = {}", proxy_url));
+                    proxy_set = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !proxy_set {
+        lines.push(format!("proxy = {}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_zypper_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "proxy"
+                    || key == "proxy.http"
+                    || key == "proxy.https"
+                    || key == "http_proxy"
+                    || key == "https_proxy"
+                    || key == "proxy_password"
+                    || key == "proxy_user"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_zypper_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_zypper_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_zypper_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_zypper_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_zypper_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_zypper_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -5332,6 +5528,8 @@ pub async fn turn_on(
     spack: bool,
     macports: bool,
     apt: bool,
+    dnf: bool,
+    zypper: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5387,6 +5585,8 @@ pub async fn turn_on(
     let set_spack = spack || all;
     let set_macports = macports || all;
     let set_apt = apt || all;
+    let set_dnf = dnf || all;
+    let set_zypper = zypper || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -6098,6 +6298,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_dnf {
+        match set_dnf_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ DNF & YUM package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update DNF config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_zypper {
+        match set_zypper_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Zypper package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Zypper config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -6167,6 +6397,8 @@ pub fn turn_off(
     spack: bool,
     macports: bool,
     apt: bool,
+    dnf: bool,
+    zypper: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -6222,6 +6454,8 @@ pub fn turn_off(
     let unset_spack = spack || all;
     let unset_macports = macports || all;
     let unset_apt = apt || all;
+    let unset_dnf = dnf || all;
+    let unset_zypper = zypper || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -6723,6 +6957,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ APT proxy removed from apt config".green()),
             Ok(false) => eprintln!("{}", "○ APT proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset APT proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_dnf {
+        match unset_dnf_proxy() {
+            Ok(true) => eprintln!("{}", "✔ DNF / YUM proxy removed from dnf.conf".green()),
+            Ok(false) => eprintln!("{}", "○ DNF / YUM proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset DNF / YUM proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_zypper {
+        match unset_zypper_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Zypper proxy removed from zypp.conf".green()),
+            Ok(false) => eprintln!("{}", "○ Zypper proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Zypper proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -7925,5 +8175,47 @@ contexts: []
         assert!(!cleaned.contains("Acquire::http::Proxy"));
         assert!(!cleaned.contains("Acquire::https::Proxy"));
         assert!(cleaned.contains("APT::Install-Recommends \"0\";"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_dnf_proxy() {
+        let initial = "[main]\ngpgcheck=1\ninstallonly_limit=3\n";
+        let with_proxy = apply_dnf_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy=http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("gpgcheck=1"));
+
+        // Replace proxy
+        let updated = apply_dnf_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("proxy=socks5://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_dnf_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy="));
+        assert!(cleaned.contains("gpgcheck=1"));
+
+        // When [main] does not exist initially
+        let empty = "";
+        let applied_empty = apply_dnf_proxy(empty, "http://127.0.0.1:7890");
+        assert!(applied_empty.contains("[main]"));
+        assert!(applied_empty.contains("proxy=http://127.0.0.1:7890"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_zypper_proxy() {
+        let initial = "## Zypper config\nsolver.onlyRequires = true\n";
+        let with_proxy = apply_zypper_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("proxy = http://127.0.0.1:7890"));
+        assert!(with_proxy.contains("solver.onlyRequires = true"));
+
+        // Replace proxy
+        let updated = apply_zypper_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("proxy = socks5://127.0.0.1:1080"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_zypper_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("proxy = "));
+        assert!(cleaned.contains("solver.onlyRequires = true"));
     }
 }
