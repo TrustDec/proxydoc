@@ -5831,6 +5831,139 @@ pub fn get_docker_daemon_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_docker_daemon_write_path() -> PathBuf {
+    if let Some((_, p)) = get_docker_daemon_proxy() {
+        return p;
+    }
+    let paths = get_docker_daemon_config_paths();
+    for p in paths {
+        if p.exists() {
+            return p;
+        }
+    }
+    let etc_docker = PathBuf::from("/etc/docker");
+    if etc_docker.is_dir() {
+        let default_target = etc_docker.join("daemon.json");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&default_target) {
+            drop(f);
+            return default_target;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".docker").join("daemon.json");
+    }
+    PathBuf::from("/etc/docker/daemon.json")
+}
+
+pub fn get_portage_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(conf) = std::env::var("PORTAGE_MAKE_CONF") {
+        let p = PathBuf::from(conf.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(root) = std::env::var("PORTAGE_CONFIGROOT") {
+        let p = PathBuf::from(root.trim()).join("etc/portage/make.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_conf = home.join(".config").join("portage").join("make.conf");
+        if user_conf.exists() && !paths.contains(&user_conf) {
+            paths.push(user_conf);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/portage/make.conf"),
+        PathBuf::from("/etc/make.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_portage_config_path() -> Option<PathBuf> {
+    let paths = get_portage_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_portage_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_portage_write_path() -> PathBuf {
+    if let Some(p) = get_portage_config_path() {
+        return p;
+    }
+    let etc_portage = PathBuf::from("/etc/portage");
+    if etc_portage.is_dir() {
+        let default_target = etc_portage.join("make.conf");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&default_target) {
+            drop(f);
+            return default_target;
+        }
+    }
+    let etc = PathBuf::from("/etc");
+    if etc.is_dir() {
+        let default_target = etc.join("make.conf");
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).create(true).open(&default_target) {
+            drop(f);
+            return default_target;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("portage").join("make.conf");
+    }
+    PathBuf::from("/etc/portage/make.conf")
+}
+
+pub fn parse_portage_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" || key == "ftp_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_portage_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_portage_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_portage_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    None
+}
+
 pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
     if !json_output {
         println!(
@@ -8584,6 +8717,38 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "FreeBSD pkg",
             "/usr/local/etc/pkg.conf & /etc/pkg.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Portage (Gentoo / ChromeOS / Funtoo) Package Manager Proxy (/etc/portage/make.conf)
+    if let Some((portproxy, portpath)) = get_portage_proxy() {
+        let ok = verify_proxy_url(&portproxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Portage package manager proxy `{}` in {} is dead! (emerge sync and builds will fail)",
+                portproxy,
+                portpath.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Portage",
+            format!("{}", portpath.display()),
+            portproxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (emerge fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Portage",
+            "/etc/portage/make.conf & ~/.config/portage/make.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -11487,5 +11652,37 @@ http_proxy: "http://127.0.0.1:7890";
 
         let input_clean = r#"{ "log-level": "info" }"#;
         assert_eq!(parse_docker_daemon_proxy(input_clean), None);
+    }
+
+    #[test]
+    fn test_parse_portage_proxy() {
+        let input_portage = r#"
+# Gentoo Portage make.conf
+CFLAGS="-O2 -pipe"
+http_proxy="http://127.0.0.1:7890"
+https_proxy="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_portage_proxy(input_portage),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_upper = "HTTP_PROXY=\"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(
+            parse_portage_proxy(input_upper),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_all = "all_proxy='socks5://127.0.0.1:1080'\n";
+        assert_eq!(
+            parse_portage_proxy(input_all),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "#http_proxy=\"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_portage_proxy(input_comment), None);
+
+        let input_none = "http_proxy=\"none\"\n";
+        assert_eq!(parse_portage_proxy(input_none), None);
     }
 }

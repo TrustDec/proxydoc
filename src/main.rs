@@ -239,7 +239,13 @@ enum Commands {
         /// Also configure FreeBSD pkg package manager proxy (/usr/local/etc/pkg.conf)
         #[arg(long)]
         pkg: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, and pkg proxy
+        /// Also configure Portage package manager proxy (/etc/portage/make.conf)
+        #[arg(long, visible_alias = "emerge")]
+        portage: bool,
+        /// Also configure Docker Daemon engine proxy (/etc/docker/daemon.json)
+        #[arg(long, visible_alias = "daemon")]
+        docker_daemon: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, and docker daemon proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -422,7 +428,13 @@ enum Commands {
         /// Also unset FreeBSD pkg package manager proxy (/usr/local/etc/pkg.conf)
         #[arg(long)]
         pkg: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, and pkg proxy
+        /// Also unset Portage package manager proxy (/etc/portage/make.conf)
+        #[arg(long, visible_alias = "emerge")]
+        portage: bool,
+        /// Also unset Docker Daemon engine proxy (/etc/docker/daemon.json)
+        #[arg(long, visible_alias = "daemon")]
+        docker_daemon: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, and docker daemon proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -524,6 +536,8 @@ async fn main() -> Result<()> {
             zypper,
             pacman,
             pkg,
+            portage,
+            docker_daemon,
             all,
             shell,
         }) => {
@@ -587,6 +601,8 @@ async fn main() -> Result<()> {
                 zypper,
                 pacman,
                 pkg,
+                portage,
+                docker_daemon,
                 all,
                 shell.as_deref(),
             )
@@ -651,6 +667,8 @@ async fn main() -> Result<()> {
             zypper,
             pacman,
             pkg,
+            portage,
+            docker_daemon,
             all,
             shell,
         }) => {
@@ -713,6 +731,8 @@ async fn main() -> Result<()> {
                 zypper,
                 pacman,
                 pkg,
+                portage,
+                docker_daemon,
                 all,
                 shell.as_deref(),
             )?;
@@ -2107,6 +2127,50 @@ mod tests {
         match cli.command {
             Some(Commands::Off { pkg, .. }) => {
                 assert!(pkg);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_portage() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--portage"]).unwrap();
+        match cli.command {
+            Some(Commands::On { portage, .. }) => {
+                assert!(portage);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_portage() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--emerge"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { portage, .. }) => {
+                assert!(portage);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_docker_daemon() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--docker-daemon"]).unwrap();
+        match cli.command {
+            Some(Commands::On { docker_daemon, .. }) => {
+                assert!(docker_daemon);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_docker_daemon() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--daemon"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { docker_daemon, .. }) => {
+                assert!(docker_daemon);
             }
             _ => panic!("Expected Off command"),
         }

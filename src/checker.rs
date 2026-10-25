@@ -234,6 +234,14 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ),
     ("Sanity API", "https://api.sanity.io/v1"),
     ("Meilisearch Cloud", "https://cloud.meilisearch.com"),
+    ("PlanetScale API", "https://api.planetscale.com/v1"),
+    ("Better Stack API", "https://uptime.betterstack.com/api/v2"),
+    ("Mintlify API", "https://api.mintlify.com"),
+    ("Val Town API", "https://api.val.town/v1"),
+    (
+        "Hetzner Cloud API",
+        "https://api.hetzner.cloud/v1",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -814,6 +822,11 @@ mod tests {
         assert!(standard.iter().any(|(name, _)| *name == "Datadog API"));
         assert!(standard.iter().any(|(name, _)| *name == "Sanity API"));
         assert!(standard.iter().any(|(name, _)| *name == "Meilisearch Cloud"));
+        assert!(standard.iter().any(|(name, _)| *name == "PlanetScale API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Better Stack API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Mintlify API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Val Town API"));
+        assert!(standard.iter().any(|(name, _)| *name == "Hetzner Cloud API"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

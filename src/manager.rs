@@ -5677,6 +5677,140 @@ pub fn unset_pkg_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_portage_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut http_set = false;
+    let mut https_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" {
+                    lines.push(format!("http_proxy=\"{}\"", proxy_url));
+                    http_set = true;
+                    continue;
+                } else if key == "https_proxy" {
+                    lines.push(format!("https_proxy=\"{}\"", proxy_url));
+                    https_set = true;
+                    continue;
+                } else if key == "all_proxy" || key == "ftp_proxy" {
+                    lines.push(format!("{}=\"{}\"", k.trim(), proxy_url));
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !http_set {
+        lines.push(format!("http_proxy=\"{}\"", proxy_url));
+    }
+    if !https_set {
+        lines.push(format!("https_proxy=\"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_portage_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if !trim.starts_with('#') && !trim.starts_with(';') {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                if key == "http_proxy" || key == "https_proxy" || key == "all_proxy" || key == "ftp_proxy" {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_portage_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_portage_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_portage_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_portage_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_portage_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_portage_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_docker_daemon_proxy_json(root: &mut serde_json::Value, proxy_url: &str) {
+    if !root.is_object() {
+        *root = serde_json::json!({});
+    }
+
+    let obj = root.as_object_mut().unwrap();
+    let proxies_val = obj.entry("proxies").or_insert_with(|| serde_json::json!({}));
+    if !proxies_val.is_object() {
+        *proxies_val = serde_json::json!({});
+    }
+
+    let proxies_map = proxies_val.as_object_mut().unwrap();
+    proxies_map.insert(
+        "http-proxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+    proxies_map.insert(
+        "https-proxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+    if !proxies_map.contains_key("no-proxy") {
+        proxies_map.insert(
+            "no-proxy".to_string(),
+            serde_json::Value::String("localhost,127.0.0.1,::1".to_string()),
+        );
+    }
+}
+
+pub fn set_docker_daemon_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_docker_daemon_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut val: serde_json::Value = if path.exists() {
+        let content = std::fs::read_to_string(&path)?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    apply_docker_daemon_proxy_json(&mut val, proxy_url);
+    let pretty = serde_json::to_string_pretty(&val)?;
+    std::fs::write(&path, pretty + "\n")?;
+    Ok(path)
+}
+
 pub fn remove_docker_daemon_proxy_json(root: &mut serde_json::Value) -> bool {
     let mut modified = false;
     if let Some(obj) = root.as_object_mut() {
@@ -5794,6 +5928,8 @@ pub async fn turn_on(
     zypper: bool,
     pacman: bool,
     pkg: bool,
+    portage: bool,
+    docker_daemon: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -5853,6 +5989,8 @@ pub async fn turn_on(
     let set_zypper = zypper || all;
     let set_pacman = pacman || all;
     let set_pkg = pkg || all;
+    let set_portage = portage || all;
+    let set_docker_daemon = docker_daemon || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -6624,6 +6762,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_portage {
+        match set_portage_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Portage package manager proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Portage config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_docker_daemon {
+        match set_docker_daemon_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Docker Daemon engine proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Docker Daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -6697,6 +6865,8 @@ pub fn turn_off(
     zypper: bool,
     pacman: bool,
     pkg: bool,
+    portage: bool,
+    docker_daemon: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -6756,6 +6926,8 @@ pub fn turn_off(
     let unset_zypper = zypper || all;
     let unset_pacman = pacman || all;
     let unset_pkg = pkg || all;
+    let unset_portage = portage || all;
+    let unset_docker_daemon = docker_daemon || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -7289,6 +7461,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ FreeBSD pkg proxy removed from pkg.conf".green()),
             Ok(false) => eprintln!("{}", "○ FreeBSD pkg proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset FreeBSD pkg proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_portage {
+        match unset_portage_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Portage proxy removed from make.conf".green()),
+            Ok(false) => eprintln!("{}", "○ Portage proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Portage proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_docker_daemon {
+        match unset_docker_daemon_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Docker Daemon proxy removed from daemon.json".green()),
+            Ok(false) => eprintln!("{}", "○ Docker Daemon proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Docker Daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -8590,5 +8778,58 @@ contexts: []
         assert!(remove_docker_daemon_proxy_json(&mut root));
         assert!(root.get("proxies").is_none());
         assert_eq!(root["log-level"], "info");
+    }
+
+    #[test]
+    fn test_apply_docker_daemon_proxy_json() {
+        let mut root = serde_json::json!({
+            "log-level": "warn"
+        });
+        apply_docker_daemon_proxy_json(&mut root, "http://127.0.0.1:7890");
+        assert_eq!(
+            root["proxies"]["http-proxy"],
+            "http://127.0.0.1:7890"
+        );
+        assert_eq!(
+            root["proxies"]["https-proxy"],
+            "http://127.0.0.1:7890"
+        );
+        assert_eq!(
+            root["proxies"]["no-proxy"],
+            "localhost,127.0.0.1,::1"
+        );
+        assert_eq!(root["log-level"], "warn");
+
+        // Overwrite existing proxy
+        apply_docker_daemon_proxy_json(&mut root, "socks5://127.0.0.1:1080");
+        assert_eq!(
+            root["proxies"]["http-proxy"],
+            "socks5://127.0.0.1:1080"
+        );
+        assert_eq!(
+            root["proxies"]["https-proxy"],
+            "socks5://127.0.0.1:1080"
+        );
+    }
+
+    #[test]
+    fn test_apply_and_remove_portage_proxy() {
+        let initial = "# Gentoo make.conf\nCFLAGS=\"-O2 -pipe\"\n";
+        let with_proxy = apply_portage_proxy(initial, "http://127.0.0.1:7890");
+        assert!(with_proxy.contains("http_proxy=\"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("https_proxy=\"http://127.0.0.1:7890\""));
+        assert!(with_proxy.contains("CFLAGS=\"-O2 -pipe\""));
+
+        // Replace proxy
+        let updated = apply_portage_proxy(&with_proxy, "socks5://127.0.0.1:1080");
+        assert!(updated.contains("http_proxy=\"socks5://127.0.0.1:1080\""));
+        assert!(updated.contains("https_proxy=\"socks5://127.0.0.1:1080\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_portage_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("http_proxy"));
+        assert!(!cleaned.contains("https_proxy"));
+        assert!(cleaned.contains("CFLAGS=\"-O2 -pipe\""));
     }
 }
