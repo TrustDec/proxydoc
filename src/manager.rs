@@ -7878,6 +7878,514 @@ pub fn unset_nomad_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_kubelet_proxy(content: &str, proxy_url: &str) -> String {
+    let trim_content = content.trim();
+    let no_proxy_def = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,localhost,.svc,.cluster.local";
+    if trim_content.is_empty() {
+        return format!(
+            "[Service]\nEnvironment=\"HTTP_PROXY={}\"\nEnvironment=\"HTTPS_PROXY={}\"\nEnvironment=\"NO_PROXY={}\"\n",
+            proxy_url, proxy_url, no_proxy_def
+        );
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_no = false;
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "all_proxy" || k_low == "kubelet_http_proxy" {
+                    lines.push(format!("Environment=\"KUBELET_HTTP_PROXY={}\"", proxy_url));
+                    continue;
+                } else if k_low == "no_proxy" {
+                    lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "all_proxy" || key == "kubelet_http_proxy" {
+                lines.push(format!("KUBELET_HTTP_PROXY=\"{}\"", proxy_url));
+                continue;
+            } else if key == "no_proxy" {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                replaced_no = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_no {
+        if has_service_section {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        } else {
+            lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_kubelet_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "kubelet_http_proxy"
+                    || k_low == "kubelet_https_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "kubelet_http_proxy"
+                || key == "kubelet_https_proxy"
+                || key == "no_proxy"
+                || key == "proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_kubelet_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_kubelet_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_kubelet_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_kubelet_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_kubelet_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_kubelet_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+fn update_toml_environment_array(line: &str, proxy_url: &str, no_proxy: &str) -> String {
+    let before_bracket = line.split('[').next().unwrap_or("  environment = ");
+    let bracket_content = line
+        .split_once('[')
+        .and_then(|(_, rest)| rest.rsplit_once(']'))
+        .map(|(inside, _)| inside)
+        .unwrap_or("");
+
+    let mut remaining_entries = Vec::new();
+    for item in bracket_content.split(',') {
+        let trim_item = item.trim();
+        let unquoted = trim_item.trim_matches('"').trim_matches('\'').trim();
+        let unquoted_low = unquoted.to_ascii_lowercase();
+        if !unquoted_low.starts_with("http_proxy=")
+            && !unquoted_low.starts_with("https_proxy=")
+            && !unquoted_low.starts_with("all_proxy=")
+            && !unquoted_low.starts_with("no_proxy=")
+            && !unquoted_low.starts_with("ci_server_proxy=")
+            && !unquoted_low.starts_with("gitlab_runner_http_proxy=")
+            && !trim_item.is_empty()
+        {
+            remaining_entries.push(trim_item.to_string());
+        }
+    }
+    remaining_entries.push(format!("\"HTTP_PROXY={}\"", proxy_url));
+    remaining_entries.push(format!("\"HTTPS_PROXY={}\"", proxy_url));
+    remaining_entries.push(format!("\"NO_PROXY={}\"", no_proxy));
+
+    format!("{}[{}]", before_bracket, remaining_entries.join(", "))
+}
+
+fn remove_toml_environment_array(line: &str) -> (String, bool) {
+    let before_bracket = line.split('[').next().unwrap_or("  environment = ");
+    let bracket_content = match line
+        .split_once('[')
+        .and_then(|(_, rest)| rest.rsplit_once(']'))
+        .map(|(inside, _)| inside)
+    {
+        Some(s) => s,
+        None => return (line.to_string(), false),
+    };
+
+    let mut remaining_entries = Vec::new();
+    let mut changed = false;
+    for item in bracket_content.split(',') {
+        let trim_item = item.trim();
+        let unquoted = trim_item.trim_matches('"').trim_matches('\'').trim();
+        let unquoted_low = unquoted.to_ascii_lowercase();
+        if unquoted_low.starts_with("http_proxy=")
+            || unquoted_low.starts_with("https_proxy=")
+            || unquoted_low.starts_with("all_proxy=")
+            || unquoted_low.starts_with("no_proxy=")
+            || unquoted_low.starts_with("ci_server_proxy=")
+            || unquoted_low.starts_with("gitlab_runner_http_proxy=")
+        {
+            changed = true;
+        } else if !trim_item.is_empty() {
+            remaining_entries.push(trim_item.to_string());
+        }
+    }
+
+    if changed {
+        (format!("{}[{}]", before_bracket, remaining_entries.join(", ")), true)
+    } else {
+        (line.to_string(), false)
+    }
+}
+
+pub fn apply_gitlab_runner_proxy(content: &str, proxy_url: &str) -> String {
+    let trim_content = content.trim();
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let is_toml = trim_content.contains("[[runners]]")
+        || trim_content.contains("concurrent =")
+        || trim_content.contains("[session_server]");
+
+    if trim_content.is_empty() {
+        return format!(
+            "[[runners]]\n  environment = [\"HTTP_PROXY={}\", \"HTTPS_PROXY={}\", \"NO_PROXY={}\"]\n",
+            proxy_url, proxy_url, no_proxy_def
+        );
+    }
+
+    if is_toml {
+        let mut lines = Vec::new();
+        let mut in_runner = false;
+        let mut env_replaced = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            if trim.starts_with("[[runners]]") {
+                if in_runner && !env_replaced {
+                    lines.push(format!(
+                        "  environment = [\"HTTP_PROXY={}\", \"HTTPS_PROXY={}\", \"NO_PROXY={}\"]",
+                        proxy_url, proxy_url, no_proxy_def
+                    ));
+                }
+                in_runner = true;
+                env_replaced = false;
+                lines.push(line.to_string());
+                continue;
+            }
+
+            if in_runner && trim.starts_with("environment =") {
+                lines.push(update_toml_environment_array(line, proxy_url, no_proxy_def));
+                env_replaced = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if in_runner && !env_replaced {
+            lines.push(format!(
+                "  environment = [\"HTTP_PROXY={}\", \"HTTPS_PROXY={}\", \"NO_PROXY={}\"]",
+                proxy_url, proxy_url, no_proxy_def
+            ));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // Systemd drop-in or env format
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_no = false;
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_http = true;
+                    continue;
+                } else if k_low == "https_proxy" {
+                    lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                    replaced_https = true;
+                    continue;
+                } else if k_low == "all_proxy" || k_low == "ci_server_proxy" {
+                    lines.push(format!("Environment=\"CI_SERVER_PROXY={}\"", proxy_url));
+                    continue;
+                } else if k_low == "no_proxy" {
+                    lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                    replaced_no = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if key == "all_proxy" || key == "ci_server_proxy" {
+                lines.push(format!("CI_SERVER_PROXY=\"{}\"", proxy_url));
+                continue;
+            } else if key == "no_proxy" {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                replaced_no = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_https {
+        if has_service_section {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+        }
+    }
+
+    if !replaced_no {
+        if has_service_section {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        } else {
+            lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_gitlab_runner_proxy(content: &str) -> (String, bool) {
+    let trim_content = content.trim();
+    let is_toml = trim_content.contains("[[runners]]")
+        || trim_content.contains("concurrent =")
+        || trim_content.contains("[session_server]");
+
+    if is_toml {
+        let mut lines = Vec::new();
+        let mut changed = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            if trim.starts_with("environment =") {
+                let (updated, did_change) = remove_toml_environment_array(line);
+                if did_change {
+                    changed = true;
+                }
+                lines.push(updated);
+            } else {
+                lines.push(line.to_string());
+            }
+        }
+
+        return (lines.join("\n") + "\n", changed);
+    }
+
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "ci_server_proxy"
+                    || k_low == "gitlab_runner_http_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "ci_server_proxy"
+                || key == "gitlab_runner_http_proxy"
+                || key == "no_proxy"
+                || key == "proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_gitlab_runner_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_gitlab_runner_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_gitlab_runner_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_gitlab_runner_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_gitlab_runner_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_gitlab_runner_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -7950,6 +8458,8 @@ pub async fn turn_on(
     k0s: bool,
     rke2: bool,
     nomad: bool,
+    kubelet: bool,
+    gitlab_runner: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -8021,6 +8531,8 @@ pub async fn turn_on(
     let set_k0s = k0s || all;
     let set_rke2 = rke2 || all;
     let set_nomad = nomad || all;
+    let set_kubelet = kubelet || all;
+    let set_gitlab_runner = gitlab_runner || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -8972,6 +9484,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_kubelet {
+        match set_kubelet_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Kubelet (Kubernetes Node Daemon) proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Kubelet daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_gitlab_runner {
+        match set_gitlab_runner_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ GitLab Runner CI daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update GitLab Runner daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -9057,6 +9599,8 @@ pub fn turn_off(
     k0s: bool,
     rke2: bool,
     nomad: bool,
+    kubelet: bool,
+    gitlab_runner: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -9128,6 +9672,8 @@ pub fn turn_off(
     let unset_k0s = k0s || all;
     let unset_rke2 = rke2 || all;
     let unset_nomad = nomad || all;
+    let unset_kubelet = kubelet || all;
+    let unset_gitlab_runner = gitlab_runner || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -9757,6 +10303,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Nomad daemon proxy removed from service/environment config".green()),
             Ok(false) => eprintln!("{}", "○ Nomad proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Nomad daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_kubelet {
+        match unset_kubelet_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Kubelet daemon proxy removed from service/environment config".green()),
+            Ok(false) => eprintln!("{}", "○ Kubelet proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Kubelet daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_gitlab_runner {
+        match unset_gitlab_runner_proxy() {
+            Ok(true) => eprintln!("{}", "✔ GitLab Runner daemon proxy removed from service/environment config".green()),
+            Ok(false) => eprintln!("{}", "○ GitLab Runner proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset GitLab Runner daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -11405,5 +11967,71 @@ contexts: []
         let (env_cleaned, env_removed) = remove_nomad_proxy(&env_updated);
         assert!(env_removed);
         assert!(!env_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_kubelet_proxy() {
+        let initial_dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\nEnvironment=\"HTTPS_PROXY=http://127.0.0.1:7890\"\n";
+        let updated = apply_kubelet_proxy(initial_dropin, "http://127.0.0.1:8080");
+        assert!(updated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("Environment=\"HTTPS_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("Environment=\"NO_PROXY=10.0.0.0/8"));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_kubelet_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY="));
+
+        // Empty file case
+        let clean = "";
+        let generated = apply_kubelet_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("[Service]"));
+        assert!(generated.contains("Environment=\"HTTP_PROXY=http://127.0.0.1:7890\""));
+
+        // Env file format case
+        let env_initial = "HTTP_PROXY=\"http://127.0.0.1:7890\"\n";
+        let env_updated = apply_kubelet_proxy(env_initial, "socks5://127.0.0.1:1080");
+        assert!(env_updated.contains("HTTP_PROXY=\"socks5://127.0.0.1:1080\""));
+        let (env_cleaned, env_removed) = remove_kubelet_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_gitlab_runner_proxy() {
+        let toml_initial = r#"
+concurrent = 4
+check_interval = 0
+
+[[runners]]
+  name = "runner-1"
+  executor = "docker"
+  environment = ["SOME_VAR=1", "HTTP_PROXY=http://127.0.0.1:7890"]
+"#;
+        let updated = apply_gitlab_runner_proxy(toml_initial, "http://127.0.0.1:8080");
+        assert!(updated.contains("\"HTTP_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("\"HTTPS_PROXY=http://127.0.0.1:8080\""));
+        assert!(updated.contains("\"NO_PROXY=localhost,127.0.0.1,.local\""));
+        assert!(updated.contains("\"SOME_VAR=1\""));
+        assert!(!updated.contains("7890"));
+
+        let (cleaned, removed) = remove_gitlab_runner_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("HTTP_PROXY="));
+        assert!(cleaned.contains("\"SOME_VAR=1\""));
+
+        // Empty file case
+        let clean = "";
+        let generated = apply_gitlab_runner_proxy(clean, "http://127.0.0.1:7890");
+        assert!(generated.contains("[[runners]]"));
+        assert!(generated.contains("\"HTTP_PROXY=http://127.0.0.1:7890\""));
+
+        // Systemd drop-in format case
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_gitlab_runner_proxy(dropin_initial, "socks5://127.0.0.1:1080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=socks5://127.0.0.1:1080\""));
+        let (dropin_cleaned, dropin_removed) = remove_gitlab_runner_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
     }
 }

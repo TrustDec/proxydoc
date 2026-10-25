@@ -275,7 +275,13 @@ enum Commands {
         /// Also configure Nomad (HashiCorp Nomad Workload Daemon) proxy (/etc/systemd/system/nomad.service.d/http-proxy.conf / /etc/default/nomad)
         #[arg(long, visible_alias = "nomadd")]
         nomad: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, and nomad proxy
+        /// Also configure Kubelet Kubernetes node daemon proxy (/etc/systemd/system/kubelet.service.d/http-proxy.conf / /etc/default/kubelet)
+        #[arg(long, visible_alias = "k8s-node")]
+        kubelet: bool,
+        /// Also configure GitLab Runner (CI/CD Workload Daemon) proxy (/etc/gitlab-runner/config.toml / /etc/systemd/system/gitlab-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "gitlab-ci", visible_alias = "gl-runner")]
+        gitlab_runner: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, and gitlab-runner proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -494,7 +500,13 @@ enum Commands {
         /// Also unset Nomad (HashiCorp Nomad Workload Daemon) proxy (/etc/systemd/system/nomad.service.d/http-proxy.conf / /etc/default/nomad)
         #[arg(long, visible_alias = "nomadd")]
         nomad: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, and nomad proxy
+        /// Also unset Kubelet Kubernetes node daemon proxy (/etc/systemd/system/kubelet.service.d/http-proxy.conf / /etc/default/kubelet)
+        #[arg(long, visible_alias = "k8s-node")]
+        kubelet: bool,
+        /// Also unset GitLab Runner (CI/CD Workload Daemon) proxy (/etc/gitlab-runner/config.toml / /etc/systemd/system/gitlab-runner.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "gitlab-ci", visible_alias = "gl-runner")]
+        gitlab_runner: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, and gitlab-runner proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -608,6 +620,8 @@ async fn main() -> Result<()> {
             k0s,
             rke2,
             nomad,
+            kubelet,
+            gitlab_runner,
             all,
             shell,
         }) => {
@@ -683,6 +697,8 @@ async fn main() -> Result<()> {
                 k0s,
                 rke2,
                 nomad,
+                kubelet,
+                gitlab_runner,
                 all,
                 shell.as_deref(),
             )
@@ -759,6 +775,8 @@ async fn main() -> Result<()> {
             k0s,
             rke2,
             nomad,
+            kubelet,
+            gitlab_runner,
             all,
             shell,
         }) => {
@@ -833,6 +851,8 @@ async fn main() -> Result<()> {
                 k0s,
                 rke2,
                 nomad,
+                kubelet,
+                gitlab_runner,
                 all,
                 shell.as_deref(),
             )?;
@@ -2539,6 +2559,74 @@ mod tests {
         match cli.command {
             Some(Commands::Off { nomad, .. }) => {
                 assert!(nomad);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_kubelet() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--kubelet"]).unwrap();
+        match cli.command {
+            Some(Commands::On { kubelet, .. }) => {
+                assert!(kubelet);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--k8s-node"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { kubelet, .. }) => {
+                assert!(kubelet);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_kubelet() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--kubelet"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { kubelet, .. }) => {
+                assert!(kubelet);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_gitlab_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--gitlab-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::On { gitlab_runner, .. }) => {
+                assert!(gitlab_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--gitlab-ci"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { gitlab_runner, .. }) => {
+                assert!(gitlab_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--gl-runner"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { gitlab_runner, .. }) => {
+                assert!(gitlab_runner);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_gitlab_runner() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--gitlab-runner"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { gitlab_runner, .. }) => {
+                assert!(gitlab_runner);
             }
             _ => panic!("Expected Off command"),
         }

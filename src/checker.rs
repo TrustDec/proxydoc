@@ -382,6 +382,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Ubuntu Archive CDN",
         "https://archive.ubuntu.com",
     ),
+    (
+        "Flathub CDN",
+        "https://dl.flathub.org/repo/flathub.flatpakrepo",
+    ),
+    (
+        "Snapcraft API",
+        "https://api.snapcraft.io",
+    ),
+    (
+        "Fedora Mirror CDN",
+        "https://mirrors.fedoraproject.org",
+    ),
+    (
+        "Arch Linux Mirrors",
+        "https://archlinux.org/mirrorlist/all/",
+    ),
+    (
+        "GitHub Actions Runners",
+        "https://github.com/actions/runner/releases",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1006,6 +1026,17 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Ubuntu Archive CDN"));
+        assert!(standard.iter().any(|(name, _)| *name == "Flathub CDN"));
+        assert!(standard.iter().any(|(name, _)| *name == "Snapcraft API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fedora Mirror CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Arch Linux Mirrors"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GitHub Actions Runners"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

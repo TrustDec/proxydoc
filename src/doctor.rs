@@ -8121,6 +8121,482 @@ pub fn get_nomad_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_kubelet_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("KUBELET_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("http-proxy.conf");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("KUBELET_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("KUBELET_ENV_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_dropin = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("kubelet.service.d")
+            .join("http-proxy.conf");
+        if user_dropin.exists() && !paths.contains(&user_dropin) {
+            paths.push(user_dropin);
+        }
+        let user_env = home.join(".config").join("kubelet").join("kubelet.env");
+        if user_env.exists() && !paths.contains(&user_env) {
+            paths.push(user_env);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/systemd/system/kubelet.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/kubelet.service.d/10-kubeadm.conf"),
+        PathBuf::from("/etc/systemd/system/kubelet.service.d/20-extra-args.conf"),
+        PathBuf::from("/etc/default/kubelet"),
+        PathBuf::from("/etc/sysconfig/kubelet"),
+        PathBuf::from("/etc/systemd/system/kubelet.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_kubelet_config_path() -> Option<PathBuf> {
+    let paths = get_kubelet_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_kubelet_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_kubelet_write_path() -> PathBuf {
+    if let Some(p) = get_kubelet_config_path() {
+        return p;
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/kubelet.service.d");
+    if dropin_dir.is_dir() {
+        let f = dropin_dir.join("http-proxy.conf");
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&f)
+        {
+            drop(file);
+            return f;
+        }
+    }
+    let default_kubelet = PathBuf::from("/etc/default/kubelet");
+    if default_kubelet.exists() {
+        return default_kubelet;
+    }
+    let sysconfig_kubelet = PathBuf::from("/etc/sysconfig/kubelet");
+    if sysconfig_kubelet.exists() {
+        return sysconfig_kubelet;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_dropin = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("kubelet.service.d");
+        if user_dropin.is_dir() {
+            return user_dropin.join("http-proxy.conf");
+        }
+    }
+    PathBuf::from("/etc/systemd/system/kubelet.service.d/http-proxy.conf")
+}
+
+pub fn parse_kubelet_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+
+        // Systemd drop-in format: Environment="HTTP_PROXY=..."
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "kubelet_http_proxy"
+                        || k_low == "kubelet_https_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Environment format: HTTP_PROXY=... / HTTPS_PROXY=...
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "kubelet_http_proxy"
+                || key == "kubelet_https_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_kubelet_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_kubelet_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_kubelet_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("KUBELET_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KUBELET_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("KUBELET_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KUBELET_HTTPS_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_gitlab_runner_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("GITLAB_RUNNER_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("GITLAB_RUNNER_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("GITLAB_RUNNER_ENV_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_toml = home.join(".gitlab-runner").join("config.toml");
+        if user_toml.exists() && !paths.contains(&user_toml) {
+            paths.push(user_toml);
+        }
+        let user_dropin = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("gitlab-runner.service.d")
+            .join("http-proxy.conf");
+        if user_dropin.exists() && !paths.contains(&user_dropin) {
+            paths.push(user_dropin);
+        }
+        let user_env = home.join(".config").join("gitlab-runner").join("gitlab-runner.env");
+        if user_env.exists() && !paths.contains(&user_env) {
+            paths.push(user_env);
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/gitlab-runner/config.toml"),
+        PathBuf::from("/etc/systemd/system/gitlab-runner.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/gitlab-runner"),
+        PathBuf::from("/etc/sysconfig/gitlab-runner"),
+        PathBuf::from("/etc/systemd/system/gitlab-runner.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_gitlab_runner_config_path() -> Option<PathBuf> {
+    let paths = get_gitlab_runner_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_gitlab_runner_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_gitlab_runner_write_path() -> PathBuf {
+    if let Some(p) = get_gitlab_runner_config_path() {
+        return p;
+    }
+    let gl_dir = PathBuf::from("/etc/gitlab-runner");
+    if gl_dir.is_dir() {
+        return gl_dir.join("config.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/gitlab-runner.service.d");
+    if dropin_dir.is_dir() {
+        let f = dropin_dir.join("http-proxy.conf");
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&f)
+        {
+            drop(file);
+            return f;
+        }
+    }
+    let default_gl = PathBuf::from("/etc/default/gitlab-runner");
+    if default_gl.exists() {
+        return default_gl;
+    }
+    let sysconfig_gl = PathBuf::from("/etc/sysconfig/gitlab-runner");
+    if sysconfig_gl.exists() {
+        return sysconfig_gl;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_toml = home.join(".gitlab-runner").join("config.toml");
+        if let Some(parent) = user_toml.parent() {
+            if parent.is_dir() {
+                return user_toml;
+            }
+        }
+        let user_dropin = home
+            .join(".config")
+            .join("systemd")
+            .join("user")
+            .join("gitlab-runner.service.d");
+        if user_dropin.is_dir() {
+            return user_dropin.join("http-proxy.conf");
+        }
+    }
+    PathBuf::from("/etc/gitlab-runner/config.toml")
+}
+
+pub fn parse_gitlab_runner_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+        let lower = trim.to_ascii_lowercase();
+
+        // Systemd drop-in format: Environment="HTTP_PROXY=..."
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            for item in env_part.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "ci_server_proxy"
+                        || k_low == "gitlab_runner_http_proxy"
+                    {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // TOML environment array format: environment = ["HTTP_PROXY=...", ...] or elements
+        if lower.contains("http_proxy=")
+            || lower.contains("https_proxy=")
+            || lower.contains("all_proxy=")
+            || lower.contains("ci_server_proxy=")
+        {
+            // Extract from quoted string within line
+            for seg in trim.split('"') {
+                if let Some((k, v)) = seg.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "ci_server_proxy"
+                    {
+                        let val = v.trim().trim_matches('\'').trim();
+                        if !val.is_empty()
+                            && !val.eq_ignore_ascii_case("none")
+                            && !val.eq_ignore_ascii_case("off")
+                            && val != "0"
+                        {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Environment format: HTTP_PROXY=... / HTTPS_PROXY=... / proxy = "..."
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "ci_server_proxy"
+                || key == "gitlab_runner_http_proxy"
+                || key == "proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && !val.eq_ignore_ascii_case("none")
+                    && !val.eq_ignore_ascii_case("off")
+                    && val != "0"
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_gitlab_runner_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_gitlab_runner_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_gitlab_runner_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GITLAB_RUNNER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GITLAB_RUNNER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CI_SERVER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CI_SERVER_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -11326,6 +11802,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Nomad Workload Daemon",
             "/etc/systemd/system/nomad.service.d/http-proxy.conf & /etc/default/nomad",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Kubelet (Kubernetes Node Daemon) Proxy (/etc/systemd/system/kubelet.service.d/http-proxy.conf / /etc/default/kubelet)
+    if let Some((kubelet_proxy, kubelet_path)) = get_kubelet_proxy() {
+        let ok = verify_proxy_url(&kubelet_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Kubelet (Kubernetes Node Daemon) proxy `{}` in {} is dead! (Kubelet pause image pulls and API communication will fail)",
+                kubelet_proxy,
+                kubelet_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Kubelet Kubernetes Daemon",
+            format!("{}", kubelet_path.display()),
+            kubelet_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (kubelet fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Kubelet Kubernetes Daemon",
+            "/etc/systemd/system/kubelet.service.d/http-proxy.conf & /etc/default/kubelet",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // GitLab Runner (CI/CD Daemon) Proxy (/etc/gitlab-runner/config.toml / /etc/systemd/system/gitlab-runner.service.d/http-proxy.conf)
+    if let Some((gl_proxy, gl_path)) = get_gitlab_runner_proxy() {
+        let ok = verify_proxy_url(&gl_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "GitLab Runner daemon proxy `{}` in {} is dead! (GitLab CI pipeline job execution and container image pulls will fail)",
+                gl_proxy,
+                gl_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "GitLab Runner CI Daemon",
+            format!("{}", gl_path.display()),
+            gl_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (gitlab-runner fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "GitLab Runner CI Daemon",
+            "/etc/gitlab-runner/config.toml & /etc/systemd/system/gitlab-runner.service.d/http-proxy.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -14637,5 +15177,75 @@ HTTPS_PROXY="http://10.0.0.5:3128"
         let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
         assert_eq!(parse_nomad_proxy(input_comment), None);
         assert_eq!(parse_nomad_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_kubelet_proxy() {
+        let systemd_dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+Environment="NO_PROXY=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,localhost,.svc,.cluster.local"
+"#;
+        assert_eq!(
+            parse_kubelet_proxy(systemd_dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let env_file = r#"
+# /etc/default/kubelet
+HTTP_PROXY="http://10.0.0.1:8080"
+HTTPS_PROXY="http://10.0.0.1:8080"
+"#;
+        assert_eq!(
+            parse_kubelet_proxy(env_file),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_kubelet_proxy(input_comment), None);
+        assert_eq!(parse_kubelet_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_gitlab_runner_proxy() {
+        let systemd_dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:8118"
+Environment="HTTPS_PROXY=http://127.0.0.1:8118"
+Environment="NO_PROXY=localhost,127.0.0.1"
+"#;
+        assert_eq!(
+            parse_gitlab_runner_proxy(systemd_dropin),
+            Some("http://127.0.0.1:8118".to_string())
+        );
+
+        let toml_file = r#"
+concurrent = 4
+check_interval = 0
+
+[[runners]]
+  name = "ci-runner"
+  url = "https://gitlab.com/"
+  executor = "docker"
+  environment = ["HTTP_PROXY=http://10.0.0.2:3128", "HTTPS_PROXY=http://10.0.0.2:3128", "NO_PROXY=localhost,127.0.0.1"]
+"#;
+        assert_eq!(
+            parse_gitlab_runner_proxy(toml_file),
+            Some("http://10.0.0.2:3128".to_string())
+        );
+
+        let env_file = r#"
+# /etc/default/gitlab-runner
+CI_SERVER_PROXY="http://10.0.0.3:8080"
+"#;
+        assert_eq!(
+            parse_gitlab_runner_proxy(env_file),
+            Some("http://10.0.0.3:8080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_gitlab_runner_proxy(input_comment), None);
+        assert_eq!(parse_gitlab_runner_proxy(""), None);
     }
 }
