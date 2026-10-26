@@ -12881,6 +12881,464 @@ pub fn get_grafana_alloy_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_otelcol_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("OTELCOL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("otelcol").join("config.yaml"),
+            home.join(".config").join("otelcol-contrib").join("config.yaml"),
+            home.join(".otelcol").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("otelcol.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("otelcol-contrib.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/otelcol/config.yaml"),
+        PathBuf::from("/etc/otelcol-contrib/config.yaml"),
+        PathBuf::from("/etc/otelcol/otelcol.conf"),
+        PathBuf::from("/etc/otelcol-contrib/otelcol.conf"),
+        PathBuf::from("/etc/default/otelcol"),
+        PathBuf::from("/etc/default/otelcol-contrib"),
+        PathBuf::from("/etc/sysconfig/otelcol"),
+        PathBuf::from("/etc/sysconfig/otelcol-contrib"),
+        PathBuf::from("/etc/systemd/system/otelcol.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/otelcol-contrib.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\Program Files\\OpenTelemetry\\Collector\\config.yaml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_otelcol_config_path() -> Option<PathBuf> {
+    let paths = get_otelcol_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_otelcol_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_otelcol_write_path() -> PathBuf {
+    if let Some(p) = get_otelcol_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("OTELCOL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_otelcol = PathBuf::from("/etc/otelcol");
+    if etc_otelcol.is_dir() {
+        return etc_otelcol.join("config.yaml");
+    }
+    let etc_otelcol_contrib = PathBuf::from("/etc/otelcol-contrib");
+    if etc_otelcol_contrib.is_dir() {
+        return etc_otelcol_contrib.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/otelcol.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("otelcol").join("config.yaml");
+    }
+    PathBuf::from("/etc/otelcol/config.yaml")
+}
+
+pub fn parse_otelcol_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "otel_exporter_otlp_proxy_url"
+                        || k_low == "otelcol_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/otelcol
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "otel_exporter_otlp_proxy_url"
+                || k_low == "otelcol_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML format: proxy_url: "http://..." or http_proxy: "http://..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "endpoint_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_otelcol_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_otelcol_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_otelcol_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("OTEL_EXPORTER_OTLP_PROXY_URL") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OTEL_EXPORTER_OTLP_PROXY_URL")));
+        }
+    }
+    if let Ok(val) = std::env::var("OTELCOL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OTELCOL_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_vector_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("VECTOR_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("vector").join("vector.yaml"),
+            home.join(".config").join("vector").join("vector.toml"),
+            home.join(".vector").join("vector.yaml"),
+            home.join(".config").join("systemd").join("user").join("vector.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/vector/vector.yaml"),
+        PathBuf::from("/etc/vector/vector.toml"),
+        PathBuf::from("/etc/default/vector"),
+        PathBuf::from("/etc/sysconfig/vector"),
+        PathBuf::from("/etc/systemd/system/vector.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\Program Files\\Vector\\config\\vector.yaml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_vector_config_path() -> Option<PathBuf> {
+    let paths = get_vector_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_vector_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_vector_write_path() -> PathBuf {
+    if let Some(p) = get_vector_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("VECTOR_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_vector = PathBuf::from("/etc/vector");
+    if etc_vector.is_dir() {
+        return etc_vector.join("vector.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/vector.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("vector").join("vector.yaml");
+    }
+    PathBuf::from("/etc/vector/vector.yaml")
+}
+
+pub fn parse_vector_proxy(content: &str) -> Option<String> {
+    let mut in_toml_proxy_block = false;
+    let mut in_yaml_proxy_block = false;
+    let mut proxy_indent = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "vector_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/vector
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "vector_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // TOML table e.g. [proxy]
+        if trimmed == "[proxy]" || trimmed.starts_with("[proxy]") {
+            in_toml_proxy_block = true;
+            in_yaml_proxy_block = false;
+            continue;
+        } else if trimmed.starts_with('[') {
+            in_toml_proxy_block = false;
+        }
+
+        if in_toml_proxy_block {
+            if let Some((k, v)) = trimmed.split_once('=') {
+                let k_low = k.trim().to_lowercase();
+                if k_low == "http" || k_low == "https" || k_low == "url" {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        // YAML indentation
+        let indent = line.len() - line.trim_start().len();
+        if trimmed == "proxy:" || trimmed.starts_with("proxy:") {
+            in_yaml_proxy_block = true;
+            in_toml_proxy_block = false;
+            proxy_indent = indent;
+            continue;
+        }
+
+        if in_yaml_proxy_block {
+            if indent <= proxy_indent && !trimmed.starts_with('-') && trimmed != "proxy:" {
+                in_yaml_proxy_block = false;
+            } else if let Some((k, v)) = trimmed.split_once(':') {
+                let k_low = k.trim().to_lowercase();
+                if k_low == "http" || k_low == "https" || k_low == "url" {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        // Direct key-value: proxy.http = "..." or proxy_url: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "https_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy.http" || k_low == "proxy.https" || k_low == "proxy_url" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_vector_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_vector_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_vector_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("VECTOR_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VECTOR_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -16790,6 +17248,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Grafana Alloy Telemetry",
             "/etc/alloy/config.alloy & /etc/default/alloy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // OpenTelemetry Collector Telemetry Daemon Proxy (/etc/otelcol/config.yaml / /etc/otelcol-contrib/config.yaml / /etc/systemd/system/otelcol.service.d/http-proxy.conf)
+    if let Some((otel_proxy, otel_path)) = get_otelcol_proxy() {
+        let ok = verify_proxy_url(&otel_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "OpenTelemetry Collector daemon proxy `{}` in {} is dead! (OTLP exporter pipelines, remote APM backends, and trace export will fail)",
+                otel_proxy,
+                otel_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "OpenTelemetry Collector",
+            format!("{}", otel_path.display()),
+            otel_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (otelcol fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "OpenTelemetry Collector",
+            "/etc/otelcol/config.yaml & ~/.config/otelcol/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Vector Telemetry & Pipeline Daemon Proxy (/etc/vector/vector.yaml / ~/.config/vector/vector.yaml / /etc/systemd/system/vector.service.d/http-proxy.conf)
+    if let Some((vector_proxy, vector_path)) = get_vector_proxy() {
+        let ok = verify_proxy_url(&vector_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Vector pipeline daemon proxy `{}` in {} is dead! (Log shipping, metrics routing, and sink transmissions will fail)",
+                vector_proxy,
+                vector_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Vector Pipeline Infra",
+            format!("{}", vector_path.display()),
+            vector_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (vector fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Vector Pipeline Infra",
+            "/etc/vector/vector.yaml & ~/.config/vector/vector.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -20891,5 +21413,90 @@ Environment="ALLOY_HTTP_PROXY=http://10.0.0.17:8080"
         let input_comment = "// proxy_url = \"http://127.0.0.1:7890\"\n# proxy_url: http://127.0.0.1:7890\n";
         assert_eq!(parse_grafana_alloy_proxy(input_comment), None);
         assert_eq!(parse_grafana_alloy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_otelcol_proxy() {
+        let yaml_file = r#"
+receivers:
+  otlp:
+    protocols:
+      grpc:
+exporters:
+  otlp:
+    endpoint: "otel.example.com:4317"
+    proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_otelcol_proxy(yaml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="OTEL_EXPORTER_OTLP_PROXY_URL=http://10.0.0.19:8080"
+"#;
+        assert_eq!(
+            parse_otelcol_proxy(dropin),
+            Some("http://10.0.0.19:8080".to_string())
+        );
+
+        let default_env = "OTELCOL_HTTP_PROXY=\"http://10.0.0.20:8080\"\n";
+        assert_eq!(
+            parse_otelcol_proxy(default_env),
+            Some("http://10.0.0.20:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: http://127.0.0.1:7890\n";
+        assert_eq!(parse_otelcol_proxy(input_comment), None);
+        assert_eq!(parse_otelcol_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_vector_proxy() {
+        let yaml_file = r#"
+sources:
+  in:
+    type: demo_logs
+sinks:
+  out:
+    type: datadog_logs
+    proxy:
+      http: "http://127.0.0.1:7890"
+      https: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_vector_proxy(yaml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let toml_file = r#"
+[proxy]
+http = "http://10.0.0.21:8080"
+https = "http://10.0.0.21:8080"
+"#;
+        assert_eq!(
+            parse_vector_proxy(toml_file),
+            Some("http://10.0.0.21:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="VECTOR_PROXY=http://10.0.0.22:8080"
+"#;
+        assert_eq!(
+            parse_vector_proxy(dropin),
+            Some("http://10.0.0.22:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.23:8080\"\n";
+        assert_eq!(
+            parse_vector_proxy(default_env),
+            Some("http://10.0.0.23:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: http://127.0.0.1:7890\n; proxy.http = http://127.0.0.1:7890\n";
+        assert_eq!(parse_vector_proxy(input_comment), None);
+        assert_eq!(parse_vector_proxy(""), None);
     }
 }

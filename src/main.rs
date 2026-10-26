@@ -341,7 +341,13 @@ enum Commands {
         /// Also configure Grafana Alloy (Grafana Agent successor telemetry collector daemon) proxy (/etc/alloy/config.alloy / /etc/default/alloy / /etc/systemd/system/alloy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "alloy", visible_alias = "grafana-agent", visible_alias = "grafana-alloy")]
         grafana_alloy: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, and grafana-alloy proxy
+        /// Also configure OpenTelemetry Collector (otelcol / otelcol-contrib daemon) proxy (/etc/otelcol/config.yaml / /etc/default/otelcol / /etc/systemd/system/otelcol.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "otel", visible_alias = "opentelemetry", visible_alias = "otel-collector")]
+        otelcol: bool,
+        /// Also configure Vector (vector telemetry & pipeline daemon) proxy (/etc/vector/vector.yaml / ~/.config/vector/vector.yaml / /etc/systemd/system/vector.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "timber-vector")]
+        vector: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, and vector proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -626,6 +632,12 @@ enum Commands {
         /// Also unset Grafana Alloy (Grafana Agent successor telemetry collector daemon) proxy (/etc/alloy/config.alloy / /etc/default/alloy / /etc/systemd/system/alloy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "alloy", visible_alias = "grafana-agent", visible_alias = "grafana-alloy")]
         grafana_alloy: bool,
+        /// Also unset OpenTelemetry Collector (otelcol / otelcol-contrib daemon) proxy (/etc/otelcol/config.yaml / /etc/default/otelcol / /etc/systemd/system/otelcol.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "otel", visible_alias = "opentelemetry", visible_alias = "otel-collector")]
+        otelcol: bool,
+        /// Also unset Vector (vector telemetry & pipeline daemon) proxy (/etc/vector/vector.yaml / ~/.config/vector/vector.yaml / /etc/systemd/system/vector.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "timber-vector")]
+        vector: bool,
         /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, and grafana-alloy proxy
         #[arg(short, long)]
         all: bool,
@@ -762,6 +774,8 @@ async fn main() -> Result<()> {
             newrelic_infra,
             elastic_agent,
             grafana_alloy,
+            otelcol,
+            vector,
             all,
             shell,
         }) => {
@@ -859,6 +873,8 @@ async fn main() -> Result<()> {
                 newrelic_infra,
                 elastic_agent,
                 grafana_alloy,
+                otelcol,
+                vector,
                 all,
                 shell.as_deref(),
             )
@@ -957,6 +973,8 @@ async fn main() -> Result<()> {
             newrelic_infra,
             elastic_agent,
             grafana_alloy,
+            otelcol,
+            vector,
             all,
             shell,
         }) => {
@@ -1053,6 +1071,8 @@ async fn main() -> Result<()> {
                 newrelic_infra,
                 elastic_agent,
                 grafana_alloy,
+                otelcol,
+                vector,
                 all,
                 shell.as_deref(),
             )?;
@@ -3539,6 +3559,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { grafana_alloy, .. }) => {
                 assert!(grafana_alloy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_otelcol() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--otelcol"]).unwrap();
+        match cli.command {
+            Some(Commands::On { otelcol, .. }) => {
+                assert!(otelcol);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--otel"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { otelcol, .. }) => {
+                assert!(otelcol);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_otelcol() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--otelcol"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { otelcol, .. }) => {
+                assert!(otelcol);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_vector() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--vector"]).unwrap();
+        match cli.command {
+            Some(Commands::On { vector, .. }) => {
+                assert!(vector);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--timber-vector"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { vector, .. }) => {
+                assert!(vector);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_vector() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--vector"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { vector, .. }) => {
+                assert!(vector);
             }
             _ => panic!("Expected Off command"),
         }

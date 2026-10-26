@@ -594,6 +594,22 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Manjaro Linux Package CDN",
         "https://repo.manjaro.org",
     ),
+    (
+        "Vector Package CDN",
+        "https://packages.timber.io",
+    ),
+    (
+        "Cloudflare cdnjs CDN",
+        "https://cdnjs.cloudflare.com",
+    ),
+    (
+        "jsDelivr CDN",
+        "https://cdn.jsdelivr.net",
+    ),
+    (
+        "unpkg CDN",
+        "https://unpkg.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1349,6 +1365,18 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Manjaro Linux Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Vector Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Cloudflare cdnjs CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "jsDelivr CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "unpkg CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
