@@ -311,7 +311,13 @@ enum Commands {
         /// Also configure Atlassian Bamboo Remote Agent (bamboo-agent CI runner daemon) proxy (~/bamboo-agent-home/bamboo-agent.cfg.xml / /opt/bamboo-agent/conf/wrapper.conf / /etc/systemd/system/bamboo-agent.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "bamboo", visible_alias = "atlassian-agent", visible_alias = "bamboo-agent")]
         bamboo_agent: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, and bamboo-agent proxy
+        /// Also configure HashiCorp Terraform Cloud / Enterprise Agent (tfc-agent daemon) proxy (/etc/tfc-agent/agent.env / ~/.tfc-agent/agent.env / /etc/systemd/system/tfc-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tfc", visible_alias = "tfc-agent", visible_alias = "terraform-agent")]
+        tfc_agent: bool,
+        /// Also configure Concourse CI Worker (concourse-worker daemon) proxy (/etc/concourse/worker.env / ~/.concourse/worker.env / /etc/systemd/system/concourse-worker.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "concourse", visible_alias = "concourse-worker")]
+        concourse_worker: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, and concourse-worker proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -566,7 +572,13 @@ enum Commands {
         /// Also unset Atlassian Bamboo Remote Agent (bamboo-agent CI runner daemon) proxy (~/bamboo-agent-home/bamboo-agent.cfg.xml / /opt/bamboo-agent/conf/wrapper.conf / /etc/systemd/system/bamboo-agent.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "bamboo", visible_alias = "atlassian-agent", visible_alias = "bamboo-agent")]
         bamboo_agent: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, and azure-pipelines-agent proxy
+        /// Also unset HashiCorp Terraform Cloud / Enterprise Agent (tfc-agent daemon) proxy (/etc/tfc-agent/agent.env / ~/.tfc-agent/agent.env / /etc/systemd/system/tfc-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tfc", visible_alias = "tfc-agent", visible_alias = "terraform-agent")]
+        tfc_agent: bool,
+        /// Also unset Concourse CI Worker (concourse-worker daemon) proxy (/etc/concourse/worker.env / ~/.concourse/worker.env / /etc/systemd/system/concourse-worker.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "concourse", visible_alias = "concourse-worker")]
+        concourse_worker: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, and concourse-worker proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -692,6 +704,8 @@ async fn main() -> Result<()> {
             azure_pipelines_agent,
             teamcity_agent,
             bamboo_agent,
+            tfc_agent,
+            concourse_worker,
             all,
             shell,
         }) => {
@@ -779,6 +793,8 @@ async fn main() -> Result<()> {
                 azure_pipelines_agent,
                 teamcity_agent,
                 bamboo_agent,
+                tfc_agent,
+                concourse_worker,
                 all,
                 shell.as_deref(),
             )
@@ -867,6 +883,8 @@ async fn main() -> Result<()> {
             azure_pipelines_agent,
             teamcity_agent,
             bamboo_agent,
+            tfc_agent,
+            concourse_worker,
             all,
             shell,
         }) => {
@@ -953,6 +971,8 @@ async fn main() -> Result<()> {
                 azure_pipelines_agent,
                 teamcity_agent,
                 bamboo_agent,
+                tfc_agent,
+                concourse_worker,
                 all,
                 shell.as_deref(),
             )?;
@@ -3123,6 +3143,74 @@ mod tests {
         match cli.command {
             Some(Commands::Off { bamboo_agent, .. }) => {
                 assert!(bamboo_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_tfc_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--tfc-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { tfc_agent, .. }) => {
+                assert!(tfc_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--tfc"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { tfc_agent, .. }) => {
+                assert!(tfc_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--terraform-agent"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { tfc_agent, .. }) => {
+                assert!(tfc_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_tfc_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--tfc-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { tfc_agent, .. }) => {
+                assert!(tfc_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_concourse_worker() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--concourse-worker"]).unwrap();
+        match cli.command {
+            Some(Commands::On { concourse_worker, .. }) => {
+                assert!(concourse_worker);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--concourse"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { concourse_worker, .. }) => {
+                assert!(concourse_worker);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_concourse_worker() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--concourse-worker"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { concourse_worker, .. }) => {
+                assert!(concourse_worker);
             }
             _ => panic!("Expected Off command"),
         }

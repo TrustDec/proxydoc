@@ -10780,6 +10780,462 @@ pub fn unset_bamboo_agent_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_tfc_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_tfc_http = false;
+        let mut replaced_tfc_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "tfc_agent_http_proxy" {
+                        lines.push(format!("Environment=\"TFC_AGENT_HTTP_PROXY={}\"", proxy_url));
+                        replaced_tfc_http = true;
+                        continue;
+                    } else if k_low == "tfc_agent_https_proxy" {
+                        lines.push(format!("Environment=\"TFC_AGENT_HTTPS_PROXY={}\"", proxy_url));
+                        replaced_tfc_https = true;
+                        continue;
+                    } else if k_low == "no_proxy" || k_low == "tfc_agent_no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_tfc_http {
+            lines.push(format!("Environment=\"TFC_AGENT_HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_tfc_https {
+            lines.push(format!("Environment=\"TFC_AGENT_HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Default key=value shell / env format for agent.env
+    let mut lines = Vec::new();
+    let mut set_http = false;
+    let mut set_https = false;
+    let mut set_tfc_http = false;
+    let mut set_tfc_https = false;
+    let mut set_no = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                set_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                set_https = true;
+                continue;
+            } else if key == "tfc_agent_http_proxy" {
+                lines.push(format!("TFC_AGENT_HTTP_PROXY=\"{}\"", proxy_url));
+                set_tfc_http = true;
+                continue;
+            } else if key == "tfc_agent_https_proxy" {
+                lines.push(format!("TFC_AGENT_HTTPS_PROXY=\"{}\"", proxy_url));
+                set_tfc_https = true;
+                continue;
+            } else if key == "no_proxy" || key == "tfc_agent_no_proxy" {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                set_no = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !set_http {
+        lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_https {
+        lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_tfc_http {
+        lines.push(format!("TFC_AGENT_HTTP_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_tfc_https {
+        lines.push(format!("TFC_AGENT_HTTPS_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_no {
+        lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_tfc_agent_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tfc_agent_http_proxy"
+                    || k_low == "tfc_agent_https_proxy"
+                    || k_low == "tfc_agent_no_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "tfc_agent_http_proxy"
+                || key == "tfc_agent_https_proxy"
+                || key == "tfc_agent_no_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_tfc_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tfc_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_tfc_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_tfc_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tfc_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tfc_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_concourse_worker_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_concourse_http = false;
+        let mut replaced_concourse_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "concourse_http_proxy" {
+                        lines.push(format!("Environment=\"CONCOURSE_HTTP_PROXY={}\"", proxy_url));
+                        replaced_concourse_http = true;
+                        continue;
+                    } else if k_low == "concourse_https_proxy" {
+                        lines.push(format!("Environment=\"CONCOURSE_HTTPS_PROXY={}\"", proxy_url));
+                        replaced_concourse_https = true;
+                        continue;
+                    } else if k_low == "no_proxy" || k_low == "concourse_no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_concourse_http {
+            lines.push(format!("Environment=\"CONCOURSE_HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_concourse_https {
+            lines.push(format!("Environment=\"CONCOURSE_HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Default key=value shell / env format for worker.env
+    let mut lines = Vec::new();
+    let mut set_http = false;
+    let mut set_https = false;
+    let mut set_concourse_http = false;
+    let mut set_concourse_https = false;
+    let mut set_no = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                set_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                set_https = true;
+                continue;
+            } else if key == "concourse_http_proxy" {
+                lines.push(format!("CONCOURSE_HTTP_PROXY=\"{}\"", proxy_url));
+                set_concourse_http = true;
+                continue;
+            } else if key == "concourse_https_proxy" {
+                lines.push(format!("CONCOURSE_HTTPS_PROXY=\"{}\"", proxy_url));
+                set_concourse_https = true;
+                continue;
+            } else if key == "no_proxy" || key == "concourse_no_proxy" {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                set_no = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !set_http {
+        lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_https {
+        lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_concourse_http {
+        lines.push(format!("CONCOURSE_HTTP_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_concourse_https {
+        lines.push(format!("CONCOURSE_HTTPS_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_no {
+        lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_concourse_worker_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "concourse_http_proxy"
+                    || k_low == "concourse_https_proxy"
+                    || k_low == "concourse_no_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "concourse_http_proxy"
+                || key == "concourse_https_proxy"
+                || key == "concourse_no_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_concourse_worker_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_concourse_worker_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_concourse_worker_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_concourse_worker_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_concourse_worker_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_concourse_worker_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -10864,6 +11320,8 @@ pub async fn turn_on(
     azure_pipelines_agent: bool,
     teamcity_agent: bool,
     bamboo_agent: bool,
+    tfc_agent: bool,
+    concourse_worker: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -10947,6 +11405,8 @@ pub async fn turn_on(
     let set_azure_pipelines_agent = azure_pipelines_agent || all;
     let set_teamcity_agent = teamcity_agent || all;
     let set_bamboo_agent = bamboo_agent || all;
+    let set_tfc_agent = tfc_agent || all;
+    let set_concourse_worker = concourse_worker || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -12078,6 +12538,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_tfc_agent {
+        match set_tfc_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Terraform Cloud Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Terraform Cloud Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_concourse_worker {
+        match set_concourse_worker_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Concourse CI Worker daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Concourse CI Worker daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -12175,6 +12665,8 @@ pub fn turn_off(
     azure_pipelines_agent: bool,
     teamcity_agent: bool,
     bamboo_agent: bool,
+    tfc_agent: bool,
+    concourse_worker: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -12258,6 +12750,8 @@ pub fn turn_off(
     let unset_azure_pipelines_agent = azure_pipelines_agent || all;
     let unset_teamcity_agent = teamcity_agent || all;
     let unset_bamboo_agent = bamboo_agent || all;
+    let unset_tfc_agent = tfc_agent || all;
+    let unset_concourse_worker = concourse_worker || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -12983,6 +13477,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Bamboo Remote Agent daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Bamboo Remote Agent proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Bamboo Remote Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tfc_agent {
+        match unset_tfc_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Terraform Cloud Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Terraform Cloud Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Terraform Cloud Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_concourse_worker {
+        match unset_concourse_worker_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Concourse CI Worker daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Concourse CI Worker proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Concourse CI Worker daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -14927,5 +15437,45 @@ check_interval = 0
         let (dropin_cleaned, dropin_removed) = remove_bamboo_agent_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tfc_agent_proxy() {
+        let env_initial = "TFC_AGENT_TOKEN=secret\n";
+        let env_updated = apply_tfc_agent_proxy(env_initial, "http://127.0.0.1:7890");
+        assert!(env_updated.contains("TFC_AGENT_HTTP_PROXY=\"http://127.0.0.1:7890\""));
+        assert!(env_updated.contains("HTTP_PROXY=\"http://127.0.0.1:7890\""));
+        let (env_cleaned, env_removed) = remove_tfc_agent_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("TFC_AGENT_HTTP_PROXY="));
+        assert!(!env_cleaned.contains("HTTP_PROXY="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_tfc_agent_proxy(dropin_initial, "http://10.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_tfc_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_concourse_worker_proxy() {
+        let env_initial = "CONCOURSE_GARDEN_NETWORK_POOL=10.254.0.0/16\n";
+        let env_updated = apply_concourse_worker_proxy(env_initial, "http://127.0.0.1:7890");
+        assert!(env_updated.contains("CONCOURSE_HTTP_PROXY=\"http://127.0.0.1:7890\""));
+        assert!(env_updated.contains("HTTP_PROXY=\"http://127.0.0.1:7890\""));
+        let (env_cleaned, env_removed) = remove_concourse_worker_proxy(&env_updated);
+        assert!(env_removed);
+        assert!(!env_cleaned.contains("CONCOURSE_HTTP_PROXY="));
+        assert!(!env_cleaned.contains("HTTP_PROXY="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"CONCOURSE_HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_concourse_worker_proxy(dropin_initial, "http://10.0.0.2:8080");
+        assert!(dropin_updated.contains("Environment=\"CONCOURSE_HTTP_PROXY=http://10.0.0.2:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_concourse_worker_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("CONCOURSE_HTTP_PROXY="));
     }
 }

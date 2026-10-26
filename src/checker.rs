@@ -492,15 +492,27 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
     ),
     (
         "NetBSD CDN",
-        "https://cdn.openbsd.org/pub/OpenBSD/",
+        "https://cdn.netbsd.org/pub/NetBSD/",
     ),
     (
-        "Debian Archive CDN",
-        "https://deb.debian.org/debian/",
+        "HashiCorp Terraform Cloud API",
+        "https://app.terraform.io/api/v2/ping",
     ),
     (
-        "Ubuntu Archive CDN",
-        "https://archive.ubuntu.com/ubuntu/",
+        "Concourse CI",
+        "https://concourse-ci.org",
+    ),
+    (
+        "GitLab Package Registry CDN",
+        "https://packages.gitlab.com",
+    ),
+    (
+        "JFrog Releases",
+        "https://releases.jfrog.io",
+    ),
+    (
+        "DragonFly BSD CDN",
+        "https://mirror-master.dragonflybsd.org",
     ),
 ];
 
@@ -1206,6 +1218,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "NetBSD CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HashiCorp Terraform Cloud API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Concourse CI"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GitLab Package Registry CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "JFrog Releases"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DragonFly BSD CDN"));
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Debian Archive CDN"));

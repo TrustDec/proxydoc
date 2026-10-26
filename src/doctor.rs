@@ -10836,6 +10836,369 @@ pub fn get_bamboo_agent_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_tfc_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TFC_AGENT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TFC_AGENT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("agent.env");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".tfc-agent").join("agent.env"),
+            home.join("tfc-agent").join("agent.env"),
+            home.join(".config").join("tfc-agent").join("agent.env"),
+            home.join(".config").join("systemd").join("user").join("tfc-agent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tfc-agent/agent.env"),
+        PathBuf::from("/etc/tfc-agent/tfc-agent.env"),
+        PathBuf::from("/etc/default/tfc-agent"),
+        PathBuf::from("/etc/sysconfig/tfc-agent"),
+        PathBuf::from("/etc/systemd/system/tfc-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/tfc-agent.service.env"),
+        PathBuf::from("/opt/tfc-agent/agent.env"),
+        PathBuf::from("/var/lib/tfc-agent/agent.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_tfc_agent_config_path() -> Option<PathBuf> {
+    let paths = get_tfc_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tfc_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tfc_agent_write_path() -> PathBuf {
+    if let Some(p) = get_tfc_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TFC_AGENT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(dir) = std::env::var("TFC_AGENT_DIR") {
+        return PathBuf::from(dir.trim()).join("agent.env");
+    }
+    let etc_dir = PathBuf::from("/etc/tfc-agent");
+    if etc_dir.is_dir() {
+        return etc_dir.join("agent.env");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tfc-agent.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".tfc-agent").join("agent.env");
+    }
+    PathBuf::from("/etc/tfc-agent/agent.env")
+}
+
+pub fn parse_tfc_agent_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "tfc_agent_http_proxy"
+                        || k_low == "tfc_agent_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Key-value .env format
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "tfc_agent_http_proxy"
+                || key == "tfc_agent_https_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tfc_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tfc_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tfc_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TFC_AGENT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TFC_AGENT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TFC_AGENT_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TFC_AGENT_HTTPS_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_concourse_worker_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CONCOURSE_WORKER_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("CONCOURSE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("worker.env");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".concourse").join("worker.env"),
+            home.join("concourse").join("worker.env"),
+            home.join(".config").join("concourse").join("worker.env"),
+            home.join(".config").join("systemd").join("user").join("concourse-worker.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/concourse/worker.env"),
+        PathBuf::from("/etc/concourse/worker_env"),
+        PathBuf::from("/var/lib/concourse/worker.env"),
+        PathBuf::from("/etc/default/concourse-worker"),
+        PathBuf::from("/etc/sysconfig/concourse-worker"),
+        PathBuf::from("/etc/systemd/system/concourse-worker.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/concourse-worker.service.env"),
+        PathBuf::from("/opt/concourse/worker.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_concourse_worker_config_path() -> Option<PathBuf> {
+    let paths = get_concourse_worker_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_concourse_worker_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_concourse_worker_write_path() -> PathBuf {
+    if let Some(p) = get_concourse_worker_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CONCOURSE_WORKER_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_dir = PathBuf::from("/etc/concourse");
+    if etc_dir.is_dir() {
+        return etc_dir.join("worker.env");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/concourse-worker.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".concourse").join("worker.env");
+    }
+    PathBuf::from("/etc/concourse/worker.env")
+}
+
+pub fn parse_concourse_worker_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "concourse_http_proxy"
+                        || k_low == "concourse_https_proxy"
+                        || k_low == "concourse_all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Key-value .env format
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "concourse_http_proxy"
+                || key == "concourse_https_proxy"
+                || key == "concourse_all_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+    None
+}
+
+pub fn get_concourse_worker_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_concourse_worker_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_concourse_worker_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CONCOURSE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CONCOURSE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CONCOURSE_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CONCOURSE_HTTPS_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -14425,6 +14788,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Bamboo Agent CI",
             "~/bamboo-agent-home/bamboo-agent.cfg.xml & /opt/bamboo-agent/conf/wrapper.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // HashiCorp Terraform Cloud / Enterprise Agent (tfc-agent) CI/CD Daemon Proxy (~/.tfc-agent/agent.env / /etc/tfc-agent/agent.env / /etc/systemd/system/tfc-agent.service.d/http-proxy.conf)
+    if let Some((tfc_proxy, tfc_path)) = get_tfc_agent_proxy() {
+        let ok = verify_proxy_url(&tfc_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Terraform Cloud Agent CI daemon proxy `{}` in {} is dead! (Terraform runs and provider downloads will fail)",
+                tfc_proxy,
+                tfc_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Terraform Cloud Agent CI",
+            format!("{}", tfc_path.display()),
+            tfc_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tfc-agent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Terraform Cloud Agent CI",
+            "/etc/tfc-agent/agent.env & ~/.tfc-agent/agent.env",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Concourse CI Worker Daemon Proxy (/etc/concourse/worker.env / /var/lib/concourse/worker.env / /etc/systemd/system/concourse-worker.service.d/http-proxy.conf)
+    if let Some((con_proxy, con_path)) = get_concourse_worker_proxy() {
+        let ok = verify_proxy_url(&con_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Concourse CI Worker daemon proxy `{}` in {} is dead! (Build containers and resource checks will fail)",
+                con_proxy,
+                con_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Concourse CI Worker",
+            format!("{}", con_path.display()),
+            con_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (concourse-worker fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Concourse CI Worker",
+            "/etc/concourse/worker.env & /etc/systemd/system/concourse-worker.service.d/http-proxy.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -18156,5 +18583,62 @@ Environment="BAMBOO_HTTP_PROXY=http://127.0.0.1:8080"
         let input_comment = "# <httpProxyHost>127.0.0.1</httpProxyHost>\n";
         assert_eq!(parse_bamboo_agent_proxy(input_comment), None);
         assert_eq!(parse_bamboo_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tfc_agent_proxy() {
+        let env_file = r#"
+# TFC Agent environment configuration
+TFC_AGENT_TOKEN="secret-token"
+TFC_AGENT_HTTP_PROXY="http://127.0.0.1:7890"
+TFC_AGENT_HTTPS_PROXY="http://127.0.0.1:7890"
+NO_PROXY="localhost,127.0.0.1"
+"#;
+        assert_eq!(
+            parse_tfc_agent_proxy(env_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.1:8080"
+Environment="HTTPS_PROXY=http://10.0.0.1:8080"
+"#;
+        assert_eq!(
+            parse_tfc_agent_proxy(dropin),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+
+        let input_comment = "# TFC_AGENT_HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_tfc_agent_proxy(input_comment), None);
+        assert_eq!(parse_tfc_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_concourse_worker_proxy() {
+        let env_file = r#"
+# Concourse Worker Environment
+CONCOURSE_GARDEN_NETWORK_POOL="10.254.0.0/16"
+CONCOURSE_HTTP_PROXY="http://127.0.0.1:7890"
+CONCOURSE_HTTPS_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_concourse_worker_proxy(env_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="CONCOURSE_HTTP_PROXY=http://10.0.0.2:8080"
+Environment="NO_PROXY=localhost,127.0.0.1"
+"#;
+        assert_eq!(
+            parse_concourse_worker_proxy(dropin),
+            Some("http://10.0.0.2:8080".to_string())
+        );
+
+        let input_comment = "# CONCOURSE_HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_concourse_worker_proxy(input_comment), None);
+        assert_eq!(parse_concourse_worker_proxy(""), None);
     }
 }
