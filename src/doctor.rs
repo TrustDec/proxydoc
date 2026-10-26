@@ -15671,6 +15671,371 @@ pub fn get_auditbeat_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_packetbeat_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PACKETBEAT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("packetbeat").join("packetbeat.yml"),
+            home.join(".packetbeat").join("packetbeat.yml"),
+            home.join(".config").join("systemd").join("user").join("packetbeat.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/packetbeat/packetbeat.yml"),
+        PathBuf::from("/etc/packetbeat/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/packetbeat"),
+        PathBuf::from("/etc/sysconfig/packetbeat"),
+        PathBuf::from("/etc/systemd/system/packetbeat.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/packetbeat/packetbeat.yml"),
+        PathBuf::from("C:\\Program Files\\Packetbeat\\packetbeat.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_packetbeat_config_path() -> Option<PathBuf> {
+    let paths = get_packetbeat_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_packetbeat_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_packetbeat_write_path() -> PathBuf {
+    if let Some(p) = get_packetbeat_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PACKETBEAT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_pb = PathBuf::from("/etc/packetbeat");
+    if etc_pb.is_dir() {
+        return etc_pb.join("packetbeat.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/packetbeat.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("packetbeat").join("packetbeat.yml");
+    }
+    PathBuf::from("/etc/packetbeat/packetbeat.yml")
+}
+
+pub fn parse_packetbeat_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "packetbeat_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/packetbeat
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "packetbeat_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML packetbeat.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_packetbeat_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_packetbeat_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_packetbeat_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PACKETBEAT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PACKETBEAT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_winlogbeat_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("WINLOGBEAT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("winlogbeat").join("winlogbeat.yml"),
+            home.join(".winlogbeat").join("winlogbeat.yml"),
+            home.join(".config").join("systemd").join("user").join("winlogbeat.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/winlogbeat/winlogbeat.yml"),
+        PathBuf::from("/etc/winlogbeat/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/winlogbeat"),
+        PathBuf::from("/etc/sysconfig/winlogbeat"),
+        PathBuf::from("/etc/systemd/system/winlogbeat.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/winlogbeat/winlogbeat.yml"),
+        PathBuf::from("C:\\ProgramData\\Elastic\\Beats\\winlogbeat\\winlogbeat.yml"),
+        PathBuf::from("C:\\Program Files\\Winlogbeat\\winlogbeat.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_winlogbeat_config_path() -> Option<PathBuf> {
+    let paths = get_winlogbeat_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_winlogbeat_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_winlogbeat_write_path() -> PathBuf {
+    if let Some(p) = get_winlogbeat_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("WINLOGBEAT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let pdata = PathBuf::from("C:\\ProgramData\\Elastic\\Beats\\winlogbeat");
+    if pdata.is_dir() {
+        return pdata.join("winlogbeat.yml");
+    }
+    let etc_wb = PathBuf::from("/etc/winlogbeat");
+    if etc_wb.is_dir() {
+        return etc_wb.join("winlogbeat.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/winlogbeat.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("winlogbeat").join("winlogbeat.yml");
+    }
+    PathBuf::from("/etc/winlogbeat/winlogbeat.yml")
+}
+
+pub fn parse_winlogbeat_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "winlogbeat_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/winlogbeat
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "winlogbeat_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML winlogbeat.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_winlogbeat_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_winlogbeat_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_winlogbeat_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("WINLOGBEAT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WINLOGBEAT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -20028,6 +20393,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Auditbeat Security Auditor",
             "/etc/auditbeat/auditbeat.yml & ~/.auditbeat/auditbeat.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Packetbeat Network Packet Analyzer Daemon Proxy (/etc/packetbeat/packetbeat.yml / ~/.packetbeat/packetbeat.yml / /etc/systemd/system/packetbeat.service.d/http-proxy.conf)
+    if let Some((pb_proxy, pb_path)) = get_packetbeat_proxy() {
+        let ok = verify_proxy_url(&pb_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Packetbeat network packet analyzer daemon proxy `{}` in {} is dead! (Network packet inspection, wire data shipping, and Elasticsearch outputs will fail)",
+                pb_proxy,
+                pb_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Packetbeat Wire Analyzer",
+            format!("{}", pb_path.display()),
+            pb_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (packetbeat fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Packetbeat Wire Analyzer",
+            "/etc/packetbeat/packetbeat.yml & ~/.packetbeat/packetbeat.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Winlogbeat Event Log Shipper Daemon Proxy (/etc/winlogbeat/winlogbeat.yml / ~/.winlogbeat/winlogbeat.yml / /etc/systemd/system/winlogbeat.service.d/http-proxy.conf)
+    if let Some((wb_proxy, wb_path)) = get_winlogbeat_proxy() {
+        let ok = verify_proxy_url(&wb_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Winlogbeat Windows event log shipping daemon proxy `{}` in {} is dead! (Event log streaming, security log telemetry, and Elasticsearch outputs will fail)",
+                wb_proxy,
+                wb_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Winlogbeat Event Shipper",
+            format!("{}", wb_path.display()),
+            wb_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (winlogbeat fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Winlogbeat Event Shipper",
+            "/etc/winlogbeat/winlogbeat.yml & ~/.winlogbeat/winlogbeat.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -24637,5 +25066,69 @@ Environment="AUDITBEAT_HTTP_PROXY=http://10.0.0.77:8080"
         let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_auditbeat_proxy(input_comment), None);
         assert_eq!(parse_auditbeat_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_packetbeat_proxy() {
+        let yaml_conf = r#"
+output.elasticsearch:
+  hosts: ["https://my-es:9200"]
+  proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_packetbeat_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="PACKETBEAT_HTTP_PROXY=http://10.0.0.79:8080"
+"#;
+        assert_eq!(
+            parse_packetbeat_proxy(dropin),
+            Some("http://10.0.0.79:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.80:8080\"\n";
+        assert_eq!(
+            parse_packetbeat_proxy(default_env),
+            Some("http://10.0.0.80:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_packetbeat_proxy(input_comment), None);
+        assert_eq!(parse_packetbeat_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_winlogbeat_proxy() {
+        let yaml_conf = r#"
+output.elasticsearch:
+  hosts: ["https://my-es:9200"]
+  proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_winlogbeat_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="WINLOGBEAT_HTTP_PROXY=http://10.0.0.81:8080"
+"#;
+        assert_eq!(
+            parse_winlogbeat_proxy(dropin),
+            Some("http://10.0.0.81:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.82:8080\"\n";
+        assert_eq!(
+            parse_winlogbeat_proxy(default_env),
+            Some("http://10.0.0.82:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_winlogbeat_proxy(input_comment), None);
+        assert_eq!(parse_winlogbeat_proxy(""), None);
     }
 }

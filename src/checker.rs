@@ -726,6 +726,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "AlmaLinux CDN",
         "https://almalinux.org",
     ),
+    (
+        "Grafana Tempo CDN",
+        "https://grafana.com/oss/tempo",
+    ),
+    (
+        "Graylog CDN",
+        "https://graylog.org",
+    ),
+    (
+        "HashiCorp Consul CDN",
+        "https://www.consul.io",
+    ),
+    (
+        "HashiCorp Vault CDN",
+        "https://www.vaultproject.io",
+    ),
+    (
+        "OpenSearch Forum CDN",
+        "https://forum.opensearch.org",
+    ),
+    (
+        "OpenNebula CDN",
+        "https://opennebula.io",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1580,6 +1604,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "AlmaLinux CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Grafana Tempo CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Graylog CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HashiCorp Consul CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HashiCorp Vault CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenSearch Forum CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenNebula CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
