@@ -371,7 +371,13 @@ enum Commands {
         /// Also configure VictoriaMetrics Agent (vmagent Prometheus-compatible metric scraper & forwarder daemon) proxy (/etc/vmagent/vmagent.yml / ~/.config/vmagent/vmagent.yml / /etc/systemd/system/vmagent.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "victoria-agent", visible_alias = "victoria-metrics-agent")]
         vmagent: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, and vmagent proxy
+        /// Also configure Filebeat (Elastic Filebeat log harvester & shipping daemon) proxy (/etc/filebeat/filebeat.yml / ~/.filebeat/filebeat.yml / /etc/systemd/system/filebeat.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "file-beat", visible_alias = "elastic-filebeat")]
+        filebeat: bool,
+        /// Also configure Metricbeat (Elastic Metricbeat system & service metrics shipping daemon) proxy (/etc/metricbeat/metricbeat.yml / ~/.metricbeat/metricbeat.yml / /etc/systemd/system/metricbeat.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "metric-beat", visible_alias = "elastic-metricbeat")]
+        metricbeat: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, and metricbeat proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -686,7 +692,13 @@ enum Commands {
         /// Also unset VictoriaMetrics Agent (vmagent Prometheus-compatible metric scraper & forwarder daemon) proxy (/etc/vmagent/vmagent.yml / ~/.config/vmagent/vmagent.yml / /etc/systemd/system/vmagent.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "victoria-agent", visible_alias = "victoria-metrics-agent")]
         vmagent: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, and vmagent proxy
+        /// Also unset Filebeat (Elastic Filebeat log harvester & shipping daemon) proxy (/etc/filebeat/filebeat.yml / ~/.filebeat/filebeat.yml / /etc/systemd/system/filebeat.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "file-beat", visible_alias = "elastic-filebeat")]
+        filebeat: bool,
+        /// Also unset Metricbeat (Elastic Metricbeat system & service metrics shipping daemon) proxy (/etc/metricbeat/metricbeat.yml / ~/.metricbeat/metricbeat.yml / /etc/systemd/system/metricbeat.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "metric-beat", visible_alias = "elastic-metricbeat")]
+        metricbeat: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, and metricbeat proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -832,6 +844,8 @@ async fn main() -> Result<()> {
             alertmanager,
             promtail,
             vmagent,
+            filebeat,
+            metricbeat,
             all,
             shell,
         }) => {
@@ -939,6 +953,8 @@ async fn main() -> Result<()> {
                 alertmanager,
                 promtail,
                 vmagent,
+                filebeat,
+                metricbeat,
                 all,
                 shell.as_deref(),
             )
@@ -1047,6 +1063,8 @@ async fn main() -> Result<()> {
             alertmanager,
             promtail,
             vmagent,
+            filebeat,
+            metricbeat,
             all,
             shell,
         }) => {
@@ -1153,6 +1171,8 @@ async fn main() -> Result<()> {
                 alertmanager,
                 promtail,
                 vmagent,
+                filebeat,
+                metricbeat,
                 all,
                 shell.as_deref(),
             )?;
@@ -3939,6 +3959,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { vmagent, .. }) => {
                 assert!(vmagent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_filebeat() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--filebeat"]).unwrap();
+        match cli.command {
+            Some(Commands::On { filebeat, .. }) => {
+                assert!(filebeat);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--elastic-filebeat"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { filebeat, .. }) => {
+                assert!(filebeat);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_filebeat() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--filebeat"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { filebeat, .. }) => {
+                assert!(filebeat);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_metricbeat() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--metricbeat"]).unwrap();
+        match cli.command {
+            Some(Commands::On { metricbeat, .. }) => {
+                assert!(metricbeat);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--elastic-metricbeat"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { metricbeat, .. }) => {
+                assert!(metricbeat);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_metricbeat() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--metricbeat"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { metricbeat, .. }) => {
+                assert!(metricbeat);
             }
             _ => panic!("Expected Off command"),
         }

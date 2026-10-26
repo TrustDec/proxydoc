@@ -682,6 +682,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Netdata Monitoring CDN",
         "https://www.netdata.cloud",
     ),
+    (
+        "Elastic Cloud API",
+        "https://api.elastic.co",
+    ),
+    (
+        "Grafana Pyroscope CDN",
+        "https://pyroscope.io",
+    ),
+    (
+        "OpenSearch CDN",
+        "https://opensearch.org",
+    ),
+    (
+        "OpenSearch Artifacts CDN",
+        "https://artifacts.opensearch.org",
+    ),
+    (
+        "ClickHouse CDN",
+        "https://clickhouse.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1503,6 +1523,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Netdata Monitoring CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Elastic Cloud API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Grafana Pyroscope CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenSearch CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenSearch Artifacts CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ClickHouse CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

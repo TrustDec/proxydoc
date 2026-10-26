@@ -15177,6 +15177,428 @@ pub fn unset_vmagent_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_filebeat_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_filebeat = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "filebeat_http_proxy" {
+                        lines.push(format!("Environment=\"FILEBEAT_HTTP_PROXY={}\"", proxy_url));
+                        replaced_filebeat = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("filebeat_http_proxy=") {
+                lines.push(format!("FILEBEAT_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_filebeat = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_filebeat {
+            lines.push(format!("Environment=\"FILEBEAT_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format: filebeat.yml
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy_url: \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut lines = Vec::new();
+    let mut in_output = false;
+    let mut inserted = false;
+    let has_output = content.lines().any(|l| l.trim().starts_with("output.elasticsearch:"));
+
+    if has_output {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            lines.push(line.to_string());
+            if trimmed.starts_with("output.elasticsearch:") {
+                in_output = true;
+            } else if in_output && !inserted {
+                if !trimmed.starts_with('#') && !trimmed.is_empty() && (line.starts_with(' ') || line.starts_with('\t')) {
+                    lines.push(format!("  proxy_url: \"{}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+        }
+        if !inserted {
+            lines.push(format!("  proxy_url: \"{}\"", proxy_url));
+        }
+    } else {
+        lines.push("output.elasticsearch:".to_string());
+        lines.push(format!("  proxy_url: \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_filebeat_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "filebeat_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("filebeat_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_filebeat_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_filebeat_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_filebeat_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_filebeat_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_filebeat_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_filebeat_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_metricbeat_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_metricbeat = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "metricbeat_http_proxy" {
+                        lines.push(format!("Environment=\"METRICBEAT_HTTP_PROXY={}\"", proxy_url));
+                        replaced_metricbeat = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("metricbeat_http_proxy=") {
+                lines.push(format!("METRICBEAT_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_metricbeat = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_metricbeat {
+            lines.push(format!("Environment=\"METRICBEAT_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format: metricbeat.yml
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy_url: \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut lines = Vec::new();
+    let mut in_output = false;
+    let mut inserted = false;
+    let has_output = content.lines().any(|l| l.trim().starts_with("output.elasticsearch:"));
+
+    if has_output {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            lines.push(line.to_string());
+            if trimmed.starts_with("output.elasticsearch:") {
+                in_output = true;
+            } else if in_output && !inserted {
+                if !trimmed.starts_with('#') && !trimmed.is_empty() && (line.starts_with(' ') || line.starts_with('\t')) {
+                    lines.push(format!("  proxy_url: \"{}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+        }
+        if !inserted {
+            lines.push(format!("  proxy_url: \"{}\"", proxy_url));
+        }
+    } else {
+        lines.push("output.elasticsearch:".to_string());
+        lines.push(format!("  proxy_url: \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_metricbeat_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "metricbeat_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("metricbeat_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_metricbeat_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_metricbeat_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_metricbeat_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_metricbeat_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_metricbeat_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_metricbeat_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -15281,6 +15703,8 @@ pub async fn turn_on(
     alertmanager: bool,
     promtail: bool,
     vmagent: bool,
+    filebeat: bool,
+    metricbeat: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -15384,6 +15808,8 @@ pub async fn turn_on(
     let set_alertmanager = alertmanager || all;
     let set_promtail = promtail || all;
     let set_vmagent = vmagent || all;
+    let set_filebeat = filebeat || all;
+    let set_metricbeat = metricbeat || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -16815,6 +17241,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_filebeat {
+        match set_filebeat_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Filebeat log shipper daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Filebeat log shipper config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_metricbeat {
+        match set_metricbeat_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Metricbeat metrics shipper daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Metricbeat metrics shipper config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -16932,6 +17388,8 @@ pub fn turn_off(
     alertmanager: bool,
     promtail: bool,
     vmagent: bool,
+    filebeat: bool,
+    metricbeat: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -17035,6 +17493,8 @@ pub fn turn_off(
     let unset_alertmanager = alertmanager || all;
     let unset_promtail = promtail || all;
     let unset_vmagent = vmagent || all;
+    let unset_filebeat = filebeat || all;
+    let unset_metricbeat = metricbeat || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -17920,6 +18380,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ VictoriaMetrics Agent daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ VictoriaMetrics Agent proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset VictoriaMetrics Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_filebeat {
+        match unset_filebeat_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Filebeat log shipper daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Filebeat log shipper proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Filebeat log shipper daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_metricbeat {
+        match unset_metricbeat_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Metricbeat metrics shipper daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Metricbeat metrics shipper proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Metricbeat metrics shipper daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -20381,5 +20857,51 @@ global:
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("VMAGENT_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_filebeat_proxy() {
+        let yml_initial = r#"
+output.elasticsearch:
+  hosts: ["https://my-es:9200"]
+"#;
+        let yml_updated = apply_filebeat_proxy(yml_initial, "http://127.0.0.1:7890");
+        assert!(yml_updated.contains("proxy_url: \"http://127.0.0.1:7890\""));
+        let (yml_cleaned, yml_removed) = remove_filebeat_proxy(&yml_updated);
+        assert!(yml_removed);
+        assert!(!yml_cleaned.contains("proxy_url:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_filebeat_proxy(dropin_initial, "http://10.0.0.28:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.28:8080\""));
+        assert!(dropin_updated.contains("Environment=\"FILEBEAT_HTTP_PROXY=http://10.0.0.28:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_filebeat_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("FILEBEAT_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_metricbeat_proxy() {
+        let yml_initial = r#"
+output.elasticsearch:
+  hosts: ["https://my-es:9200"]
+"#;
+        let yml_updated = apply_metricbeat_proxy(yml_initial, "http://127.0.0.1:7890");
+        assert!(yml_updated.contains("proxy_url: \"http://127.0.0.1:7890\""));
+        let (yml_cleaned, yml_removed) = remove_metricbeat_proxy(&yml_updated);
+        assert!(yml_removed);
+        assert!(!yml_cleaned.contains("proxy_url:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_metricbeat_proxy(dropin_initial, "http://10.0.0.29:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.29:8080\""));
+        assert!(dropin_updated.contains("Environment=\"METRICBEAT_HTTP_PROXY=http://10.0.0.29:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_metricbeat_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("METRICBEAT_HTTP_PROXY="));
     }
 }

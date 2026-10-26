@@ -14951,6 +14951,366 @@ pub fn get_vmagent_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_filebeat_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("FILEBEAT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("filebeat").join("filebeat.yml"),
+            home.join(".filebeat").join("filebeat.yml"),
+            home.join(".config").join("systemd").join("user").join("filebeat.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/filebeat/filebeat.yml"),
+        PathBuf::from("/etc/filebeat/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/filebeat"),
+        PathBuf::from("/etc/sysconfig/filebeat"),
+        PathBuf::from("/etc/systemd/system/filebeat.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/filebeat/filebeat.yml"),
+        PathBuf::from("C:\\Program Files\\Filebeat\\filebeat.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_filebeat_config_path() -> Option<PathBuf> {
+    let paths = get_filebeat_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_filebeat_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_filebeat_write_path() -> PathBuf {
+    if let Some(p) = get_filebeat_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("FILEBEAT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_fb = PathBuf::from("/etc/filebeat");
+    if etc_fb.is_dir() {
+        return etc_fb.join("filebeat.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/filebeat.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("filebeat").join("filebeat.yml");
+    }
+    PathBuf::from("/etc/filebeat/filebeat.yml")
+}
+
+pub fn parse_filebeat_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "filebeat_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/filebeat
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "filebeat_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML filebeat.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_filebeat_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_filebeat_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_filebeat_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("FILEBEAT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FILEBEAT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_metricbeat_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("METRICBEAT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("metricbeat").join("metricbeat.yml"),
+            home.join(".metricbeat").join("metricbeat.yml"),
+            home.join(".config").join("systemd").join("user").join("metricbeat.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/metricbeat/metricbeat.yml"),
+        PathBuf::from("/etc/metricbeat/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/metricbeat"),
+        PathBuf::from("/etc/sysconfig/metricbeat"),
+        PathBuf::from("/etc/systemd/system/metricbeat.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/metricbeat/metricbeat.yml"),
+        PathBuf::from("C:\\Program Files\\Metricbeat\\metricbeat.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_metricbeat_config_path() -> Option<PathBuf> {
+    let paths = get_metricbeat_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_metricbeat_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_metricbeat_write_path() -> PathBuf {
+    if let Some(p) = get_metricbeat_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("METRICBEAT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_mb = PathBuf::from("/etc/metricbeat");
+    if etc_mb.is_dir() {
+        return etc_mb.join("metricbeat.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/metricbeat.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("metricbeat").join("metricbeat.yml");
+    }
+    PathBuf::from("/etc/metricbeat/metricbeat.yml")
+}
+
+pub fn parse_metricbeat_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "metricbeat_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/metricbeat
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "metricbeat_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML metricbeat.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_metricbeat_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_metricbeat_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_metricbeat_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("METRICBEAT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:METRICBEAT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -19180,6 +19540,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "VictoriaMetrics Agent",
             "/etc/vmagent/vmagent.yml & ~/.config/vmagent/vmagent.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Filebeat Log Shipper Daemon Proxy (/etc/filebeat/filebeat.yml / ~/.filebeat/filebeat.yml / /etc/systemd/system/filebeat.service.d/http-proxy.conf)
+    if let Some((fb_proxy, fb_path)) = get_filebeat_proxy() {
+        let ok = verify_proxy_url(&fb_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Filebeat log shipper daemon proxy `{}` in {} is dead! (Log harvesting, Elasticsearch outputs, and Logstash forwarders will fail)",
+                fb_proxy,
+                fb_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Filebeat Log Shipper",
+            format!("{}", fb_path.display()),
+            fb_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (filebeat fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Filebeat Log Shipper",
+            "/etc/filebeat/filebeat.yml & ~/.filebeat/filebeat.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Metricbeat Metrics Shipper Daemon Proxy (/etc/metricbeat/metricbeat.yml / ~/.metricbeat/metricbeat.yml / /etc/systemd/system/metricbeat.service.d/http-proxy.conf)
+    if let Some((mb_proxy, mb_path)) = get_metricbeat_proxy() {
+        let ok = verify_proxy_url(&mb_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Metricbeat metrics shipper daemon proxy `{}` in {} is dead! (System metrics harvesting, Elasticsearch outputs, and metric shipping will fail)",
+                mb_proxy,
+                mb_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Metricbeat Metrics Shipper",
+            format!("{}", mb_path.display()),
+            mb_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (metricbeat fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Metricbeat Metrics Shipper",
+            "/etc/metricbeat/metricbeat.yml & ~/.metricbeat/metricbeat.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -23661,5 +24085,69 @@ Environment="VMAGENT_HTTP_PROXY=http://10.0.0.62:8080"
         let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_vmagent_proxy(input_comment), None);
         assert_eq!(parse_vmagent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_filebeat_proxy() {
+        let yaml_conf = r#"
+output.elasticsearch:
+  hosts: ["https://my-es:9200"]
+  proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_filebeat_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="FILEBEAT_HTTP_PROXY=http://10.0.0.71:8080"
+"#;
+        assert_eq!(
+            parse_filebeat_proxy(dropin),
+            Some("http://10.0.0.71:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.72:8080\"\n";
+        assert_eq!(
+            parse_filebeat_proxy(default_env),
+            Some("http://10.0.0.72:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_filebeat_proxy(input_comment), None);
+        assert_eq!(parse_filebeat_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_metricbeat_proxy() {
+        let yaml_conf = r#"
+output.elasticsearch:
+  hosts: ["https://my-es:9200"]
+  proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_metricbeat_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="METRICBEAT_HTTP_PROXY=http://10.0.0.73:8080"
+"#;
+        assert_eq!(
+            parse_metricbeat_proxy(dropin),
+            Some("http://10.0.0.73:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.74:8080\"\n";
+        assert_eq!(
+            parse_metricbeat_proxy(default_env),
+            Some("http://10.0.0.74:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_metricbeat_proxy(input_comment), None);
+        assert_eq!(parse_metricbeat_proxy(""), None);
     }
 }
