@@ -317,7 +317,13 @@ enum Commands {
         /// Also configure Concourse CI Worker (concourse-worker daemon) proxy (/etc/concourse/worker.env / ~/.concourse/worker.env / /etc/systemd/system/concourse-worker.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "concourse", visible_alias = "concourse-worker")]
         concourse_worker: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, and concourse-worker proxy
+        /// Also configure Octopus Deploy Tentacle Agent (tentacle CI/CD deployment runner daemon) proxy (~/octopus/Tentacle/tentacle.config / /etc/octopus/Tentacle/tentacle.config / /etc/systemd/system/tentacle.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tentacle", visible_alias = "octopus", visible_alias = "octopus-tentacle", visible_alias = "tentacle-agent")]
+        tentacle_agent: bool,
+        /// Also configure Puppet Agent (puppet-agent daemon) proxy (/etc/puppetlabs/puppet/puppet.conf / ~/.puppetlabs/etc/puppet/puppet.conf / /etc/systemd/system/puppet.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "puppet", visible_alias = "puppet-agent")]
+        puppet_agent: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, and puppet-agent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -578,7 +584,13 @@ enum Commands {
         /// Also unset Concourse CI Worker (concourse-worker daemon) proxy (/etc/concourse/worker.env / ~/.concourse/worker.env / /etc/systemd/system/concourse-worker.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "concourse", visible_alias = "concourse-worker")]
         concourse_worker: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, and concourse-worker proxy
+        /// Also unset Octopus Deploy Tentacle Agent (tentacle CI/CD deployment runner daemon) proxy (~/octopus/Tentacle/tentacle.config / /etc/octopus/Tentacle/tentacle.config / /etc/systemd/system/tentacle.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tentacle", visible_alias = "octopus", visible_alias = "octopus-tentacle", visible_alias = "tentacle-agent")]
+        tentacle_agent: bool,
+        /// Also unset Puppet Agent (puppet-agent daemon) proxy (/etc/puppetlabs/puppet/puppet.conf / ~/.puppetlabs/etc/puppet/puppet.conf / /etc/systemd/system/puppet.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "puppet", visible_alias = "puppet-agent")]
+        puppet_agent: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, and puppet-agent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -706,6 +718,8 @@ async fn main() -> Result<()> {
             bamboo_agent,
             tfc_agent,
             concourse_worker,
+            tentacle_agent,
+            puppet_agent,
             all,
             shell,
         }) => {
@@ -795,6 +809,8 @@ async fn main() -> Result<()> {
                 bamboo_agent,
                 tfc_agent,
                 concourse_worker,
+                tentacle_agent,
+                puppet_agent,
                 all,
                 shell.as_deref(),
             )
@@ -885,6 +901,8 @@ async fn main() -> Result<()> {
             bamboo_agent,
             tfc_agent,
             concourse_worker,
+            tentacle_agent,
+            puppet_agent,
             all,
             shell,
         }) => {
@@ -973,6 +991,8 @@ async fn main() -> Result<()> {
                 bamboo_agent,
                 tfc_agent,
                 concourse_worker,
+                tentacle_agent,
+                puppet_agent,
                 all,
                 shell.as_deref(),
             )?;
@@ -3211,6 +3231,74 @@ mod tests {
         match cli.command {
             Some(Commands::Off { concourse_worker, .. }) => {
                 assert!(concourse_worker);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_tentacle_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--tentacle-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { tentacle_agent, .. }) => {
+                assert!(tentacle_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--tentacle"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { tentacle_agent, .. }) => {
+                assert!(tentacle_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--octopus"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { tentacle_agent, .. }) => {
+                assert!(tentacle_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_tentacle_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--tentacle-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { tentacle_agent, .. }) => {
+                assert!(tentacle_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_puppet_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--puppet-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { puppet_agent, .. }) => {
+                assert!(puppet_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--puppet"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { puppet_agent, .. }) => {
+                assert!(puppet_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_puppet_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--puppet-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { puppet_agent, .. }) => {
+                assert!(puppet_agent);
             }
             _ => panic!("Expected Off command"),
         }

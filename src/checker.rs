@@ -514,6 +514,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "DragonFly BSD CDN",
         "https://mirror-master.dragonflybsd.org",
     ),
+    (
+        "Octopus Deploy API & Portal",
+        "https://octopus.com",
+    ),
+    (
+        "Puppet Forge API",
+        "https://forgeapi.puppet.com/v3/releases",
+    ),
+    (
+        "Ansible Galaxy API",
+        "https://galaxy.ansible.com/api/",
+    ),
+    (
+        "CentOS Stream Mirror CDN",
+        "https://mirror.stream.centos.org",
+    ),
+    (
+        "Debian Security CDN",
+        "https://security.debian.org",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {

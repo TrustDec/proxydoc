@@ -11236,6 +11236,551 @@ pub fn unset_concourse_worker_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_tentacle_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let (proxy_host, proxy_port) = extract_host_port(proxy_url);
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let is_xml = content.contains("<octopus-settings") || content.contains("<set key=") || content.trim_start().starts_with("<?xml");
+    if is_xml {
+        let mut lines = Vec::new();
+        let mut set_host = false;
+        let mut set_port = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            if trim.contains("Tentacle.Services.ProxyHost") {
+                lines.push(format!("  <set key=\"Tentacle.Services.ProxyHost\">{}</set>", proxy_host));
+                set_host = true;
+                continue;
+            }
+            if trim.contains("Tentacle.Services.ProxyPort") {
+                lines.push(format!("  <set key=\"Tentacle.Services.ProxyPort\">{}</set>", proxy_port));
+                set_port = true;
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !set_host || !set_port {
+            let mut new_lines = Vec::new();
+            let mut inserted = false;
+            for line in lines {
+                if !inserted && line.trim().eq_ignore_ascii_case("</octopus-settings>") {
+                    if !set_host {
+                        new_lines.push(format!("  <set key=\"Tentacle.Services.ProxyHost\">{}</set>", proxy_host));
+                    }
+                    if !set_port {
+                        new_lines.push(format!("  <set key=\"Tentacle.Services.ProxyPort\">{}</set>", proxy_port));
+                    }
+                    inserted = true;
+                }
+                new_lines.push(line);
+            }
+            if !inserted {
+                if !set_host {
+                    new_lines.push(format!("  <set key=\"Tentacle.Services.ProxyHost\">{}</set>", proxy_host));
+                }
+                if !set_port {
+                    new_lines.push(format!("  <set key=\"Tentacle.Services.ProxyPort\">{}</set>", proxy_port));
+                }
+            }
+            return new_lines.join("\n") + "\n";
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_octo_host = false;
+        let mut replaced_octo_port = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "octopus_proxy_host" || k_low == "tentacle_proxy_host" {
+                        lines.push(format!("Environment=\"OCTOPUS_PROXY_HOST={}\"", proxy_host));
+                        replaced_octo_host = true;
+                        continue;
+                    } else if k_low == "octopus_proxy_port" || k_low == "tentacle_proxy_port" {
+                        lines.push(format!("Environment=\"OCTOPUS_PROXY_PORT={}\"", proxy_port));
+                        replaced_octo_port = true;
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_octo_host {
+            lines.push(format!("Environment=\"OCTOPUS_PROXY_HOST={}\"", proxy_host));
+        }
+        if !replaced_octo_port {
+            lines.push(format!("Environment=\"OCTOPUS_PROXY_PORT={}\"", proxy_port));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Default key=value / env format
+    let mut lines = Vec::new();
+    let mut set_http = false;
+    let mut set_https = false;
+    let mut set_octo_host = false;
+    let mut set_octo_port = false;
+    let mut set_no = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "http_proxy" {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                set_http = true;
+                continue;
+            } else if key == "https_proxy" {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                set_https = true;
+                continue;
+            } else if key == "octopus_proxy_host" || key == "tentacle_proxy_host" {
+                lines.push(format!("OCTOPUS_PROXY_HOST=\"{}\"", proxy_host));
+                set_octo_host = true;
+                continue;
+            } else if key == "octopus_proxy_port" || key == "tentacle_proxy_port" {
+                lines.push(format!("OCTOPUS_PROXY_PORT=\"{}\"", proxy_port));
+                set_octo_port = true;
+                continue;
+            } else if key == "no_proxy" {
+                lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+                set_no = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !set_http {
+        lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_https {
+        lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+    }
+    if !set_octo_host {
+        lines.push(format!("OCTOPUS_PROXY_HOST=\"{}\"", proxy_host));
+    }
+    if !set_octo_port {
+        lines.push(format!("OCTOPUS_PROXY_PORT=\"{}\"", proxy_port));
+    }
+    if !set_no {
+        lines.push(format!("NO_PROXY=\"{}\"", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_tentacle_agent_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if trim.contains("Tentacle.Services.ProxyHost")
+            || trim.contains("Tentacle.Services.ProxyPort")
+            || trim.contains("Tentacle.Services.ProxyUsername")
+            || trim.contains("Tentacle.Services.ProxyPassword")
+        {
+            changed = true;
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "octopus_proxy_host"
+                    || k_low == "octopus_proxy_port"
+                    || k_low == "tentacle_proxy_host"
+                    || k_low == "tentacle_proxy_port"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "octopus_proxy_host"
+                || key == "octopus_proxy_port"
+                || key == "tentacle_proxy_host"
+                || key == "tentacle_proxy_port"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_tentacle_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tentacle_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_tentacle_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_tentacle_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tentacle_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tentacle_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_puppet_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let (proxy_host, proxy_port) = extract_host_port(proxy_url);
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_host = false;
+        let mut replaced_port = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "http_proxy_host" || k_low == "puppet_proxy_host" {
+                        lines.push(format!("Environment=\"HTTP_PROXY_HOST={}\"", proxy_host));
+                        replaced_host = true;
+                        continue;
+                    } else if k_low == "http_proxy_port" || k_low == "puppet_proxy_port" {
+                        lines.push(format!("Environment=\"HTTP_PROXY_PORT={}\"", proxy_port));
+                        replaced_port = true;
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_host {
+            lines.push(format!("Environment=\"HTTP_PROXY_HOST={}\"", proxy_host));
+        }
+        if !replaced_port {
+            lines.push(format!("Environment=\"HTTP_PROXY_PORT={}\"", proxy_port));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // puppet.conf INI format
+    let has_main_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[main]"));
+    let mut lines = Vec::new();
+    let mut set_host = false;
+    let mut set_port = false;
+    let mut set_no = false;
+    let mut in_main_section = !has_main_section;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('[') && trim.ends_with(']') {
+            let sec = trim[1..trim.len() - 1].trim();
+            in_main_section = sec.eq_ignore_ascii_case("main");
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_main_section {
+            if let Some((k, _)) = trim.split_once('=') {
+                let key = k.trim().to_lowercase();
+                if key == "http_proxy_host" || key == "puppet_proxy_host" {
+                    lines.push(format!("http_proxy_host = {}", proxy_host));
+                    set_host = true;
+                    continue;
+                } else if key == "http_proxy_port" || key == "puppet_proxy_port" {
+                    lines.push(format!("http_proxy_port = {}", proxy_port));
+                    set_port = true;
+                    continue;
+                } else if key == "no_proxy" {
+                    lines.push(format!("no_proxy = {}", no_proxy_def));
+                    set_no = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if has_main_section {
+        if !set_host || !set_port || !set_no {
+            let mut new_lines = Vec::new();
+            let mut inserted = false;
+            for line in lines {
+                new_lines.push(line.clone());
+                if !inserted && line.trim().eq_ignore_ascii_case("[main]") {
+                    if !set_host {
+                        new_lines.push(format!("http_proxy_host = {}", proxy_host));
+                    }
+                    if !set_port {
+                        new_lines.push(format!("http_proxy_port = {}", proxy_port));
+                    }
+                    if !set_no {
+                        new_lines.push(format!("no_proxy = {}", no_proxy_def));
+                    }
+                    inserted = true;
+                }
+            }
+            return new_lines.join("\n") + "\n";
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    let mut res = Vec::new();
+    res.push("[main]".to_string());
+    if !set_host {
+        res.push(format!("http_proxy_host = {}", proxy_host));
+    }
+    if !set_port {
+        res.push(format!("http_proxy_port = {}", proxy_port));
+    }
+    if !set_no {
+        res.push(format!("no_proxy = {}", no_proxy_def));
+    }
+    for line in lines {
+        if !line.trim().is_empty() {
+            res.push(line);
+        }
+    }
+    res.join("\n") + "\n"
+}
+
+pub fn remove_puppet_agent_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy_host"
+                    || k_low == "http_proxy_port"
+                    || k_low == "puppet_proxy_host"
+                    || k_low == "puppet_proxy_port"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "http_proxy_host"
+                || key == "http_proxy_port"
+                || key == "puppet_proxy_host"
+                || key == "puppet_proxy_port"
+                || key == "http_proxy_user"
+                || key == "http_proxy_password"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_puppet_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_puppet_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_puppet_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_puppet_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_puppet_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_puppet_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -11322,6 +11867,8 @@ pub async fn turn_on(
     bamboo_agent: bool,
     tfc_agent: bool,
     concourse_worker: bool,
+    tentacle_agent: bool,
+    puppet_agent: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -11407,6 +11954,8 @@ pub async fn turn_on(
     let set_bamboo_agent = bamboo_agent || all;
     let set_tfc_agent = tfc_agent || all;
     let set_concourse_worker = concourse_worker || all;
+    let set_tentacle_agent = tentacle_agent || all;
+    let set_puppet_agent = puppet_agent || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -12568,6 +13117,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_tentacle_agent {
+        match set_tentacle_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Octopus Deploy Tentacle Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Octopus Deploy Tentacle Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_puppet_agent {
+        match set_puppet_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Puppet Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Puppet Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -12667,6 +13246,8 @@ pub fn turn_off(
     bamboo_agent: bool,
     tfc_agent: bool,
     concourse_worker: bool,
+    tentacle_agent: bool,
+    puppet_agent: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -12752,6 +13333,8 @@ pub fn turn_off(
     let unset_bamboo_agent = bamboo_agent || all;
     let unset_tfc_agent = tfc_agent || all;
     let unset_concourse_worker = concourse_worker || all;
+    let unset_tentacle_agent = tentacle_agent || all;
+    let unset_puppet_agent = puppet_agent || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -13493,6 +14076,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Concourse CI Worker daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Concourse CI Worker proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Concourse CI Worker daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tentacle_agent {
+        match unset_tentacle_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Octopus Deploy Tentacle Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Octopus Deploy Tentacle Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Octopus Deploy Tentacle Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_puppet_agent {
+        match unset_puppet_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Puppet Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Puppet Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Puppet Agent daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -15477,5 +16076,59 @@ check_interval = 0
         let (dropin_cleaned, dropin_removed) = remove_concourse_worker_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("CONCOURSE_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tentacle_agent_proxy() {
+        let xml_initial = r#"<?xml version="1.0" encoding="utf-8"?>
+<octopus-settings xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <set key="Tentacle.Communication.ListenPort">10933</set>
+</octopus-settings>
+"#;
+        let xml_updated = apply_tentacle_agent_proxy(xml_initial, "http://127.0.0.1:7890");
+        assert!(xml_updated.contains("<set key=\"Tentacle.Services.ProxyHost\">127.0.0.1</set>"));
+        assert!(xml_updated.contains("<set key=\"Tentacle.Services.ProxyPort\">7890</set>"));
+        let (xml_cleaned, xml_removed) = remove_tentacle_agent_proxy(&xml_updated);
+        assert!(xml_removed);
+        assert!(!xml_cleaned.contains("Tentacle.Services.ProxyHost"));
+        assert!(!xml_cleaned.contains("Tentacle.Services.ProxyPort"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_tentacle_agent_proxy(dropin_initial, "http://10.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
+        assert!(dropin_updated.contains("Environment=\"OCTOPUS_PROXY_HOST=10.0.0.1\""));
+        assert!(dropin_updated.contains("Environment=\"OCTOPUS_PROXY_PORT=8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_tentacle_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("OCTOPUS_PROXY_HOST="));
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_puppet_agent_proxy() {
+        let ini_initial = r#"
+[main]
+certname = agent.local
+server = puppet.local
+"#;
+        let ini_updated = apply_puppet_agent_proxy(ini_initial, "http://127.0.0.1:7890");
+        assert!(ini_updated.contains("http_proxy_host = 127.0.0.1"));
+        assert!(ini_updated.contains("http_proxy_port = 7890"));
+        let (ini_cleaned, ini_removed) = remove_puppet_agent_proxy(&ini_updated);
+        assert!(ini_removed);
+        assert!(!ini_cleaned.contains("http_proxy_host"));
+        assert!(!ini_cleaned.contains("http_proxy_port"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_puppet_agent_proxy(dropin_initial, "http://10.0.0.2:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.2:8080\""));
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY_HOST=10.0.0.2\""));
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY_PORT=8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_puppet_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("HTTP_PROXY_HOST="));
     }
 }

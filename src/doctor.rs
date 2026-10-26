@@ -11199,6 +11199,482 @@ pub fn get_concourse_worker_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_tentacle_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("OCTOPUS_TENTACLE_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TENTACLE_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("OCTOPUS_HOME") {
+        let p = PathBuf::from(dir.trim()).join("Tentacle").join("tentacle.config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TENTACLE_HOME") {
+        let p = PathBuf::from(dir.trim()).join("tentacle.config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".octopus").join("Tentacle").join("tentacle.config"),
+            home.join(".octopus").join("default").join("tentacle.config"),
+            home.join(".config").join("octopus").join("Tentacle").join("tentacle.config"),
+            home.join(".config").join("systemd").join("user").join("tentacle.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("octopus-tentacle.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/octopus/Tentacle/tentacle.config"),
+        PathBuf::from("/etc/octopus/default/tentacle.config"),
+        PathBuf::from("/etc/octopus/tentacle.config"),
+        PathBuf::from("/etc/default/tentacle"),
+        PathBuf::from("/etc/sysconfig/tentacle"),
+        PathBuf::from("/etc/systemd/system/tentacle.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/octopus-tentacle.service.d/http-proxy.conf"),
+        PathBuf::from("/opt/octopus/tentacle/tentacle.config"),
+        PathBuf::from("/var/lib/octopus/tentacle/tentacle.config"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_tentacle_agent_config_path() -> Option<PathBuf> {
+    let paths = get_tentacle_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tentacle_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tentacle_agent_write_path() -> PathBuf {
+    if let Some(p) = get_tentacle_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("OCTOPUS_TENTACLE_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TENTACLE_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_dir = PathBuf::from("/etc/octopus/Tentacle");
+    if etc_dir.is_dir() {
+        return etc_dir.join("tentacle.config");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tentacle.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".octopus").join("Tentacle").join("tentacle.config");
+    }
+    PathBuf::from("/etc/octopus/Tentacle/tentacle.config")
+}
+
+pub fn parse_tentacle_agent_proxy(content: &str) -> Option<String> {
+    let mut host: Option<String> = None;
+    let mut port: Option<String> = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "octopus_proxy_host"
+                        || k_low == "tentacle_proxy_host"
+                    {
+                        let h = v.trim_matches('"').trim_matches('\'').trim();
+                        if !h.is_empty() {
+                            host = Some(h.to_string());
+                        }
+                    } else if k_low == "octopus_proxy_port"
+                        || k_low == "tentacle_proxy_port"
+                    {
+                        let p = v.trim_matches('"').trim_matches('\'').trim();
+                        if !p.is_empty() {
+                            port = Some(p.to_string());
+                        }
+                    } else if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // XML format: <set key="Tentacle.Services.ProxyHost">127.0.0.1</set>
+        if trim.contains("Tentacle.Services.ProxyHost") {
+            if let Some(h) = trim.split('>').nth(1).and_then(|s| s.split('<').next()) {
+                let h_clean = h.trim();
+                if !h_clean.is_empty() {
+                    host = Some(h_clean.to_string());
+                }
+            }
+        }
+        if trim.contains("Tentacle.Services.ProxyPort") {
+            if let Some(p) = trim.split('>').nth(1).and_then(|s| s.split('<').next()) {
+                let p_clean = p.trim();
+                if !p_clean.is_empty() {
+                    port = Some(p_clean.to_string());
+                }
+            }
+        }
+
+        // Standard XML <httpProxyHost> / <proxyHost>
+        if (trim.contains("<httpProxyHost>") && trim.contains("</httpProxyHost>"))
+            || (trim.contains("<proxyHost>") && trim.contains("</proxyHost>"))
+        {
+            let h = trim
+                .trim_start_matches(|c| c != '>')
+                .trim_start_matches('>')
+                .trim_end_matches(|c| c != '<')
+                .trim_end_matches('<')
+                .trim();
+            if !h.is_empty() {
+                host = Some(h.to_string());
+            }
+        }
+        if (trim.contains("<httpProxyPort>") && trim.contains("</httpProxyPort>"))
+            || (trim.contains("<proxyPort>") && trim.contains("</proxyPort>"))
+        {
+            let p = trim
+                .trim_start_matches(|c| c != '>')
+                .trim_start_matches('>')
+                .trim_end_matches(|c| c != '<')
+                .trim_end_matches('<')
+                .trim();
+            if !p.is_empty() {
+                port = Some(p.to_string());
+            }
+        }
+
+        // Key=value format / JSON format
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if key == "octopus_proxy_host" || key == "tentacle_proxy_host" {
+                if !val.is_empty() {
+                    host = Some(val.to_string());
+                }
+            } else if key == "octopus_proxy_port" || key == "tentacle_proxy_port" {
+                if !val.is_empty() {
+                    port = Some(val.to_string());
+                }
+            } else if (key == "http_proxy" || key == "https_proxy" || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        } else if let Some((k, v)) = trim.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches(',').trim().trim_matches('"').trim_matches('\'').trim();
+            if key == "tentacle.services.proxyhost" || key == "octopus_proxy_host" {
+                if !val.is_empty() {
+                    host = Some(val.to_string());
+                }
+            } else if key == "tentacle.services.proxyport" || key == "octopus_proxy_port" {
+                if !val.is_empty() {
+                    port = Some(val.to_string());
+                }
+            }
+        }
+    }
+
+    if let Some(h) = host {
+        let p = port.as_deref().unwrap_or("80");
+        return Some(if h.starts_with("http://") || h.starts_with("https://") {
+            format!("{}:{}", h, p)
+        } else {
+            format!("http://{}:{}", h, p)
+        });
+    }
+
+    None
+}
+
+pub fn get_tentacle_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tentacle_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tentacle_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("OCTOPUS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OCTOPUS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TENTACLE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TENTACLE_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_puppet_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PUPPET_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PUPPET_DIR") {
+        let p = PathBuf::from(dir.trim()).join("puppet.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".puppetlabs").join("etc").join("puppet").join("puppet.conf"),
+            home.join(".puppet").join("puppet.conf"),
+            home.join(".config").join("puppet").join("puppet.conf"),
+            home.join(".config").join("systemd").join("user").join("puppet.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/puppetlabs/puppet/puppet.conf"),
+        PathBuf::from("/etc/puppet/puppet.conf"),
+        PathBuf::from("/etc/default/puppet"),
+        PathBuf::from("/etc/sysconfig/puppet"),
+        PathBuf::from("/etc/systemd/system/puppet.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/puppet-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/opt/puppetlabs/puppet/puppet.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_puppet_agent_config_path() -> Option<PathBuf> {
+    let paths = get_puppet_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_puppet_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_puppet_agent_write_path() -> PathBuf {
+    if let Some(p) = get_puppet_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PUPPET_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_puppetlabs = PathBuf::from("/etc/puppetlabs/puppet");
+    if etc_puppetlabs.is_dir() {
+        return etc_puppetlabs.join("puppet.conf");
+    }
+    let etc_puppet = PathBuf::from("/etc/puppet");
+    if etc_puppet.is_dir() {
+        return etc_puppet.join("puppet.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/puppet.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".puppetlabs").join("etc").join("puppet").join("puppet.conf");
+    }
+    PathBuf::from("/etc/puppetlabs/puppet/puppet.conf")
+}
+
+pub fn parse_puppet_agent_proxy(content: &str) -> Option<String> {
+    let mut host: Option<String> = None;
+    let mut port: Option<String> = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "http_proxy_host" || k_low == "puppet_proxy_host" {
+                        let h = v.trim_matches('"').trim_matches('\'').trim();
+                        if !h.is_empty() {
+                            host = Some(h.to_string());
+                        }
+                    } else if k_low == "http_proxy_port" || k_low == "puppet_proxy_port" {
+                        let p = v.trim_matches('"').trim_matches('\'').trim();
+                        if !p.is_empty() {
+                            port = Some(p.to_string());
+                        }
+                    } else if k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // INI key = val format in puppet.conf (http_proxy_host = 127.0.0.1, http_proxy_port = 7890)
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if key == "http_proxy_host" || key == "puppet_proxy_host" {
+                if !val.is_empty() {
+                    host = Some(val.to_string());
+                }
+            } else if key == "http_proxy_port" || key == "puppet_proxy_port" {
+                if !val.is_empty() {
+                    port = Some(val.to_string());
+                }
+            } else if (key == "http_proxy" || key == "https_proxy" || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+
+    if let Some(h) = host {
+        let p = port.as_deref().unwrap_or("80");
+        return Some(if h.starts_with("http://") || h.starts_with("https://") {
+            format!("{}:{}", h, p)
+        } else {
+            format!("http://{}:{}", h, p)
+        });
+    }
+
+    None
+}
+
+pub fn get_puppet_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_puppet_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_puppet_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PUPPET_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PUPPET_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -14852,6 +15328,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Concourse CI Worker",
             "/etc/concourse/worker.env & /etc/systemd/system/concourse-worker.service.d/http-proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Octopus Deploy Tentacle Agent CI/CD Daemon Proxy (~/.octopus/Tentacle/tentacle.config / /etc/octopus/Tentacle/tentacle.config / /etc/systemd/system/tentacle.service.d/http-proxy.conf)
+    if let Some((tentacle_proxy, tentacle_path)) = get_tentacle_agent_proxy() {
+        let ok = verify_proxy_url(&tentacle_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Octopus Deploy Tentacle Agent daemon proxy `{}` in {} is dead! (Deployment tasks and package downloads will fail)",
+                tentacle_proxy,
+                tentacle_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Octopus Tentacle CI",
+            format!("{}", tentacle_path.display()),
+            tentacle_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tentacle fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Octopus Tentacle CI",
+            "/etc/octopus/Tentacle/tentacle.config & ~/.octopus/Tentacle/tentacle.config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Puppet Agent Infrastructure Daemon Proxy (/etc/puppetlabs/puppet/puppet.conf / ~/.puppetlabs/etc/puppet/puppet.conf / /etc/systemd/system/puppet.service.d/http-proxy.conf)
+    if let Some((puppet_proxy, puppet_path)) = get_puppet_agent_proxy() {
+        let ok = verify_proxy_url(&puppet_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Puppet Agent daemon proxy `{}` in {} is dead! (Catalog runs and module downloads will fail)",
+                puppet_proxy,
+                puppet_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Puppet Agent Infra",
+            format!("{}", puppet_path.display()),
+            puppet_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (puppet agent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Puppet Agent Infra",
+            "/etc/puppetlabs/puppet/puppet.conf & ~/.puppetlabs/etc/puppet/puppet.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -18640,5 +19180,62 @@ Environment="NO_PROXY=localhost,127.0.0.1"
         let input_comment = "# CONCOURSE_HTTP_PROXY=http://127.0.0.1:7890\n";
         assert_eq!(parse_concourse_worker_proxy(input_comment), None);
         assert_eq!(parse_concourse_worker_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tentacle_agent_proxy() {
+        let xml_file = r#"<?xml version="1.0" encoding="utf-8"?>
+<octopus-settings xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <set key="Tentacle.Services.ProxyHost">127.0.0.1</set>
+  <set key="Tentacle.Services.ProxyPort">7890</set>
+</octopus-settings>"#;
+        assert_eq!(
+            parse_tentacle_agent_proxy(xml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.1:8080"
+Environment="OCTOPUS_PROXY_HOST=10.0.0.1"
+Environment="OCTOPUS_PROXY_PORT=8080"
+"#;
+        assert_eq!(
+            parse_tentacle_agent_proxy(dropin),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+
+        let input_comment = "# OCTOPUS_PROXY_HOST=127.0.0.1\n";
+        assert_eq!(parse_tentacle_agent_proxy(input_comment), None);
+        assert_eq!(parse_tentacle_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_puppet_agent_proxy() {
+        let ini_file = r#"
+[main]
+certname = agent1.example.com
+server = puppet.example.com
+http_proxy_host = 127.0.0.1
+http_proxy_port = 7890
+"#;
+        assert_eq!(
+            parse_puppet_agent_proxy(ini_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.2:8080"
+Environment="NO_PROXY=localhost,127.0.0.1"
+"#;
+        assert_eq!(
+            parse_puppet_agent_proxy(dropin),
+            Some("http://10.0.0.2:8080".to_string())
+        );
+
+        let input_comment = "# http_proxy_host = 127.0.0.1\n";
+        assert_eq!(parse_puppet_agent_proxy(input_comment), None);
+        assert_eq!(parse_puppet_agent_proxy(""), None);
     }
 }
