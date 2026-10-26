@@ -377,7 +377,13 @@ enum Commands {
         /// Also configure Metricbeat (Elastic Metricbeat system & service metrics shipping daemon) proxy (/etc/metricbeat/metricbeat.yml / ~/.metricbeat/metricbeat.yml / /etc/systemd/system/metricbeat.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "metric-beat", visible_alias = "elastic-metricbeat")]
         metricbeat: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, and metricbeat proxy
+        /// Also configure Heartbeat (Elastic Heartbeat uptime & synthetic monitoring daemon) proxy (/etc/heartbeat/heartbeat.yml / ~/.heartbeat/heartbeat.yml / /etc/systemd/system/heartbeat.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "heart-beat", visible_alias = "elastic-heartbeat")]
+        heartbeat: bool,
+        /// Also configure Auditbeat (Elastic Auditbeat audit data & security monitoring daemon) proxy (/etc/auditbeat/auditbeat.yml / ~/.auditbeat/auditbeat.yml / /etc/systemd/system/auditbeat.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "audit-beat", visible_alias = "elastic-auditbeat")]
+        auditbeat: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, and auditbeat proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -698,7 +704,13 @@ enum Commands {
         /// Also unset Metricbeat (Elastic Metricbeat system & service metrics shipping daemon) proxy (/etc/metricbeat/metricbeat.yml / ~/.metricbeat/metricbeat.yml / /etc/systemd/system/metricbeat.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "metric-beat", visible_alias = "elastic-metricbeat")]
         metricbeat: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, and metricbeat proxy
+        /// Also unset Heartbeat (Elastic Heartbeat uptime & synthetic monitoring daemon) proxy (/etc/heartbeat/heartbeat.yml / ~/.heartbeat/heartbeat.yml / /etc/systemd/system/heartbeat.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "heart-beat", visible_alias = "elastic-heartbeat")]
+        heartbeat: bool,
+        /// Also unset Auditbeat (Elastic Auditbeat audit data & security monitoring daemon) proxy (/etc/auditbeat/auditbeat.yml / ~/.auditbeat/auditbeat.yml / /etc/systemd/system/auditbeat.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "audit-beat", visible_alias = "elastic-auditbeat")]
+        auditbeat: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, and auditbeat proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -846,6 +858,8 @@ async fn main() -> Result<()> {
             vmagent,
             filebeat,
             metricbeat,
+            heartbeat,
+            auditbeat,
             all,
             shell,
         }) => {
@@ -955,6 +969,8 @@ async fn main() -> Result<()> {
                 vmagent,
                 filebeat,
                 metricbeat,
+                heartbeat,
+                auditbeat,
                 all,
                 shell.as_deref(),
             )
@@ -1065,6 +1081,8 @@ async fn main() -> Result<()> {
             vmagent,
             filebeat,
             metricbeat,
+            heartbeat,
+            auditbeat,
             all,
             shell,
         }) => {
@@ -1173,6 +1191,8 @@ async fn main() -> Result<()> {
                 vmagent,
                 filebeat,
                 metricbeat,
+                heartbeat,
+                auditbeat,
                 all,
                 shell.as_deref(),
             )?;
@@ -4019,6 +4039,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { metricbeat, .. }) => {
                 assert!(metricbeat);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_heartbeat() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--heartbeat"]).unwrap();
+        match cli.command {
+            Some(Commands::On { heartbeat, .. }) => {
+                assert!(heartbeat);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--elastic-heartbeat"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { heartbeat, .. }) => {
+                assert!(heartbeat);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_heartbeat() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--heartbeat"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { heartbeat, .. }) => {
+                assert!(heartbeat);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_auditbeat() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--auditbeat"]).unwrap();
+        match cli.command {
+            Some(Commands::On { auditbeat, .. }) => {
+                assert!(auditbeat);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--elastic-auditbeat"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { auditbeat, .. }) => {
+                assert!(auditbeat);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_auditbeat() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--auditbeat"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { auditbeat, .. }) => {
+                assert!(auditbeat);
             }
             _ => panic!("Expected Off command"),
         }

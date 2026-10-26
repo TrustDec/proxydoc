@@ -15311,6 +15311,366 @@ pub fn get_metricbeat_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_heartbeat_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("HEARTBEAT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("heartbeat").join("heartbeat.yml"),
+            home.join(".heartbeat").join("heartbeat.yml"),
+            home.join(".config").join("systemd").join("user").join("heartbeat.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/heartbeat/heartbeat.yml"),
+        PathBuf::from("/etc/heartbeat/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/heartbeat"),
+        PathBuf::from("/etc/sysconfig/heartbeat"),
+        PathBuf::from("/etc/systemd/system/heartbeat.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/heartbeat/heartbeat.yml"),
+        PathBuf::from("C:\\Program Files\\Heartbeat\\heartbeat.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_heartbeat_config_path() -> Option<PathBuf> {
+    let paths = get_heartbeat_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_heartbeat_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_heartbeat_write_path() -> PathBuf {
+    if let Some(p) = get_heartbeat_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("HEARTBEAT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_hb = PathBuf::from("/etc/heartbeat");
+    if etc_hb.is_dir() {
+        return etc_hb.join("heartbeat.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/heartbeat.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("heartbeat").join("heartbeat.yml");
+    }
+    PathBuf::from("/etc/heartbeat/heartbeat.yml")
+}
+
+pub fn parse_heartbeat_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "heartbeat_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/heartbeat
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "heartbeat_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML heartbeat.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_heartbeat_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_heartbeat_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_heartbeat_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("HEARTBEAT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HEARTBEAT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_auditbeat_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("AUDITBEAT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("auditbeat").join("auditbeat.yml"),
+            home.join(".auditbeat").join("auditbeat.yml"),
+            home.join(".config").join("systemd").join("user").join("auditbeat.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/auditbeat/auditbeat.yml"),
+        PathBuf::from("/etc/auditbeat/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/auditbeat"),
+        PathBuf::from("/etc/sysconfig/auditbeat"),
+        PathBuf::from("/etc/systemd/system/auditbeat.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/auditbeat/auditbeat.yml"),
+        PathBuf::from("C:\\Program Files\\Auditbeat\\auditbeat.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_auditbeat_config_path() -> Option<PathBuf> {
+    let paths = get_auditbeat_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_auditbeat_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_auditbeat_write_path() -> PathBuf {
+    if let Some(p) = get_auditbeat_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("AUDITBEAT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_ab = PathBuf::from("/etc/auditbeat");
+    if etc_ab.is_dir() {
+        return etc_ab.join("auditbeat.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/auditbeat.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("auditbeat").join("auditbeat.yml");
+    }
+    PathBuf::from("/etc/auditbeat/auditbeat.yml")
+}
+
+pub fn parse_auditbeat_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "auditbeat_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/auditbeat
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "auditbeat_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML auditbeat.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_auditbeat_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_auditbeat_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_auditbeat_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("AUDITBEAT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AUDITBEAT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -19604,6 +19964,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Metricbeat Metrics Shipper",
             "/etc/metricbeat/metricbeat.yml & ~/.metricbeat/metricbeat.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Heartbeat Uptime Monitor Daemon Proxy (/etc/heartbeat/heartbeat.yml / ~/.heartbeat/heartbeat.yml / /etc/systemd/system/heartbeat.service.d/http-proxy.conf)
+    if let Some((hb_proxy, hb_path)) = get_heartbeat_proxy() {
+        let ok = verify_proxy_url(&hb_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Heartbeat uptime monitor daemon proxy `{}` in {} is dead! (Uptime checks, HTTP/TCP monitors, and Elasticsearch outputs will fail)",
+                hb_proxy,
+                hb_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Heartbeat Uptime Monitor",
+            format!("{}", hb_path.display()),
+            hb_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (heartbeat fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Heartbeat Uptime Monitor",
+            "/etc/heartbeat/heartbeat.yml & ~/.heartbeat/heartbeat.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Auditbeat Security Auditor Daemon Proxy (/etc/auditbeat/auditbeat.yml / ~/.auditbeat/auditbeat.yml / /etc/systemd/system/auditbeat.service.d/http-proxy.conf)
+    if let Some((ab_proxy, ab_path)) = get_auditbeat_proxy() {
+        let ok = verify_proxy_url(&ab_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Auditbeat security auditor daemon proxy `{}` in {} is dead! (Audit data shipping, file integrity monitoring, and Elasticsearch outputs will fail)",
+                ab_proxy,
+                ab_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Auditbeat Security Auditor",
+            format!("{}", ab_path.display()),
+            ab_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (auditbeat fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Auditbeat Security Auditor",
+            "/etc/auditbeat/auditbeat.yml & ~/.auditbeat/auditbeat.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -24149,5 +24573,69 @@ Environment="METRICBEAT_HTTP_PROXY=http://10.0.0.73:8080"
         let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_metricbeat_proxy(input_comment), None);
         assert_eq!(parse_metricbeat_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_heartbeat_proxy() {
+        let yaml_conf = r#"
+output.elasticsearch:
+  hosts: ["https://my-es:9200"]
+  proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_heartbeat_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HEARTBEAT_HTTP_PROXY=http://10.0.0.75:8080"
+"#;
+        assert_eq!(
+            parse_heartbeat_proxy(dropin),
+            Some("http://10.0.0.75:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.76:8080\"\n";
+        assert_eq!(
+            parse_heartbeat_proxy(default_env),
+            Some("http://10.0.0.76:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_heartbeat_proxy(input_comment), None);
+        assert_eq!(parse_heartbeat_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_auditbeat_proxy() {
+        let yaml_conf = r#"
+output.elasticsearch:
+  hosts: ["https://my-es:9200"]
+  proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_auditbeat_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="AUDITBEAT_HTTP_PROXY=http://10.0.0.77:8080"
+"#;
+        assert_eq!(
+            parse_auditbeat_proxy(dropin),
+            Some("http://10.0.0.77:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.78:8080\"\n";
+        assert_eq!(
+            parse_auditbeat_proxy(default_env),
+            Some("http://10.0.0.78:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_auditbeat_proxy(input_comment), None);
+        assert_eq!(parse_auditbeat_proxy(""), None);
     }
 }
