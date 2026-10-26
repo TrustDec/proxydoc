@@ -610,6 +610,22 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "unpkg CDN",
         "https://unpkg.com",
     ),
+    (
+        "Fluent Bit Package CDN",
+        "https://packages.fluentbit.io",
+    ),
+    (
+        "Fluentd Package CDN",
+        "https://packages.treasuredata.com",
+    ),
+    (
+        "Fastly CDN",
+        "https://www.fastly.com",
+    ),
+    (
+        "Statically CDN",
+        "https://cdn.statically.io",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1377,6 +1393,18 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "unpkg CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fluent Bit Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fluentd Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fastly CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Statically CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

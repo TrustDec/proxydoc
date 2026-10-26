@@ -347,7 +347,13 @@ enum Commands {
         /// Also configure Vector (vector telemetry & pipeline daemon) proxy (/etc/vector/vector.yaml / ~/.config/vector/vector.yaml / /etc/systemd/system/vector.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "timber-vector")]
         vector: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, and vector proxy
+        /// Also configure Fluent Bit (fluent-bit telemetry & log processor daemon) proxy (/etc/fluent-bit/fluent-bit.conf / /etc/fluent-bit/fluent-bit.yaml / /etc/systemd/system/fluent-bit.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "flb", visible_alias = "fluentbit")]
+        fluent_bit: bool,
+        /// Also configure Fluentd (fluentd / td-agent / fluent-package logging framework daemon) proxy (/etc/fluentd/fluent.conf / /etc/td-agent/td-agent.conf / /etc/systemd/system/fluentd.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "td-agent", visible_alias = "fluent-package")]
+        fluentd: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, and fluentd proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -638,7 +644,13 @@ enum Commands {
         /// Also unset Vector (vector telemetry & pipeline daemon) proxy (/etc/vector/vector.yaml / ~/.config/vector/vector.yaml / /etc/systemd/system/vector.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "timber-vector")]
         vector: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, and grafana-alloy proxy
+        /// Also unset Fluent Bit (fluent-bit telemetry & log processor daemon) proxy (/etc/fluent-bit/fluent-bit.conf / /etc/fluent-bit/fluent-bit.yaml / /etc/systemd/system/fluent-bit.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "flb", visible_alias = "fluentbit")]
+        fluent_bit: bool,
+        /// Also unset Fluentd (fluentd / td-agent / fluent-package logging framework daemon) proxy (/etc/fluentd/fluent.conf / /etc/td-agent/td-agent.conf / /etc/systemd/system/fluentd.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "td-agent", visible_alias = "fluent-package")]
+        fluentd: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, and fluentd proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -776,6 +788,8 @@ async fn main() -> Result<()> {
             grafana_alloy,
             otelcol,
             vector,
+            fluent_bit,
+            fluentd,
             all,
             shell,
         }) => {
@@ -875,6 +889,8 @@ async fn main() -> Result<()> {
                 grafana_alloy,
                 otelcol,
                 vector,
+                fluent_bit,
+                fluentd,
                 all,
                 shell.as_deref(),
             )
@@ -975,6 +991,8 @@ async fn main() -> Result<()> {
             grafana_alloy,
             otelcol,
             vector,
+            fluent_bit,
+            fluentd,
             all,
             shell,
         }) => {
@@ -1073,6 +1091,8 @@ async fn main() -> Result<()> {
                 grafana_alloy,
                 otelcol,
                 vector,
+                fluent_bit,
+                fluentd,
                 all,
                 shell.as_deref(),
             )?;
@@ -3619,6 +3639,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { vector, .. }) => {
                 assert!(vector);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_fluent_bit() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--fluent-bit"]).unwrap();
+        match cli.command {
+            Some(Commands::On { fluent_bit, .. }) => {
+                assert!(fluent_bit);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--flb"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { fluent_bit, .. }) => {
+                assert!(fluent_bit);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_fluent_bit() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--fluent-bit"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { fluent_bit, .. }) => {
+                assert!(fluent_bit);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_fluentd() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--fluentd"]).unwrap();
+        match cli.command {
+            Some(Commands::On { fluentd, .. }) => {
+                assert!(fluentd);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--td-agent"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { fluentd, .. }) => {
+                assert!(fluentd);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_fluentd() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--fluentd"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { fluentd, .. }) => {
+                assert!(fluentd);
             }
             _ => panic!("Expected Off command"),
         }

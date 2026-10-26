@@ -13339,6 +13339,488 @@ pub fn get_vector_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_fluent_bit_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("FLUENT_BIT_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("FLB_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("fluent-bit").join("fluent-bit.conf"),
+            home.join(".config").join("fluent-bit").join("fluent-bit.yaml"),
+            home.join(".fluent-bit").join("fluent-bit.conf"),
+            home.join(".config").join("systemd").join("user").join("fluent-bit.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/fluent-bit/fluent-bit.conf"),
+        PathBuf::from("/etc/fluent-bit/fluent-bit.yaml"),
+        PathBuf::from("/etc/td-agent-bit/td-agent-bit.conf"),
+        PathBuf::from("/opt/fluent-bit/etc/fluent-bit.conf"),
+        PathBuf::from("/etc/default/fluent-bit"),
+        PathBuf::from("/etc/default/td-agent-bit"),
+        PathBuf::from("/etc/sysconfig/fluent-bit"),
+        PathBuf::from("/etc/sysconfig/td-agent-bit"),
+        PathBuf::from("/etc/systemd/system/fluent-bit.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/td-agent-bit.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\Program Files\\fluent-bit\\conf\\fluent-bit.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_fluent_bit_config_path() -> Option<PathBuf> {
+    let paths = get_fluent_bit_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_fluent_bit_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_fluent_bit_write_path() -> PathBuf {
+    if let Some(p) = get_fluent_bit_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("FLUENT_BIT_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("FLB_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_flb = PathBuf::from("/etc/fluent-bit");
+    if etc_flb.is_dir() {
+        return etc_flb.join("fluent-bit.conf");
+    }
+    let etc_td_bit = PathBuf::from("/etc/td-agent-bit");
+    if etc_td_bit.is_dir() {
+        return etc_td_bit.join("td-agent-bit.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/fluent-bit.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("fluent-bit").join("fluent-bit.conf");
+    }
+    PathBuf::from("/etc/fluent-bit/fluent-bit.conf")
+}
+
+pub fn parse_fluent_bit_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "flb_http_proxy"
+                        || k_low == "fluent_bit_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/fluent-bit
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "flb_http_proxy"
+                || k_low == "fluent_bit_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Classic fluent-bit conf format: HTTP_Proxy <url>, HTTP_Proxy = <url>, Proxy <url>, etc.
+        let mut parts = trimmed.split_whitespace();
+        if let Some(first) = parts.next() {
+            let first_clean = first.trim_end_matches(':').to_lowercase();
+            if first_clean == "http_proxy" || first_clean == "proxy" {
+                let rest = trimmed[first.len()..]
+                    .trim()
+                    .trim_start_matches('=')
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if !rest.is_empty()
+                    && (rest.starts_with("http://")
+                        || rest.starts_with("https://")
+                        || rest.starts_with("socks")
+                        || rest.contains(':'))
+                {
+                    return Some(if rest.starts_with("http://")
+                        || rest.starts_with("https://")
+                        || rest.starts_with("socks")
+                    {
+                        rest.to_string()
+                    } else {
+                        format!("http://{}", rest)
+                    });
+                }
+            }
+        }
+
+        // YAML format: http_proxy: "http://..." or proxy: "http://..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_fluent_bit_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_fluent_bit_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_fluent_bit_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("FLB_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FLB_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("FLUENT_BIT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FLUENT_BIT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_fluentd_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("FLUENT_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".fluentd").join("fluent.conf"),
+            home.join(".config").join("fluentd").join("fluent.conf"),
+            home.join(".config").join("systemd").join("user").join("fluentd.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("td-agent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/fluentd/fluent.conf"),
+        PathBuf::from("/etc/td-agent/td-agent.conf"),
+        PathBuf::from("/etc/fluent-package/fluent.conf"),
+        PathBuf::from("/etc/default/fluentd"),
+        PathBuf::from("/etc/default/td-agent"),
+        PathBuf::from("/etc/default/fluent-package"),
+        PathBuf::from("/etc/sysconfig/fluentd"),
+        PathBuf::from("/etc/sysconfig/td-agent"),
+        PathBuf::from("/etc/sysconfig/fluent-package"),
+        PathBuf::from("/etc/systemd/system/fluentd.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/td-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/fluent-package.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\opt\\td-agent\\etc\\td-agent\\td-agent.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_fluentd_config_path() -> Option<PathBuf> {
+    let paths = get_fluentd_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_fluentd_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_fluentd_write_path() -> PathBuf {
+    if let Some(p) = get_fluentd_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("FLUENT_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_fluentd = PathBuf::from("/etc/fluentd");
+    if etc_fluentd.is_dir() {
+        return etc_fluentd.join("fluent.conf");
+    }
+    let etc_td = PathBuf::from("/etc/td-agent");
+    if etc_td.is_dir() {
+        return etc_td.join("td-agent.conf");
+    }
+    let etc_fp = PathBuf::from("/etc/fluent-package");
+    if etc_fp.is_dir() {
+        return etc_fp.join("fluent.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/fluentd.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".fluentd").join("fluent.conf");
+    }
+    PathBuf::from("/etc/fluentd/fluent.conf")
+}
+
+pub fn parse_fluentd_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "fluentd_http_proxy"
+                        || k_low == "td_agent_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/fluentd
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "fluentd_http_proxy"
+                || k_low == "td_agent_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Direct directive: http_proxy http://127.0.0.1:7890 or http_proxy "http://127.0.0.1:7890" or http_proxy = ...
+        let mut parts = trimmed.split_whitespace();
+        if let Some(first) = parts.next() {
+            let first_clean = first.trim_end_matches(':').to_lowercase();
+            if first_clean == "http_proxy" {
+                let rest = trimmed[first.len()..]
+                    .trim()
+                    .trim_start_matches('=')
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if !rest.is_empty()
+                    && (rest.starts_with("http://")
+                        || rest.starts_with("https://")
+                        || rest.starts_with("socks")
+                        || rest.contains(':'))
+                {
+                    return Some(if rest.starts_with("http://")
+                        || rest.starts_with("https://")
+                        || rest.starts_with("socks")
+                    {
+                        rest.to_string()
+                    } else {
+                        format!("http://{}", rest)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "http_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_fluentd_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_fluentd_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_fluentd_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("FLUENTD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FLUENTD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TD_AGENT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TD_AGENT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -17312,6 +17794,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Vector Pipeline Infra",
             "/etc/vector/vector.yaml & ~/.config/vector/vector.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Fluent Bit Telemetry & Log Processor Daemon Proxy (/etc/fluent-bit/fluent-bit.conf / /etc/fluent-bit/fluent-bit.yaml / /etc/systemd/system/fluent-bit.service.d/http-proxy.conf)
+    if let Some((flb_proxy, flb_path)) = get_fluent_bit_proxy() {
+        let ok = verify_proxy_url(&flb_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Fluent Bit daemon proxy `{}` in {} is dead! (Telemetry routing, log parsing, and cloud sink forwarders will fail)",
+                flb_proxy,
+                flb_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Fluent Bit Telemetry",
+            format!("{}", flb_path.display()),
+            flb_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (fluent-bit fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Fluent Bit Telemetry",
+            "/etc/fluent-bit/fluent-bit.conf & ~/.config/fluent-bit/fluent-bit.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Fluentd Logging Framework Proxy (/etc/fluentd/fluent.conf / /etc/td-agent/td-agent.conf / /etc/systemd/system/fluentd.service.d/http-proxy.conf)
+    if let Some((fluentd_proxy, fluentd_path)) = get_fluentd_proxy() {
+        let ok = verify_proxy_url(&fluentd_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Fluentd logging daemon proxy `{}` in {} is dead! (Unified logging layer, buffer output, and remote endpoints will fail)",
+                fluentd_proxy,
+                fluentd_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Fluentd Log Framework",
+            format!("{}", fluentd_path.display()),
+            fluentd_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (fluentd fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Fluentd Log Framework",
+            "/etc/fluentd/fluent.conf & /etc/td-agent/td-agent.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -21498,5 +22044,96 @@ Environment="VECTOR_PROXY=http://10.0.0.22:8080"
         let input_comment = "# proxy_url: http://127.0.0.1:7890\n; proxy.http = http://127.0.0.1:7890\n";
         assert_eq!(parse_vector_proxy(input_comment), None);
         assert_eq!(parse_vector_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_fluent_bit_proxy() {
+        let classic_conf = r#"
+[SERVICE]
+    Flush        1
+    Log_Level    info
+    HTTP_Proxy   http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_fluent_bit_proxy(classic_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let output_plugin = r#"
+[OUTPUT]
+    Name         http
+    Match        *
+    Proxy        http://10.0.0.30:8080
+"#;
+        assert_eq!(
+            parse_fluent_bit_proxy(output_plugin),
+            Some("http://10.0.0.30:8080".to_string())
+        );
+
+        let yaml_file = r#"
+service:
+  http_proxy: "http://127.0.0.1:8888"
+"#;
+        assert_eq!(
+            parse_fluent_bit_proxy(yaml_file),
+            Some("http://127.0.0.1:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="FLB_HTTP_PROXY=http://10.0.0.31:8080"
+"#;
+        assert_eq!(
+            parse_fluent_bit_proxy(dropin),
+            Some("http://10.0.0.31:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.32:8080\"\n";
+        assert_eq!(
+            parse_fluent_bit_proxy(default_env),
+            Some("http://10.0.0.32:8080".to_string())
+        );
+
+        let input_comment = "# HTTP_Proxy http://127.0.0.1:7890\n; proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_fluent_bit_proxy(input_comment), None);
+        assert_eq!(parse_fluent_bit_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_fluentd_proxy() {
+        let system_xml = r#"
+<system>
+  http_proxy http://127.0.0.1:7890
+</system>
+"#;
+        assert_eq!(
+            parse_fluentd_proxy(system_xml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let direct_conf = "http_proxy \"http://10.0.0.33:8080\"\n";
+        assert_eq!(
+            parse_fluentd_proxy(direct_conf),
+            Some("http://10.0.0.33:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="FLUENTD_HTTP_PROXY=http://10.0.0.34:8080"
+"#;
+        assert_eq!(
+            parse_fluentd_proxy(dropin),
+            Some("http://10.0.0.34:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.35:8080\"\n";
+        assert_eq!(
+            parse_fluentd_proxy(default_env),
+            Some("http://10.0.0.35:8080".to_string())
+        );
+
+        let input_comment = "# http_proxy http://127.0.0.1:7890\n; http_proxy: http://127.0.0.1:7890\n";
+        assert_eq!(parse_fluentd_proxy(input_comment), None);
+        assert_eq!(parse_fluentd_proxy(""), None);
     }
 }

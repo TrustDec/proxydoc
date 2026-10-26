@@ -13397,6 +13397,463 @@ pub fn unset_vector_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_fluent_bit_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_flb = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "flb_http_proxy" {
+                        lines.push(format!("Environment=\"FLB_HTTP_PROXY={}\"", proxy_url));
+                        replaced_flb = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("flb_http_proxy=") {
+                lines.push(format!("FLB_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_flb = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_flb {
+            lines.push(format!("Environment=\"FLB_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // Classic fluent-bit conf format: check if [SERVICE] exists
+    let has_flb_service = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[SERVICE]"));
+    if has_flb_service {
+        let mut lines = Vec::new();
+        let mut in_service = false;
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.eq_ignore_ascii_case("[SERVICE]") {
+                in_service = true;
+                lines.push(line.to_string());
+                continue;
+            } else if in_service && trimmed.starts_with('[') {
+                if !replaced {
+                    lines.push(format!("    HTTP_Proxy  {}", proxy_url));
+                    replaced = true;
+                }
+                in_service = false;
+                lines.push(line.to_string());
+                continue;
+            }
+
+            if in_service {
+                let first_token = trimmed.split_whitespace().next().unwrap_or("").to_lowercase();
+                if first_token == "http_proxy" || first_token == "proxy" {
+                    lines.push(format!("    HTTP_Proxy  {}", proxy_url));
+                    replaced = true;
+                    continue;
+                }
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if in_service && !replaced {
+            lines.push(format!("    HTTP_Proxy  {}", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format: check if yaml keys exist
+    if content.lines().any(|l| l.trim().starts_with("service:") || l.trim().starts_with("pipeline:")) {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if let Some((k, _)) = trimmed.split_once(':') {
+                let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+                if key == "http_proxy" || key == "proxy" {
+                    let indent = line.len() - line.trim_start().len();
+                    lines.push(format!("{:indent$}http_proxy: \"{}\"", "", proxy_url, indent = indent));
+                    replaced = true;
+                    continue;
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            lines.push("service:".to_string());
+            lines.push(format!("  http_proxy: \"{}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // Default classic .conf format
+    let mut lines = Vec::new();
+    lines.push("[SERVICE]".to_string());
+    lines.push(format!("    HTTP_Proxy  {}", proxy_url));
+    if !content.trim().is_empty() {
+        lines.push(String::new());
+        lines.push(content.trim().to_string());
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_fluent_bit_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "flb_http_proxy"
+                    || k_low == "fluent_bit_http_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("flb_http_proxy=")
+            || lower.starts_with("fluent_bit_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let first_token = trimmed.split_whitespace().next().unwrap_or("").to_lowercase();
+        if first_token == "http_proxy" || first_token == "proxy" {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http_proxy" || key == "proxy" {
+                if trimmed.contains("http://") || trimmed.contains("https://") || trimmed.contains("socks") {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_fluent_bit_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_fluent_bit_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_fluent_bit_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_fluent_bit_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_fluent_bit_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_fluent_bit_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_fluentd_proxy(content: &str, proxy_url: &str) -> String {
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_fluent = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "fluentd_http_proxy" || k_low == "td_agent_http_proxy" {
+                        lines.push(format!("Environment=\"FLUENTD_HTTP_PROXY={}\"", proxy_url));
+                        replaced_fluent = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("fluentd_http_proxy=") || lower.starts_with("td_agent_http_proxy=") {
+                lines.push(format!("FLUENTD_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_fluent = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_fluent {
+            lines.push(format!("Environment=\"FLUENTD_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // In fluent.conf
+    let has_system_tag = content.lines().any(|l| l.trim().eq_ignore_ascii_case("<system>"));
+    if has_system_tag {
+        let mut lines = Vec::new();
+        let mut in_system = false;
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.eq_ignore_ascii_case("<system>") {
+                in_system = true;
+                lines.push(line.to_string());
+                continue;
+            } else if in_system && trimmed.eq_ignore_ascii_case("</system>") {
+                if !replaced {
+                    lines.push(format!("  http_proxy {}", proxy_url));
+                    replaced = true;
+                }
+                in_system = false;
+                lines.push(line.to_string());
+                continue;
+            }
+
+            if in_system {
+                let first_token = trimmed.split_whitespace().next().unwrap_or("").to_lowercase();
+                if first_token == "http_proxy" {
+                    lines.push(format!("  http_proxy {}", proxy_url));
+                    replaced = true;
+                    continue;
+                }
+            }
+
+            lines.push(line.to_string());
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // No <system> tag found: prepend <system>\n  http_proxy ...\n</system>
+    let mut lines = Vec::new();
+    lines.push("<system>".to_string());
+    lines.push(format!("  http_proxy {}", proxy_url));
+    lines.push("</system>".to_string());
+    if !content.trim().is_empty() {
+        lines.push(String::new());
+        lines.push(content.trim().to_string());
+    }
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_fluentd_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "fluentd_http_proxy"
+                    || k_low == "td_agent_http_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("fluentd_http_proxy=")
+            || lower.starts_with("td_agent_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let first_token = trimmed.split_whitespace().next().unwrap_or("").to_lowercase();
+        if first_token == "http_proxy" {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http_proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_fluentd_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_fluentd_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_fluentd_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_fluentd_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_fluentd_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_fluentd_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -13493,6 +13950,8 @@ pub async fn turn_on(
     grafana_alloy: bool,
     otelcol: bool,
     vector: bool,
+    fluent_bit: bool,
+    fluentd: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -13588,6 +14047,8 @@ pub async fn turn_on(
     let set_grafana_alloy = grafana_alloy || all;
     let set_otelcol = otelcol || all;
     let set_vector = vector || all;
+    let set_fluent_bit = fluent_bit || all;
+    let set_fluentd = fluentd || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -14899,6 +15360,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_fluent_bit {
+        match set_fluent_bit_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Fluent Bit telemetry daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Fluent Bit telemetry daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_fluentd {
+        match set_fluentd_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Fluentd logging framework proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Fluentd logging framework config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -15008,6 +15499,8 @@ pub fn turn_off(
     grafana_alloy: bool,
     otelcol: bool,
     vector: bool,
+    fluent_bit: bool,
+    fluentd: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -15103,6 +15596,8 @@ pub fn turn_off(
     let unset_grafana_alloy = grafana_alloy || all;
     let unset_otelcol = otelcol || all;
     let unset_vector = vector || all;
+    let unset_fluent_bit = fluent_bit || all;
+    let unset_fluentd = fluentd || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -15924,6 +16419,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Vector pipeline daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Vector pipeline proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Vector pipeline daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_fluent_bit {
+        match unset_fluent_bit_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Fluent Bit telemetry daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Fluent Bit telemetry proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Fluent Bit telemetry daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_fluentd {
+        match unset_fluentd_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Fluentd logging framework proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Fluentd logging framework proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Fluentd logging framework proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -18179,5 +18690,61 @@ sinks:
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("VECTOR_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_fluent_bit_proxy() {
+        let conf_initial = r#"
+[SERVICE]
+    Flush        1
+    Log_Level    info
+"#;
+        let conf_updated = apply_fluent_bit_proxy(conf_initial, "http://127.0.0.1:7890");
+        assert!(conf_updated.contains("HTTP_Proxy  http://127.0.0.1:7890"));
+        let (conf_cleaned, conf_removed) = remove_fluent_bit_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("HTTP_Proxy"));
+
+        // YAML format
+        let yaml_initial = "service:\n  flush: 1\n";
+        let yaml_updated = apply_fluent_bit_proxy(yaml_initial, "http://127.0.0.1:7890");
+        assert!(yaml_updated.contains("http_proxy: \"http://127.0.0.1:7890\""));
+        let (yaml_cleaned, yaml_removed) = remove_fluent_bit_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("http_proxy:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_fluent_bit_proxy(dropin_initial, "http://10.0.0.11:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.11:8080\""));
+        assert!(dropin_updated.contains("Environment=\"FLB_HTTP_PROXY=http://10.0.0.11:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_fluent_bit_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("FLB_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_fluentd_proxy() {
+        let conf_initial = r#"
+<system>
+  workers 2
+</system>
+"#;
+        let conf_updated = apply_fluentd_proxy(conf_initial, "http://127.0.0.1:7890");
+        assert!(conf_updated.contains("http_proxy http://127.0.0.1:7890"));
+        let (conf_cleaned, conf_removed) = remove_fluentd_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("http_proxy"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_fluentd_proxy(dropin_initial, "http://10.0.0.12:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.12:8080\""));
+        assert!(dropin_updated.contains("Environment=\"FLUENTD_HTTP_PROXY=http://10.0.0.12:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_fluentd_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("FLUENTD_HTTP_PROXY="));
     }
 }
