@@ -554,6 +554,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Amazon Linux CDN",
         "https://cdn.amazonlinux.com",
     ),
+    (
+        "New Relic Infrastructure Intake API",
+        "https://infra-api.newrelic.com",
+    ),
+    (
+        "New Relic Package CDN",
+        "https://download.newrelic.com",
+    ),
+    (
+        "Datadog Package CDN",
+        "https://apt.datadoghq.com",
+    ),
+    (
+        "Linux Mint Package CDN",
+        "https://packages.linuxmint.com",
+    ),
+    (
+        "Raspberry Pi OS Archive CDN",
+        "https://archive.raspberrypi.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1279,6 +1299,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Ubuntu Archive CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "New Relic Infrastructure Intake API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "New Relic Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Datadog Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Linux Mint Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Raspberry Pi OS Archive CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

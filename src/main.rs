@@ -329,7 +329,13 @@ enum Commands {
         /// Also configure SaltStack Salt Minion (salt-minion daemon) proxy (/etc/salt/minion / /etc/salt/minion.d/proxy.conf / /etc/systemd/system/salt-minion.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "salt", visible_alias = "saltstack", visible_alias = "salt-agent")]
         salt_minion: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, and salt-minion proxy
+        /// Also configure Datadog Agent (datadog-agent daemon) proxy (/etc/datadog-agent/datadog.yaml / ~/.datadog-agent/datadog.yaml / /etc/systemd/system/datadog-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "datadog", visible_alias = "datadog-agent", visible_alias = "dd-agent")]
+        datadog_agent: bool,
+        /// Also configure New Relic Infrastructure Agent (newrelic-infra daemon) proxy (/etc/newrelic-infra.yml / /etc/systemd/system/newrelic-infra.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "newrelic", visible_alias = "newrelic-infra", visible_alias = "nr-agent")]
+        newrelic_infra: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, and newrelic-infra proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -602,7 +608,13 @@ enum Commands {
         /// Also unset SaltStack Salt Minion (salt-minion daemon) proxy (/etc/salt/minion / /etc/salt/minion.d/proxy.conf / /etc/systemd/system/salt-minion.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "salt", visible_alias = "saltstack", visible_alias = "salt-agent")]
         salt_minion: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, and salt-minion proxy
+        /// Also unset Datadog Agent (datadog-agent daemon) proxy (/etc/datadog-agent/datadog.yaml / ~/.datadog-agent/datadog.yaml / /etc/systemd/system/datadog-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "datadog", visible_alias = "datadog-agent", visible_alias = "dd-agent")]
+        datadog_agent: bool,
+        /// Also unset New Relic Infrastructure Agent (newrelic-infra daemon) proxy (/etc/newrelic-infra.yml / /etc/systemd/system/newrelic-infra.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "newrelic", visible_alias = "newrelic-infra", visible_alias = "nr-agent")]
+        newrelic_infra: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, and newrelic-infra proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -734,6 +746,8 @@ async fn main() -> Result<()> {
             puppet_agent,
             chef_client,
             salt_minion,
+            datadog_agent,
+            newrelic_infra,
             all,
             shell,
         }) => {
@@ -827,6 +841,8 @@ async fn main() -> Result<()> {
                 puppet_agent,
                 chef_client,
                 salt_minion,
+                datadog_agent,
+                newrelic_infra,
                 all,
                 shell.as_deref(),
             )
@@ -921,6 +937,8 @@ async fn main() -> Result<()> {
             puppet_agent,
             chef_client,
             salt_minion,
+            datadog_agent,
+            newrelic_infra,
             all,
             shell,
         }) => {
@@ -1013,6 +1031,8 @@ async fn main() -> Result<()> {
                 puppet_agent,
                 chef_client,
                 salt_minion,
+                datadog_agent,
+                newrelic_infra,
                 all,
                 shell.as_deref(),
             )?;
@@ -3379,6 +3399,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { salt_minion, .. }) => {
                 assert!(salt_minion);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_datadog_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--datadog-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { datadog_agent, .. }) => {
+                assert!(datadog_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--datadog"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { datadog_agent, .. }) => {
+                assert!(datadog_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_datadog_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--datadog-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { datadog_agent, .. }) => {
+                assert!(datadog_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_newrelic_infra() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--newrelic-infra"]).unwrap();
+        match cli.command {
+            Some(Commands::On { newrelic_infra, .. }) => {
+                assert!(newrelic_infra);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--newrelic"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { newrelic_infra, .. }) => {
+                assert!(newrelic_infra);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_newrelic_infra() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--newrelic-infra"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { newrelic_infra, .. }) => {
+                assert!(newrelic_infra);
             }
             _ => panic!("Expected Off command"),
         }

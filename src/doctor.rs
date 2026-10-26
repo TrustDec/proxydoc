@@ -12048,6 +12048,414 @@ pub fn get_salt_minion_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_datadog_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DD_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DATADOG_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DATADOG_HOME") {
+        let d = PathBuf::from(dir.trim());
+        let candidate = d.join("datadog.yaml");
+        if candidate.exists() && !paths.contains(&candidate) {
+            paths.push(candidate);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".datadog-agent").join("datadog.yaml"),
+            home.join(".config").join("datadog-agent").join("datadog.yaml"),
+            home.join(".config").join("systemd").join("user").join("datadog-agent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/datadog-agent/datadog.yaml"),
+        PathBuf::from("/opt/datadog-agent/etc/datadog.yaml"),
+        PathBuf::from("/etc/default/datadog-agent"),
+        PathBuf::from("/etc/sysconfig/datadog-agent"),
+        PathBuf::from("/etc/systemd/system/datadog-agent.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\ProgramData\\Datadog\\datadog.yaml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_datadog_agent_config_path() -> Option<PathBuf> {
+    let paths = get_datadog_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_datadog_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_datadog_agent_write_path() -> PathBuf {
+    if let Some(p) = get_datadog_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DD_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_dd = PathBuf::from("/etc/datadog-agent");
+    if etc_dd.is_dir() {
+        return etc_dd.join("datadog.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/datadog-agent.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".datadog-agent").join("datadog.yaml");
+    }
+    PathBuf::from("/etc/datadog-agent/datadog.yaml")
+}
+
+pub fn parse_datadog_agent_proxy(content: &str) -> Option<String> {
+    let mut in_proxy_block = false;
+    let mut proxy_indent = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "dd_proxy_https"
+                        || k_low == "dd_proxy_http"
+                        || k_low == "https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/datadog-agent
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "dd_proxy_https"
+                || k_low == "dd_proxy_http"
+                || k_low == "https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML parsing
+        let indent = line.len() - line.trim_start().len();
+
+        if trimmed == "proxy:" || trimmed.starts_with("proxy:") {
+            in_proxy_block = true;
+            proxy_indent = indent;
+            if let Some((_, v)) = trimmed.split_once(':') {
+                let v_clean = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !v_clean.is_empty()
+                    && (v_clean.starts_with("http://")
+                        || v_clean.starts_with("https://")
+                        || v_clean.starts_with("socks"))
+                {
+                    return Some(v_clean.to_string());
+                }
+            }
+            continue;
+        }
+
+        if in_proxy_block {
+            if indent <= proxy_indent && !trimmed.starts_with('-') {
+                in_proxy_block = false;
+            } else if let Some((k, v)) = trimmed.split_once(':') {
+                let k_low = k.trim().to_lowercase();
+                if k_low == "https" || k_low == "http" {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_datadog_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_datadog_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_datadog_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DD_PROXY_HTTPS") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DD_PROXY_HTTPS")));
+        }
+    }
+    if let Ok(val) = std::env::var("DD_PROXY_HTTP") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DD_PROXY_HTTP")));
+        }
+    }
+    None
+}
+
+pub fn get_newrelic_infra_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("NRIA_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NEWRELIC_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".newrelic").join("newrelic-infra.yml"),
+            home.join(".config").join("newrelic-infra.yml"),
+            home.join(".config").join("systemd").join("user").join("newrelic-infra.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/newrelic-infra.yml"),
+        PathBuf::from("/etc/newrelic-infra/newrelic-infra.yml"),
+        PathBuf::from("/etc/default/newrelic-infra"),
+        PathBuf::from("/etc/sysconfig/newrelic-infra"),
+        PathBuf::from("/etc/systemd/system/newrelic-infra.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\Program Files\\New Relic\\newrelic-infra\\newrelic-infra.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_newrelic_infra_config_path() -> Option<PathBuf> {
+    let paths = get_newrelic_infra_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_newrelic_infra_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_newrelic_infra_write_path() -> PathBuf {
+    if let Some(p) = get_newrelic_infra_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("NRIA_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc = PathBuf::from("/etc");
+    if etc.is_dir() {
+        return etc.join("newrelic-infra.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/newrelic-infra.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".newrelic").join("newrelic-infra.yml");
+    }
+    PathBuf::from("/etc/newrelic-infra.yml")
+}
+
+pub fn parse_newrelic_infra_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "nria_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/newrelic-infra
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "nria_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML parsing: proxy: http://...
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if key == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_newrelic_infra_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_newrelic_infra_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_newrelic_infra_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NRIA_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NRIA_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -15829,6 +16237,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Salt Minion Infra",
             "/etc/salt/minion & /etc/salt/minion.d/proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Datadog Agent Infrastructure Daemon Proxy (/etc/datadog-agent/datadog.yaml / ~/.datadog-agent/datadog.yaml / /etc/systemd/system/datadog-agent.service.d/http-proxy.conf)
+    if let Some((dd_proxy, dd_path)) = get_datadog_agent_proxy() {
+        let ok = verify_proxy_url(&dd_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Datadog Agent daemon proxy `{}` in {} is dead! (Host telemetry, APM traces, and log intakes will fail)",
+                dd_proxy,
+                dd_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Datadog Agent Infra",
+            format!("{}", dd_path.display()),
+            dd_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (datadog-agent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Datadog Agent Infra",
+            "/etc/datadog-agent/datadog.yaml & ~/.datadog-agent/datadog.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // New Relic Infrastructure Agent Daemon Proxy (/etc/newrelic-infra.yml / /etc/systemd/system/newrelic-infra.service.d/http-proxy.conf)
+    if let Some((nr_proxy, nr_path)) = get_newrelic_infra_proxy() {
+        let ok = verify_proxy_url(&nr_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "New Relic Infrastructure Agent daemon proxy `{}` in {} is dead! (System metrics and New Relic intake will fail)",
+                nr_proxy,
+                nr_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "New Relic Infra Agent",
+            format!("{}", nr_path.display()),
+            nr_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (newrelic-infra fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "New Relic Infra Agent",
+            "/etc/newrelic-infra.yml & ~/.newrelic/newrelic-infra.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -19750,5 +20222,92 @@ Environment="PROXY_PORT=8080"
         let input_comment = "# proxy_host: 127.0.0.1\n";
         assert_eq!(parse_salt_minion_proxy(input_comment), None);
         assert_eq!(parse_salt_minion_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_datadog_agent_proxy() {
+        let yaml_file = r#"
+api_key: abcdef123456
+site: datadoghq.com
+proxy:
+  http: http://127.0.0.1:7890
+  https: http://127.0.0.1:7890
+  no_proxy:
+    - localhost
+    - 127.0.0.1
+"#;
+        assert_eq!(
+            parse_datadog_agent_proxy(yaml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let yaml_inline = r#"
+api_key: abcdef123456
+proxy: http://10.0.0.7:8080
+"#;
+        assert_eq!(
+            parse_datadog_agent_proxy(yaml_inline),
+            Some("http://10.0.0.7:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.8:8080"
+Environment="DD_PROXY_HTTPS=http://10.0.0.8:8080"
+"#;
+        assert_eq!(
+            parse_datadog_agent_proxy(dropin),
+            Some("http://10.0.0.8:8080".to_string())
+        );
+
+        let default_env = "DD_PROXY_HTTP=\"http://10.0.0.9:8080\"\n";
+        assert_eq!(
+            parse_datadog_agent_proxy(default_env),
+            Some("http://10.0.0.9:8080".to_string())
+        );
+
+        let input_comment = "# proxy:\n#   http: http://127.0.0.1:7890\n";
+        assert_eq!(parse_datadog_agent_proxy(input_comment), None);
+        assert_eq!(parse_datadog_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_newrelic_infra_proxy() {
+        let yaml_file = r#"
+license_key: fedcba654321
+proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_newrelic_infra_proxy(yaml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let yaml_quoted = r#"
+license_key: fedcba654321
+proxy: "http://10.0.0.10:8080"
+"#;
+        assert_eq!(
+            parse_newrelic_infra_proxy(yaml_quoted),
+            Some("http://10.0.0.10:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="NRIA_PROXY=http://10.0.0.11:8080"
+"#;
+        assert_eq!(
+            parse_newrelic_infra_proxy(dropin),
+            Some("http://10.0.0.11:8080".to_string())
+        );
+
+        let default_env = "NRIA_PROXY=\"http://10.0.0.12:8080\"\n";
+        assert_eq!(
+            parse_newrelic_infra_proxy(default_env),
+            Some("http://10.0.0.12:8080".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n";
+        assert_eq!(parse_newrelic_infra_proxy(input_comment), None);
+        assert_eq!(parse_newrelic_infra_proxy(""), None);
     }
 }

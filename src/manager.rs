@@ -12172,6 +12172,392 @@ pub fn unset_salt_minion_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_datadog_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let no_proxy_def = "localhost,127.0.0.1,.local";
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_dd_http = false;
+        let mut replaced_dd_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "dd_proxy_http" {
+                        lines.push(format!("Environment=\"DD_PROXY_HTTP={}\"", proxy_url));
+                        replaced_dd_http = true;
+                        continue;
+                    } else if k_low == "dd_proxy_https" {
+                        lines.push(format!("Environment=\"DD_PROXY_HTTPS={}\"", proxy_url));
+                        replaced_dd_https = true;
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_dd_http {
+            lines.push(format!("Environment=\"DD_PROXY_HTTP={}\"", proxy_url));
+        }
+        if !replaced_dd_https {
+            lines.push(format!("Environment=\"DD_PROXY_HTTPS={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // YAML format in datadog.yaml
+    let mut lines = Vec::new();
+    let mut in_proxy_block = false;
+    let mut proxy_indent = 0;
+    let mut replaced_proxy = false;
+
+    let proxy_block = format!(
+        "proxy:\n  http: {}\n  https: {}\n  no_proxy:\n    - localhost\n    - 127.0.0.1\n    - .local",
+        proxy_url, proxy_url
+    );
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+
+        if (trimmed == "proxy:" || trimmed.starts_with("proxy:")) && !in_proxy_block {
+            in_proxy_block = true;
+            proxy_indent = indent;
+            lines.push(proxy_block.clone());
+            replaced_proxy = true;
+            continue;
+        }
+
+        if in_proxy_block {
+            if (indent > proxy_indent) || trimmed.starts_with('-') {
+                continue;
+            } else {
+                in_proxy_block = false;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy {
+        if !lines.is_empty() && !lines.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
+            lines.push(String::new());
+        }
+        lines.push(proxy_block);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_datadog_agent_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+    let mut in_proxy_block = false;
+    let mut proxy_indent = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "dd_proxy_http"
+                    || k_low == "dd_proxy_https"
+                    || k_low == "no_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("dd_proxy_http=")
+            || lower.starts_with("dd_proxy_https=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let indent = line.len() - line.trim_start().len();
+        if (trimmed == "proxy:" || trimmed.starts_with("proxy:")) && !in_proxy_block {
+            in_proxy_block = true;
+            proxy_indent = indent;
+            removed = true;
+            continue;
+        }
+
+        if in_proxy_block {
+            if (indent > proxy_indent) || trimmed.starts_with('-') {
+                removed = true;
+                continue;
+            } else {
+                in_proxy_block = false;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_datadog_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_datadog_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_datadog_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_datadog_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_datadog_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_datadog_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_newrelic_infra_proxy(content: &str, proxy_url: &str) -> String {
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_nria = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "nria_proxy" {
+                        lines.push(format!("Environment=\"NRIA_PROXY={}\"", proxy_url));
+                        replaced_nria = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_nria {
+            lines.push(format!("Environment=\"NRIA_PROXY={}\"", proxy_url));
+        }
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // YAML format in newrelic-infra.yml
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            if k.trim().trim_matches('"').trim_matches('\'').eq_ignore_ascii_case("proxy") {
+                lines.push(format!("proxy: {}", proxy_url));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy {
+        if !lines.is_empty() && !lines.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
+            lines.push(String::new());
+        }
+        lines.push(format!("proxy: {}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_newrelic_infra_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "nria_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("nria_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            if k.trim().trim_matches('"').trim_matches('\'').eq_ignore_ascii_case("proxy") {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_newrelic_infra_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_newrelic_infra_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_newrelic_infra_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_newrelic_infra_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_newrelic_infra_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_newrelic_infra_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -12262,6 +12648,8 @@ pub async fn turn_on(
     puppet_agent: bool,
     chef_client: bool,
     salt_minion: bool,
+    datadog_agent: bool,
+    newrelic_infra: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -12351,6 +12739,8 @@ pub async fn turn_on(
     let set_puppet_agent = puppet_agent || all;
     let set_chef_client = chef_client || all;
     let set_salt_minion = salt_minion || all;
+    let set_datadog_agent = datadog_agent || all;
+    let set_newrelic_infra = newrelic_infra || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -13572,6 +13962,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_datadog_agent {
+        match set_datadog_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Datadog Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Datadog Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_newrelic_infra {
+        match set_newrelic_infra_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ New Relic Infrastructure Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update New Relic Infrastructure Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -13675,6 +14095,8 @@ pub fn turn_off(
     puppet_agent: bool,
     chef_client: bool,
     salt_minion: bool,
+    datadog_agent: bool,
+    newrelic_infra: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -13764,6 +14186,8 @@ pub fn turn_off(
     let unset_puppet_agent = puppet_agent || all;
     let unset_chef_client = chef_client || all;
     let unset_salt_minion = salt_minion || all;
+    let unset_datadog_agent = datadog_agent || all;
+    let unset_newrelic_infra = newrelic_infra || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -14537,6 +14961,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ SaltStack Salt Minion daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ SaltStack Salt Minion proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset SaltStack Salt Minion daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_datadog_agent {
+        match unset_datadog_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Datadog Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Datadog Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Datadog Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_newrelic_infra {
+        match unset_newrelic_infra_proxy() {
+            Ok(true) => eprintln!("{}", "✔ New Relic Infrastructure Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ New Relic Infrastructure Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset New Relic Infrastructure Agent daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -16626,5 +17066,56 @@ id: node-1
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("PROXY_HOST="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_datadog_agent_proxy() {
+        let yaml_initial = r#"
+api_key: 123456abcdef
+site: datadoghq.com
+"#;
+        let yaml_updated = apply_datadog_agent_proxy(yaml_initial, "http://127.0.0.1:7890");
+        assert!(yaml_updated.contains("proxy:"));
+        assert!(yaml_updated.contains("http: http://127.0.0.1:7890"));
+        assert!(yaml_updated.contains("https: http://127.0.0.1:7890"));
+        let (yaml_cleaned, yaml_removed) = remove_datadog_agent_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("proxy:"));
+        assert!(!yaml_cleaned.contains("http://127.0.0.1:7890"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_datadog_agent_proxy(dropin_initial, "http://10.0.0.5:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.5:8080\""));
+        assert!(dropin_updated.contains("Environment=\"DD_PROXY_HTTP=http://10.0.0.5:8080\""));
+        assert!(dropin_updated.contains("Environment=\"DD_PROXY_HTTPS=http://10.0.0.5:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_datadog_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("DD_PROXY_HTTP="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_newrelic_infra_proxy() {
+        let yaml_initial = r#"
+license_key: 654321fedcba
+log:
+  level: info
+"#;
+        let yaml_updated = apply_newrelic_infra_proxy(yaml_initial, "http://127.0.0.1:7890");
+        assert!(yaml_updated.contains("proxy: http://127.0.0.1:7890"));
+        let (yaml_cleaned, yaml_removed) = remove_newrelic_infra_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("proxy:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_newrelic_infra_proxy(dropin_initial, "http://10.0.0.6:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.6:8080\""));
+        assert!(dropin_updated.contains("Environment=\"NRIA_PROXY=http://10.0.0.6:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_newrelic_infra_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("NRIA_PROXY="));
     }
 }
