@@ -662,6 +662,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "OpsGenie Alert API",
         "https://api.opsgenie.com",
     ),
+    (
+        "VictoriaMetrics CDN",
+        "https://victoriametrics.com",
+    ),
+    (
+        "Grafana Loki CDN",
+        "https://grafana.com",
+    ),
+    (
+        "Jaeger Tracing CDN",
+        "https://www.jaegertracing.io",
+    ),
+    (
+        "Netdata Cloud API",
+        "https://api.netdata.cloud",
+    ),
+    (
+        "Netdata Monitoring CDN",
+        "https://www.netdata.cloud",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1468,6 +1488,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "OpsGenie Alert API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "VictoriaMetrics CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Grafana Loki CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Jaeger Tracing CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Netdata Cloud API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Netdata Monitoring CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

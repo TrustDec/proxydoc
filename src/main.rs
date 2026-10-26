@@ -365,7 +365,13 @@ enum Commands {
         /// Also configure Alertmanager (Prometheus Alertmanager alert routing & notification daemon) proxy (/etc/alertmanager/alertmanager.yml / ~/.config/alertmanager/alertmanager.yml / /etc/systemd/system/alertmanager.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "alert-manager", visible_alias = "prom-alertmanager")]
         alertmanager: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, and alertmanager proxy
+        /// Also configure Promtail (Grafana Promtail log collection & shipping daemon) proxy (/etc/promtail/config.yml / ~/.config/promtail/config.yml / /etc/systemd/system/promtail.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "prom-tail", visible_alias = "loki-promtail")]
+        promtail: bool,
+        /// Also configure VictoriaMetrics Agent (vmagent Prometheus-compatible metric scraper & forwarder daemon) proxy (/etc/vmagent/vmagent.yml / ~/.config/vmagent/vmagent.yml / /etc/systemd/system/vmagent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "victoria-agent", visible_alias = "victoria-metrics-agent")]
+        vmagent: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, and vmagent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -674,7 +680,13 @@ enum Commands {
         /// Also unset Alertmanager (Prometheus Alertmanager alert routing & notification daemon) proxy (/etc/alertmanager/alertmanager.yml / ~/.config/alertmanager/alertmanager.yml / /etc/systemd/system/alertmanager.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "alert-manager", visible_alias = "prom-alertmanager")]
         alertmanager: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, and alertmanager proxy
+        /// Also unset Promtail (Grafana Promtail log collection & shipping daemon) proxy (/etc/promtail/config.yml / ~/.config/promtail/config.yml / /etc/systemd/system/promtail.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "prom-tail", visible_alias = "loki-promtail")]
+        promtail: bool,
+        /// Also unset VictoriaMetrics Agent (vmagent Prometheus-compatible metric scraper & forwarder daemon) proxy (/etc/vmagent/vmagent.yml / ~/.config/vmagent/vmagent.yml / /etc/systemd/system/vmagent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "victoria-agent", visible_alias = "victoria-metrics-agent")]
+        vmagent: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, and vmagent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -818,6 +830,8 @@ async fn main() -> Result<()> {
             logstash,
             prometheus,
             alertmanager,
+            promtail,
+            vmagent,
             all,
             shell,
         }) => {
@@ -923,6 +937,8 @@ async fn main() -> Result<()> {
                 logstash,
                 prometheus,
                 alertmanager,
+                promtail,
+                vmagent,
                 all,
                 shell.as_deref(),
             )
@@ -1029,6 +1045,8 @@ async fn main() -> Result<()> {
             logstash,
             prometheus,
             alertmanager,
+            promtail,
+            vmagent,
             all,
             shell,
         }) => {
@@ -1133,6 +1151,8 @@ async fn main() -> Result<()> {
                 logstash,
                 prometheus,
                 alertmanager,
+                promtail,
+                vmagent,
                 all,
                 shell.as_deref(),
             )?;
@@ -3859,6 +3879,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { alertmanager, .. }) => {
                 assert!(alertmanager);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_promtail() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--promtail"]).unwrap();
+        match cli.command {
+            Some(Commands::On { promtail, .. }) => {
+                assert!(promtail);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--loki-promtail"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { promtail, .. }) => {
+                assert!(promtail);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_promtail() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--promtail"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { promtail, .. }) => {
+                assert!(promtail);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_vmagent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--vmagent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { vmagent, .. }) => {
+                assert!(vmagent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--victoria-agent"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { vmagent, .. }) => {
+                assert!(vmagent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_vmagent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--vmagent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { vmagent, .. }) => {
+                assert!(vmagent);
             }
             _ => panic!("Expected Off command"),
         }

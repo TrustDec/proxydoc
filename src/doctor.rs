@@ -14582,6 +14582,375 @@ pub fn get_alertmanager_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_promtail_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PROMTAIL_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("promtail").join("config.yml"),
+            home.join(".config").join("promtail").join("promtail.yml"),
+            home.join(".promtail").join("config.yml"),
+            home.join(".config").join("systemd").join("user").join("promtail.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/promtail/config.yml"),
+        PathBuf::from("/etc/promtail/promtail.yml"),
+        PathBuf::from("/etc/promtail/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/promtail"),
+        PathBuf::from("/etc/sysconfig/promtail"),
+        PathBuf::from("/etc/systemd/system/promtail.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/promtail/config.yml"),
+        PathBuf::from("C:\\Program Files\\Promtail\\config.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_promtail_config_path() -> Option<PathBuf> {
+    let paths = get_promtail_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_promtail_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_promtail_write_path() -> PathBuf {
+    if let Some(p) = get_promtail_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PROMTAIL_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_promtail = PathBuf::from("/etc/promtail");
+    if etc_promtail.is_dir() {
+        return etc_promtail.join("config.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/promtail.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("promtail").join("config.yml");
+    }
+    PathBuf::from("/etc/promtail/config.yml")
+}
+
+pub fn parse_promtail_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "promtail_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/promtail
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "promtail_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML promtail.yml / config.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_promtail_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_promtail_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_promtail_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PROMTAIL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PROMTAIL_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_vmagent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("VMAGENT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("vmagent").join("vmagent.yml"),
+            home.join(".vmagent").join("vmagent.yml"),
+            home.join(".config").join("victoriametrics").join("vmagent.yml"),
+            home.join(".config").join("systemd").join("user").join("vmagent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/vmagent/vmagent.yml"),
+        PathBuf::from("/etc/victoriametrics/vmagent.yml"),
+        PathBuf::from("/etc/vmagent/config.yml"),
+        PathBuf::from("/etc/vmagent/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/vmagent"),
+        PathBuf::from("/etc/sysconfig/vmagent"),
+        PathBuf::from("/etc/systemd/system/vmagent.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/vmagent.yml"),
+        PathBuf::from("C:\\Program Files\\VictoriaMetrics\\vmagent.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_vmagent_config_path() -> Option<PathBuf> {
+    let paths = get_vmagent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_vmagent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_vmagent_write_path() -> PathBuf {
+    if let Some(p) = get_vmagent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("VMAGENT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_vm = PathBuf::from("/etc/vmagent");
+    if etc_vm.is_dir() {
+        return etc_vm.join("vmagent.yml");
+    }
+    let etc_vm2 = PathBuf::from("/etc/victoriametrics");
+    if etc_vm2.is_dir() {
+        return etc_vm2.join("vmagent.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/vmagent.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("vmagent").join("vmagent.yml");
+    }
+    PathBuf::from("/etc/vmagent/vmagent.yml")
+}
+
+pub fn parse_vmagent_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "vmagent_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/vmagent
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "vmagent_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML vmagent.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_vmagent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_vmagent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_vmagent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("VMAGENT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VMAGENT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -18747,6 +19116,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Prometheus Alertmanager",
             "/etc/alertmanager/alertmanager.yml & ~/.config/alertmanager/alertmanager.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Promtail Log Collection Agent Proxy (/etc/promtail/config.yml / /etc/systemd/system/promtail.service.d/http-proxy.conf)
+    if let Some((promtail_proxy, promtail_path)) = get_promtail_proxy() {
+        let ok = verify_proxy_url(&promtail_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Promtail log collection daemon proxy `{}` in {} is dead! (Log ingestion, tailing, and Loki push will fail)",
+                promtail_proxy,
+                promtail_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Promtail Agent",
+            format!("{}", promtail_path.display()),
+            promtail_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (promtail fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Promtail Agent",
+            "/etc/promtail/config.yml & ~/.config/promtail/config.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // VictoriaMetrics Agent (vmagent) Proxy (/etc/vmagent/vmagent.yml / /etc/systemd/system/vmagent.service.d/http-proxy.conf)
+    if let Some((vmagent_proxy, vmagent_path)) = get_vmagent_proxy() {
+        let ok = verify_proxy_url(&vmagent_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "VictoriaMetrics Agent daemon proxy `{}` in {} is dead! (Metric scraping and remote_write forwarding will fail)",
+                vmagent_proxy,
+                vmagent_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "VictoriaMetrics Agent",
+            format!("{}", vmagent_path.display()),
+            vmagent_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (vmagent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "VictoriaMetrics Agent",
+            "/etc/vmagent/vmagent.yml & ~/.config/vmagent/vmagent.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -23161,5 +23594,72 @@ Environment="ALERTMANAGER_HTTP_PROXY=http://10.0.0.42:8080"
         let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_alertmanager_proxy(input_comment), None);
         assert_eq!(parse_alertmanager_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_promtail_proxy() {
+        let yaml_conf = r#"
+server:
+  http_listen_port: 9080
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_promtail_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="PROMTAIL_HTTP_PROXY=http://10.0.0.52:8080"
+"#;
+        assert_eq!(
+            parse_promtail_proxy(dropin),
+            Some("http://10.0.0.52:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.53:8080\"\n";
+        assert_eq!(
+            parse_promtail_proxy(default_env),
+            Some("http://10.0.0.53:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_promtail_proxy(input_comment), None);
+        assert_eq!(parse_promtail_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_vmagent_proxy() {
+        let yaml_conf = r#"
+global:
+  scrape_interval: 10s
+  http_config:
+    proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_vmagent_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="VMAGENT_HTTP_PROXY=http://10.0.0.62:8080"
+"#;
+        assert_eq!(
+            parse_vmagent_proxy(dropin),
+            Some("http://10.0.0.62:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.63:8080\"\n";
+        assert_eq!(
+            parse_vmagent_proxy(default_env),
+            Some("http://10.0.0.63:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_vmagent_proxy(input_comment), None);
+        assert_eq!(parse_vmagent_proxy(""), None);
     }
 }
