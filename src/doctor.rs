@@ -13821,6 +13821,407 @@ pub fn get_fluentd_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_telegraf_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TELEGRAF_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("telegraf").join("telegraf.conf"),
+            home.join(".telegraf").join("telegraf.conf"),
+            home.join(".config").join("systemd").join("user").join("telegraf.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/telegraf/telegraf.conf"),
+        PathBuf::from("/etc/telegraf/telegraf.d/proxy.conf"),
+        PathBuf::from("/etc/default/telegraf"),
+        PathBuf::from("/etc/sysconfig/telegraf"),
+        PathBuf::from("/etc/systemd/system/telegraf.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\Program Files\\Telegraf\\telegraf.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_telegraf_config_path() -> Option<PathBuf> {
+    let paths = get_telegraf_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_telegraf_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_telegraf_write_path() -> PathBuf {
+    if let Some(p) = get_telegraf_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TELEGRAF_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_telegraf = PathBuf::from("/etc/telegraf");
+    if etc_telegraf.is_dir() {
+        return etc_telegraf.join("telegraf.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/telegraf.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("telegraf").join("telegraf.conf");
+    }
+    PathBuf::from("/etc/telegraf/telegraf.conf")
+}
+
+pub fn parse_telegraf_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "telegraf_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/telegraf
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "telegraf_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // TOML format: http_proxy = "http://..." or proxy = "http://..."
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_telegraf_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_telegraf_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_telegraf_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TELEGRAF_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TELEGRAF_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_logstash_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("LOGSTASH_PATH_SETTINGS") {
+        let p = PathBuf::from(file.trim());
+        if p.is_dir() {
+            let yml = p.join("logstash.yml");
+            if yml.exists() {
+                paths.push(yml);
+            }
+        } else if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(home) = std::env::var("LOGSTASH_HOME") {
+        let p = PathBuf::from(home.trim()).join("config").join("logstash.yml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("logstash").join("logstash.yml"),
+            home.join(".logstash").join("logstash.yml"),
+            home.join(".config").join("systemd").join("user").join("logstash.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/logstash/logstash.yml"),
+        PathBuf::from("/etc/logstash/jvm.options"),
+        PathBuf::from("/etc/logstash/jvm.options.d/proxy.options"),
+        PathBuf::from("/etc/default/logstash"),
+        PathBuf::from("/etc/sysconfig/logstash"),
+        PathBuf::from("/etc/systemd/system/logstash.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/share/logstash/config/logstash.yml"),
+        PathBuf::from("C:\\Program Files\\logstash\\config\\logstash.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_logstash_config_path() -> Option<PathBuf> {
+    let paths = get_logstash_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_logstash_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_logstash_write_path() -> PathBuf {
+    if let Some(p) = get_logstash_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("LOGSTASH_PATH_SETTINGS") {
+        let p = PathBuf::from(file.trim());
+        if p.is_dir() {
+            return p.join("logstash.yml");
+        }
+        return p;
+    }
+    let etc_logstash = PathBuf::from("/etc/logstash");
+    if etc_logstash.is_dir() {
+        return etc_logstash.join("logstash.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/logstash.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("logstash").join("logstash.yml");
+    }
+    PathBuf::from("/etc/logstash/logstash.yml")
+}
+
+pub fn parse_logstash_proxy(content: &str) -> Option<String> {
+    let mut jvm_host: Option<String> = None;
+    let mut jvm_port: Option<String> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "logstash_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/logstash
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "logstash_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // jvm.options: -Dhttp.proxyHost=... and -Dhttp.proxyPort=...
+        if trimmed.starts_with("-Dhttp.proxyHost=") || trimmed.starts_with("-Dhttps.proxyHost=") {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let host = v.trim().trim_matches('"').trim_matches('\'');
+                if !host.is_empty() {
+                    jvm_host = Some(host.to_string());
+                }
+            }
+        }
+        if trimmed.starts_with("-Dhttp.proxyPort=") || trimmed.starts_with("-Dhttps.proxyPort=") {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let port = v.trim().trim_matches('"').trim_matches('\'');
+                if !port.is_empty() {
+                    jvm_port = Some(port.to_string());
+                }
+            }
+        }
+
+        // YAML logstash.yml: http.proxy: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "http.proxy" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    if let Some(host) = jvm_host {
+        let port = jvm_port.unwrap_or_else(|| "8080".to_string());
+        return Some(format!("http://{}:{}", host, port));
+    }
+
+    None
+}
+
+pub fn get_logstash_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_logstash_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_logstash_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("LOGSTASH_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LOGSTASH_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -17858,6 +18259,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Fluentd Log Framework",
             "/etc/fluentd/fluent.conf & /etc/td-agent/td-agent.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Telegraf Metrics Collection Daemon Proxy (/etc/telegraf/telegraf.conf / /etc/systemd/system/telegraf.service.d/http-proxy.conf)
+    if let Some((telegraf_proxy, telegraf_path)) = get_telegraf_proxy() {
+        let ok = verify_proxy_url(&telegraf_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Telegraf metrics daemon proxy `{}` in {} is dead! (Metric outputs, HTTP plugins, and cloud influx ingestion will fail)",
+                telegraf_proxy,
+                telegraf_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Telegraf Metrics Agent",
+            format!("{}", telegraf_path.display()),
+            telegraf_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (telegraf fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Telegraf Metrics Agent",
+            "/etc/telegraf/telegraf.conf & ~/.config/telegraf/telegraf.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Logstash Pipeline Ingestion Daemon Proxy (/etc/logstash/logstash.yml / /etc/logstash/jvm.options / /etc/systemd/system/logstash.service.d/http-proxy.conf)
+    if let Some((logstash_proxy, logstash_path)) = get_logstash_proxy() {
+        let ok = verify_proxy_url(&logstash_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Logstash pipeline daemon proxy `{}` in {} is dead! (Log ingestion, Elasticsearch outputs, and external HTTP plugins will fail)",
+                logstash_proxy,
+                logstash_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Logstash Log Pipeline",
+            format!("{}", logstash_path.display()),
+            logstash_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (logstash fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Logstash Log Pipeline",
+            "/etc/logstash/logstash.yml & /etc/logstash/jvm.options",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -22135,5 +22600,76 @@ Environment="FLUENTD_HTTP_PROXY=http://10.0.0.34:8080"
         let input_comment = "# http_proxy http://127.0.0.1:7890\n; http_proxy: http://127.0.0.1:7890\n";
         assert_eq!(parse_fluentd_proxy(input_comment), None);
         assert_eq!(parse_fluentd_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_telegraf_proxy() {
+        let toml_conf = r#"
+[agent]
+  interval = "10s"
+  http_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_telegraf_proxy(toml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="TELEGRAF_HTTP_PROXY=http://10.0.0.36:8080"
+"#;
+        assert_eq!(
+            parse_telegraf_proxy(dropin),
+            Some("http://10.0.0.36:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.37:8080\"\n";
+        assert_eq!(
+            parse_telegraf_proxy(default_env),
+            Some("http://10.0.0.37:8080".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n; proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_telegraf_proxy(input_comment), None);
+        assert_eq!(parse_telegraf_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_logstash_proxy() {
+        let yaml_conf = r#"
+http.proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_logstash_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let jvm_options = r#"
+-Dhttp.proxyHost=127.0.0.1
+-Dhttp.proxyPort=7890
+"#;
+        assert_eq!(
+            parse_logstash_proxy(jvm_options),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="LOGSTASH_HTTP_PROXY=http://10.0.0.38:8080"
+"#;
+        assert_eq!(
+            parse_logstash_proxy(dropin),
+            Some("http://10.0.0.38:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.39:8080\"\n";
+        assert_eq!(
+            parse_logstash_proxy(default_env),
+            Some("http://10.0.0.39:8080".to_string())
+        );
+
+        let input_comment = "# http.proxy: \"http://127.0.0.1:7890\"\n; -Dhttp.proxyHost=127.0.0.1\n";
+        assert_eq!(parse_logstash_proxy(input_comment), None);
+        assert_eq!(parse_logstash_proxy(""), None);
     }
 }

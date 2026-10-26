@@ -13854,6 +13854,470 @@ pub fn unset_fluentd_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_telegraf_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_telegraf = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "telegraf_http_proxy" {
+                        lines.push(format!("Environment=\"TELEGRAF_HTTP_PROXY={}\"", proxy_url));
+                        replaced_telegraf = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("telegraf_http_proxy=") {
+                lines.push(format!("TELEGRAF_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_telegraf = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_telegraf {
+            lines.push(format!("Environment=\"TELEGRAF_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // TOML telegraf.conf format
+    let has_agent_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[agent]"));
+    let mut lines = Vec::new();
+    let mut in_agent = false;
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.eq_ignore_ascii_case("[agent]") {
+            in_agent = true;
+            lines.push(line.to_string());
+            continue;
+        } else if in_agent && trimmed.starts_with('[') {
+            if !replaced {
+                lines.push(format!("  http_proxy = \"{}\"", proxy_url));
+                replaced = true;
+            }
+            in_agent = false;
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if in_agent {
+            if let Some((k, _)) = trimmed.split_once('=') {
+                let k_clean = k.trim().trim_start_matches('#').trim().to_ascii_lowercase();
+                if k_clean == "http_proxy" || k_clean == "https_proxy" || k_clean == "proxy" {
+                    lines.push(format!("  http_proxy = \"{}\"", proxy_url));
+                    replaced = true;
+                    continue;
+                }
+            }
+        } else if !has_agent_section {
+            if let Some((k, _)) = trimmed.split_once('=') {
+                let k_clean = k.trim().trim_start_matches('#').trim().to_ascii_lowercase();
+                if k_clean == "http_proxy" || k_clean == "https_proxy" || k_clean == "proxy" {
+                    lines.push(format!("http_proxy = \"{}\"", proxy_url));
+                    replaced = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_agent && !replaced {
+        lines.push(format!("  http_proxy = \"{}\"", proxy_url));
+        replaced = true;
+    }
+
+    if !replaced {
+        if has_agent_section {
+            let mut final_lines = Vec::new();
+            for l in lines {
+                let t = l.trim();
+                final_lines.push(l.clone());
+                if t.eq_ignore_ascii_case("[agent]") {
+                    final_lines.push(format!("  http_proxy = \"{}\"", proxy_url));
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push("[agent]".to_string());
+            lines.push(format!("  http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_telegraf_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "telegraf_http_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("telegraf_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once('=') {
+            let k_clean = k.trim().to_ascii_lowercase();
+            if k_clean == "http_proxy" || k_clean == "https_proxy" || k_clean == "proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_telegraf_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_telegraf_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_telegraf_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_telegraf_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_telegraf_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_telegraf_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_logstash_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_logstash = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "logstash_http_proxy" {
+                        lines.push(format!("Environment=\"LOGSTASH_HTTP_PROXY={}\"", proxy_url));
+                        replaced_logstash = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("logstash_http_proxy=") {
+                lines.push(format!("LOGSTASH_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_logstash = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_logstash {
+            lines.push(format!("Environment=\"LOGSTASH_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // jvm.options format
+    let is_jvm_options = content.lines().any(|l| {
+        let trimmed = l.trim();
+        trimmed.starts_with("-D") || trimmed.contains("jvm.options") || trimmed.contains("JVM configuration")
+    });
+
+    if is_jvm_options {
+        let (host, port) = extract_host_port(proxy_url);
+        let mut lines = Vec::new();
+        let mut replaced_host = false;
+        let mut replaced_port = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("-Dhttp.proxyHost=") || trimmed.starts_with("-Dhttps.proxyHost=") {
+                if !replaced_host {
+                    lines.push(format!("-Dhttp.proxyHost={}", host));
+                    lines.push(format!("-Dhttps.proxyHost={}", host));
+                    replaced_host = true;
+                }
+                continue;
+            } else if trimmed.starts_with("-Dhttp.proxyPort=") || trimmed.starts_with("-Dhttps.proxyPort=") {
+                if !replaced_port {
+                    lines.push(format!("-Dhttp.proxyPort={}", port));
+                    lines.push(format!("-Dhttps.proxyPort={}", port));
+                    replaced_port = true;
+                }
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_host {
+            lines.push(format!("-Dhttp.proxyHost={}", host));
+            lines.push(format!("-Dhttps.proxyHost={}", host));
+        }
+        if !replaced_port {
+            lines.push(format!("-Dhttp.proxyPort={}", port));
+            lines.push(format!("-Dhttps.proxyPort={}", port));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format: logstash.yml
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http.proxy" || key == "http_proxy" || key == "proxy" {
+                lines.push(format!("http.proxy: \"{}\"", proxy_url));
+                replaced = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(format!("http.proxy: \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_logstash_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "logstash_http_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("logstash_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if trimmed.starts_with("-Dhttp.proxyHost=")
+            || trimmed.starts_with("-Dhttps.proxyHost=")
+            || trimmed.starts_with("-Dhttp.proxyPort=")
+            || trimmed.starts_with("-Dhttps.proxyPort=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http.proxy" || key == "http_proxy" || key == "proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_logstash_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_logstash_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_logstash_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_logstash_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_logstash_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_logstash_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -13952,6 +14416,8 @@ pub async fn turn_on(
     vector: bool,
     fluent_bit: bool,
     fluentd: bool,
+    telegraf: bool,
+    logstash: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -14049,6 +14515,8 @@ pub async fn turn_on(
     let set_vector = vector || all;
     let set_fluent_bit = fluent_bit || all;
     let set_fluentd = fluentd || all;
+    let set_telegraf = telegraf || all;
+    let set_logstash = logstash || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -15390,6 +15858,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_telegraf {
+        match set_telegraf_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Telegraf metrics agent proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Telegraf metrics agent config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_logstash {
+        match set_logstash_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Logstash pipeline daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Logstash pipeline daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -15501,6 +15999,8 @@ pub fn turn_off(
     vector: bool,
     fluent_bit: bool,
     fluentd: bool,
+    telegraf: bool,
+    logstash: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -15598,6 +16098,8 @@ pub fn turn_off(
     let unset_vector = vector || all;
     let unset_fluent_bit = fluent_bit || all;
     let unset_fluentd = fluentd || all;
+    let unset_telegraf = telegraf || all;
+    let unset_logstash = logstash || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -16435,6 +16937,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Fluentd logging framework proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Fluentd logging framework proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Fluentd logging framework proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_telegraf {
+        match unset_telegraf_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Telegraf metrics agent proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Telegraf metrics proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Telegraf metrics agent proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_logstash {
+        match unset_logstash_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Logstash pipeline daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Logstash pipeline proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Logstash pipeline daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -18746,5 +19264,60 @@ sinks:
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("FLUENTD_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_telegraf_proxy() {
+        let conf_initial = r#"
+[agent]
+  interval = "10s"
+  # http_proxy = "http://old:8080"
+"#;
+        let conf_updated = apply_telegraf_proxy(conf_initial, "http://127.0.0.1:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://127.0.0.1:7890\""));
+        let (conf_cleaned, conf_removed) = remove_telegraf_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("http_proxy = \"http://127.0.0.1:7890\""));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_telegraf_proxy(dropin_initial, "http://10.0.0.13:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.13:8080\""));
+        assert!(dropin_updated.contains("Environment=\"TELEGRAF_HTTP_PROXY=http://10.0.0.13:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_telegraf_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TELEGRAF_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_logstash_proxy() {
+        let yml_initial = r#"
+pipeline.workers: 2
+"#;
+        let yml_updated = apply_logstash_proxy(yml_initial, "http://127.0.0.1:7890");
+        assert!(yml_updated.contains("http.proxy: \"http://127.0.0.1:7890\""));
+        let (yml_cleaned, yml_removed) = remove_logstash_proxy(&yml_updated);
+        assert!(yml_removed);
+        assert!(!yml_cleaned.contains("http.proxy"));
+
+        // JVM options format
+        let jvm_initial = "# JVM configuration\n-Xms1g\n";
+        let jvm_updated = apply_logstash_proxy(jvm_initial, "http://127.0.0.1:7890");
+        assert!(jvm_updated.contains("-Dhttp.proxyHost=127.0.0.1"));
+        assert!(jvm_updated.contains("-Dhttp.proxyPort=7890"));
+        let (jvm_cleaned, jvm_removed) = remove_logstash_proxy(&jvm_updated);
+        assert!(jvm_removed);
+        assert!(!jvm_cleaned.contains("-Dhttp.proxyHost"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_logstash_proxy(dropin_initial, "http://10.0.0.14:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.14:8080\""));
+        assert!(dropin_updated.contains("Environment=\"LOGSTASH_HTTP_PROXY=http://10.0.0.14:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_logstash_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("LOGSTASH_HTTP_PROXY="));
     }
 }

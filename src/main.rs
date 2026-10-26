@@ -353,7 +353,13 @@ enum Commands {
         /// Also configure Fluentd (fluentd / td-agent / fluent-package logging framework daemon) proxy (/etc/fluentd/fluent.conf / /etc/td-agent/td-agent.conf / /etc/systemd/system/fluentd.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "td-agent", visible_alias = "fluent-package")]
         fluentd: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, and fluentd proxy
+        /// Also configure Telegraf (InfluxData telegraf metrics collection agent daemon) proxy (/etc/telegraf/telegraf.conf / ~/.config/telegraf/telegraf.conf / /etc/systemd/system/telegraf.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "influx-telegraf")]
+        telegraf: bool,
+        /// Also configure Logstash (logstash log processing & ingestion pipeline daemon) proxy (/etc/logstash/logstash.yml / /etc/logstash/jvm.options / /etc/systemd/system/logstash.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "elastic-logstash")]
+        logstash: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, and logstash proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -650,7 +656,13 @@ enum Commands {
         /// Also unset Fluentd (fluentd / td-agent / fluent-package logging framework daemon) proxy (/etc/fluentd/fluent.conf / /etc/td-agent/td-agent.conf / /etc/systemd/system/fluentd.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "td-agent", visible_alias = "fluent-package")]
         fluentd: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, and fluentd proxy
+        /// Also unset Telegraf (InfluxData telegraf metrics collection agent daemon) proxy (/etc/telegraf/telegraf.conf / ~/.config/telegraf/telegraf.conf / /etc/systemd/system/telegraf.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "influx-telegraf")]
+        telegraf: bool,
+        /// Also unset Logstash (logstash log processing & ingestion pipeline daemon) proxy (/etc/logstash/logstash.yml / /etc/logstash/jvm.options / /etc/systemd/system/logstash.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "elastic-logstash")]
+        logstash: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, and logstash proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -790,6 +802,8 @@ async fn main() -> Result<()> {
             vector,
             fluent_bit,
             fluentd,
+            telegraf,
+            logstash,
             all,
             shell,
         }) => {
@@ -891,6 +905,8 @@ async fn main() -> Result<()> {
                 vector,
                 fluent_bit,
                 fluentd,
+                telegraf,
+                logstash,
                 all,
                 shell.as_deref(),
             )
@@ -993,6 +1009,8 @@ async fn main() -> Result<()> {
             vector,
             fluent_bit,
             fluentd,
+            telegraf,
+            logstash,
             all,
             shell,
         }) => {
@@ -1093,6 +1111,8 @@ async fn main() -> Result<()> {
                 vector,
                 fluent_bit,
                 fluentd,
+                telegraf,
+                logstash,
                 all,
                 shell.as_deref(),
             )?;
@@ -3699,6 +3719,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { fluentd, .. }) => {
                 assert!(fluentd);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_telegraf() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--telegraf"]).unwrap();
+        match cli.command {
+            Some(Commands::On { telegraf, .. }) => {
+                assert!(telegraf);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--influx-telegraf"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { telegraf, .. }) => {
+                assert!(telegraf);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_telegraf() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--telegraf"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { telegraf, .. }) => {
+                assert!(telegraf);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_logstash() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--logstash"]).unwrap();
+        match cli.command {
+            Some(Commands::On { logstash, .. }) => {
+                assert!(logstash);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--elastic-logstash"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { logstash, .. }) => {
+                assert!(logstash);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_logstash() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--logstash"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { logstash, .. }) => {
+                assert!(logstash);
             }
             _ => panic!("Expected Off command"),
         }

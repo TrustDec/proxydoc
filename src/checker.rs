@@ -626,6 +626,22 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Statically CDN",
         "https://cdn.statically.io",
     ),
+    (
+        "InfluxData Package CDN",
+        "https://repos.influxdata.com",
+    ),
+    (
+        "InfluxData Cloud API",
+        "https://cloud2.influxdata.com",
+    ),
+    (
+        "esm.sh CDN",
+        "https://esm.sh",
+    ),
+    (
+        "Skypack CDN",
+        "https://cdn.skypack.dev",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1405,6 +1421,18 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Statically CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InfluxData Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InfluxData Cloud API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "esm.sh CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Skypack CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
