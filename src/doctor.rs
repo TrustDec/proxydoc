@@ -16036,6 +16036,401 @@ pub fn get_winlogbeat_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_consul_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CONSUL_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("CONSUL_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("consul.hcl");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("consul").join("consul.hcl"),
+            home.join(".config").join("consul.d").join("consul.hcl"),
+            home.join(".consul.d").join("consul.hcl"),
+            home.join(".config").join("systemd").join("user").join("consul.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/consul.d/consul.hcl"),
+        PathBuf::from("/etc/consul.d/consul.json"),
+        PathBuf::from("/etc/consul.d/proxy.hcl"),
+        PathBuf::from("/etc/consul/consul.hcl"),
+        PathBuf::from("/etc/default/consul"),
+        PathBuf::from("/etc/sysconfig/consul"),
+        PathBuf::from("/etc/systemd/system/consul.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/consul-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/consul.d/consul.hcl"),
+        PathBuf::from("C:\\ProgramData\\consul\\consul.hcl"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_consul_config_path() -> Option<PathBuf> {
+    let paths = get_consul_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_consul_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_consul_write_path() -> PathBuf {
+    if let Some(p) = get_consul_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CONSUL_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_consul_d = PathBuf::from("/etc/consul.d");
+    if etc_consul_d.is_dir() {
+        return etc_consul_d.join("consul.hcl");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/consul.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("consul").join("consul.hcl");
+    }
+    PathBuf::from("/etc/consul.d/consul.hcl")
+}
+
+pub fn parse_consul_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "consul_http_proxy"
+                        || k_low == "consul_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/consul
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "consul_http_proxy"
+                || k_low == "consul_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "proxy_url"
+                || k_low == "http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // HCL or JSON consul.hcl / consul.json: proxy_url = "..." or "proxy_url": "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "https_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim_matches(',').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_consul_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_consul_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_consul_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CONSUL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CONSUL_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_vault_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("VAULT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("VAULT_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("vault.hcl");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("vault").join("vault.hcl"),
+            home.join(".config").join("vault.d").join("vault.hcl"),
+            home.join(".vault.d").join("vault.hcl"),
+            home.join(".config").join("systemd").join("user").join("vault.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/vault.d/vault.hcl"),
+        PathBuf::from("/etc/vault.d/vault.json"),
+        PathBuf::from("/etc/vault.d/vault-agent.hcl"),
+        PathBuf::from("/etc/vault/vault.hcl"),
+        PathBuf::from("/etc/default/vault"),
+        PathBuf::from("/etc/sysconfig/vault"),
+        PathBuf::from("/etc/systemd/system/vault.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/vault-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/vault.d/vault.hcl"),
+        PathBuf::from("C:\\ProgramData\\vault\\vault.hcl"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_vault_config_path() -> Option<PathBuf> {
+    let paths = get_vault_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_vault_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_vault_write_path() -> PathBuf {
+    if let Some(p) = get_vault_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("VAULT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_vault_d = PathBuf::from("/etc/vault.d");
+    if etc_vault_d.is_dir() {
+        return etc_vault_d.join("vault.hcl");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/vault.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("vault").join("vault.hcl");
+    }
+    PathBuf::from("/etc/vault.d/vault.hcl")
+}
+
+pub fn parse_vault_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "vault_http_proxy"
+                        || k_low == "vault_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/vault
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "vault_http_proxy"
+                || k_low == "vault_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "proxy_url"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // HCL or JSON vault.hcl / vault.json: http_proxy = "..." or "http_proxy": "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "proxy_url" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim_matches(',').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_vault_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_vault_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_vault_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("VAULT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VAULT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -20457,6 +20852,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Winlogbeat Event Shipper",
             "/etc/winlogbeat/winlogbeat.yml & ~/.winlogbeat/winlogbeat.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Consul Service Mesh & Discovery Daemon Proxy (/etc/consul.d/consul.hcl / ~/.consul.d/consul.hcl / /etc/systemd/system/consul.service.d/http-proxy.conf)
+    if let Some((cs_proxy, cs_path)) = get_consul_proxy() {
+        let ok = verify_proxy_url(&cs_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "HashiCorp Consul service mesh daemon proxy `{}` in {} is dead! (Consul cluster discovery, service mesh routing, and WAN federation will fail)",
+                cs_proxy,
+                cs_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Consul Service Mesh",
+            format!("{}", cs_path.display()),
+            cs_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (consul fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Consul Service Mesh",
+            "/etc/consul.d/consul.hcl & ~/.consul.d/consul.hcl",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Vault Secret Management Daemon Proxy (/etc/vault.d/vault.hcl / ~/.vault.d/vault.hcl / /etc/systemd/system/vault.service.d/http-proxy.conf)
+    if let Some((vt_proxy, vt_path)) = get_vault_proxy() {
+        let ok = verify_proxy_url(&vt_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "HashiCorp Vault secret management daemon proxy `{}` in {} is dead! (Vault auto-auth, secret retrieval, token renewal, and KMS integration will fail)",
+                vt_proxy,
+                vt_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Vault Secret Manager",
+            format!("{}", vt_path.display()),
+            vt_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (vault fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Vault Secret Manager",
+            "/etc/vault.d/vault.hcl & ~/.vault.d/vault.hcl",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -25130,5 +25589,71 @@ Environment="WINLOGBEAT_HTTP_PROXY=http://10.0.0.81:8080"
         let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_winlogbeat_proxy(input_comment), None);
         assert_eq!(parse_winlogbeat_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_consul_proxy() {
+        let hcl_conf = r#"
+datacenter = "dc1"
+http_config {
+  proxy_url = "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_consul_proxy(hcl_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="CONSUL_HTTP_PROXY=http://10.0.0.83:8080"
+"#;
+        assert_eq!(
+            parse_consul_proxy(dropin),
+            Some("http://10.0.0.83:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.84:8080\"\n";
+        assert_eq!(
+            parse_consul_proxy(default_env),
+            Some("http://10.0.0.84:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url = \"http://127.0.0.1:7890\"\n// proxy_url = \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_consul_proxy(input_comment), None);
+        assert_eq!(parse_consul_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_vault_proxy() {
+        let hcl_conf = r#"
+listener "tcp" {
+  address = "127.0.0.1:8200"
+}
+http_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_vault_proxy(hcl_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="VAULT_HTTP_PROXY=http://10.0.0.85:8080"
+"#;
+        assert_eq!(
+            parse_vault_proxy(dropin),
+            Some("http://10.0.0.85:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.86:8080\"\n";
+        assert_eq!(
+            parse_vault_proxy(default_env),
+            Some("http://10.0.0.86:8080".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// http_proxy = \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_vault_proxy(input_comment), None);
+        assert_eq!(parse_vault_proxy(""), None);
     }
 }

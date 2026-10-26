@@ -16443,6 +16443,443 @@ pub fn unset_winlogbeat_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_consul_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_consul = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "consul_http_proxy" {
+                        lines.push(format!("Environment=\"CONSUL_HTTP_PROXY={}\"", proxy_url));
+                        replaced_consul = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("consul_http_proxy=") {
+                lines.push(format!("CONSUL_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_consul = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_consul {
+            lines.push(format!("Environment=\"CONSUL_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // HCL / JSON format: consul.hcl / consul.json
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" || key == "http_proxy" || key == "https_proxy" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy_url = \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        } else if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" || key == "http_proxy" || key == "https_proxy" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}\"proxy_url\": \"{}\",", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut lines = Vec::new();
+    let mut in_http_config = false;
+    let mut inserted = false;
+    let has_http_config = content.lines().any(|l| l.trim().starts_with("http_config") && l.contains('{'));
+
+    if has_http_config {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            lines.push(line.to_string());
+            if trimmed.starts_with("http_config") && trimmed.contains('{') {
+                in_http_config = true;
+            } else if in_http_config && !inserted {
+                if !trimmed.starts_with('#') && !trimmed.starts_with("//") && !trimmed.is_empty() {
+                    lines.push(format!("  proxy_url = \"{}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+        }
+        if !inserted {
+            lines.push(format!("  proxy_url = \"{}\"", proxy_url));
+        }
+    } else {
+        if !content.trim().is_empty() {
+            lines.push(content.trim_end().to_string());
+        }
+        lines.push("http_config {".to_string());
+        lines.push(format!("  proxy_url = \"{}\"", proxy_url));
+        lines.push("}".to_string());
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_consul_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "consul_http_proxy"
+                    || k_low == "consul_https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("consul_http_proxy=")
+            || lower.starts_with("consul_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" || key == "http_proxy" || key == "https_proxy" {
+                removed = true;
+                continue;
+            }
+        } else if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" || key == "http_proxy" || key == "https_proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_consul_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_consul_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_consul_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_consul_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_consul_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_consul_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_vault_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_vault = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "vault_http_proxy" {
+                        lines.push(format!("Environment=\"VAULT_HTTP_PROXY={}\"", proxy_url));
+                        replaced_vault = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("vault_http_proxy=") {
+                lines.push(format!("VAULT_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_vault = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_vault {
+            lines.push(format!("Environment=\"VAULT_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // HCL / JSON format: vault.hcl / vault.json
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http_proxy" || key == "proxy_url" || key == "https_proxy" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}http_proxy = \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        } else if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http_proxy" || key == "proxy_url" || key == "https_proxy" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}\"http_proxy\": \"{}\",", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    if !content.trim().is_empty() {
+        lines.push(content.trim_end().to_string());
+    }
+    lines.push(format!("http_proxy = \"{}\"", proxy_url));
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_vault_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "vault_http_proxy"
+                    || k_low == "vault_https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("vault_http_proxy=")
+            || lower.starts_with("vault_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http_proxy" || key == "proxy_url" || key == "https_proxy" {
+                removed = true;
+                continue;
+            }
+        } else if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http_proxy" || key == "proxy_url" || key == "https_proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_vault_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_vault_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_vault_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_vault_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_vault_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_vault_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -16553,6 +16990,8 @@ pub async fn turn_on(
     auditbeat: bool,
     packetbeat: bool,
     winlogbeat: bool,
+    consul: bool,
+    vault: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -16662,6 +17101,8 @@ pub async fn turn_on(
     let set_auditbeat = auditbeat || all;
     let set_packetbeat = packetbeat || all;
     let set_winlogbeat = winlogbeat || all;
+    let set_consul = consul || all;
+    let set_vault = vault || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -18183,6 +18624,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_consul {
+        match set_consul_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Consul service mesh daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Consul daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_vault {
+        match set_vault_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Vault secret management daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Vault daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -18306,6 +18777,8 @@ pub fn turn_off(
     auditbeat: bool,
     packetbeat: bool,
     winlogbeat: bool,
+    consul: bool,
+    vault: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -18415,6 +18888,8 @@ pub fn turn_off(
     let unset_auditbeat = auditbeat || all;
     let unset_packetbeat = packetbeat || all;
     let unset_winlogbeat = winlogbeat || all;
+    let unset_consul = consul || all;
+    let unset_vault = vault || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -19348,6 +19823,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Winlogbeat event shipper daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Winlogbeat event shipper proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Winlogbeat event shipper daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_consul {
+        match unset_consul_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Consul service mesh daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Consul service mesh proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Consul service mesh daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_vault {
+        match unset_vault_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Vault secret management daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Vault secret management proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Vault secret management daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -21947,5 +22438,55 @@ output.elasticsearch:
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("WINLOGBEAT_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_consul_proxy() {
+        let hcl_initial = r#"
+datacenter = "dc1"
+http_config {
+  proxy_url = "http://127.0.0.1:7890"
+}
+"#;
+        let hcl_updated = apply_consul_proxy(hcl_initial, "http://10.0.0.34:8080");
+        assert!(hcl_updated.contains("proxy_url = \"http://10.0.0.34:8080\""));
+        let (hcl_cleaned, hcl_removed) = remove_consul_proxy(&hcl_updated);
+        assert!(hcl_removed);
+        assert!(!hcl_cleaned.contains("proxy_url ="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_consul_proxy(dropin_initial, "http://10.0.0.34:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.34:8080\""));
+        assert!(dropin_updated.contains("Environment=\"CONSUL_HTTP_PROXY=http://10.0.0.34:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_consul_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("CONSUL_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_vault_proxy() {
+        let hcl_initial = r#"
+listener "tcp" {
+  address = "127.0.0.1:8200"
+}
+http_proxy = "http://127.0.0.1:7890"
+"#;
+        let hcl_updated = apply_vault_proxy(hcl_initial, "http://10.0.0.35:8080");
+        assert!(hcl_updated.contains("http_proxy = \"http://10.0.0.35:8080\""));
+        let (hcl_cleaned, hcl_removed) = remove_vault_proxy(&hcl_updated);
+        assert!(hcl_removed);
+        assert!(!hcl_cleaned.contains("http_proxy ="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_vault_proxy(dropin_initial, "http://10.0.0.35:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.35:8080\""));
+        assert!(dropin_updated.contains("Environment=\"VAULT_HTTP_PROXY=http://10.0.0.35:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_vault_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("VAULT_HTTP_PROXY="));
     }
 }

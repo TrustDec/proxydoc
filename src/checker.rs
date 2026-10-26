@@ -750,6 +750,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "OpenNebula CDN",
         "https://opennebula.io",
     ),
+    (
+        "Cloudflare Workers CDN",
+        "https://workers.cloudflare.com",
+    ),
+    (
+        "Traefik Proxy CDN",
+        "https://traefik.io",
+    ),
+    (
+        "Envoy Proxy CDN",
+        "https://www.envoyproxy.io",
+    ),
+    (
+        "Caddy Web Server CDN",
+        "https://caddyserver.com",
+    ),
+    (
+        "Kong API Gateway CDN",
+        "https://konghq.com",
+    ),
+    (
+        "RabbitMQ CDN",
+        "https://www.rabbitmq.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1622,6 +1646,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "OpenNebula CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Cloudflare Workers CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Traefik Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Envoy Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Caddy Web Server CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Kong API Gateway CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "RabbitMQ CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
