@@ -10304,6 +10304,482 @@ pub fn unset_azure_pipelines_agent_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_teamcity_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+    let (host, port) = extract_host_port(proxy_url);
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "all_proxy" || k_low == "teamcity_http_proxy" || k_low == "buildagent_http_proxy" {
+                        lines.push(format!("Environment=\"TEAMCITY_HTTP_PROXY={}\"", proxy_url));
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Default: Java properties file format for buildAgent.properties
+    let mut lines = Vec::new();
+    let mut env_http_set = false;
+    let mut env_https_set = false;
+    let mut env_no_set = false;
+    let mut host_set = false;
+    let mut port_set = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') || trim.starts_with('!') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "env.http_proxy" {
+                lines.push(format!("env.HTTP_PROXY={}", proxy_url));
+                env_http_set = true;
+                continue;
+            } else if key == "env.https_proxy" {
+                lines.push(format!("env.HTTPS_PROXY={}", proxy_url));
+                env_https_set = true;
+                continue;
+            } else if key == "env.no_proxy" {
+                lines.push(format!("env.NO_PROXY={}", no_proxy_def));
+                env_no_set = true;
+                continue;
+            } else if key == "teamcity.http.proxyhost" || key == "http.proxyhost" {
+                lines.push(format!("teamcity.http.proxyHost={}", host));
+                host_set = true;
+                continue;
+            } else if key == "teamcity.http.proxyport" || key == "http.proxyport" {
+                lines.push(format!("teamcity.http.proxyPort={}", port));
+                port_set = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !env_http_set {
+        lines.push(format!("env.HTTP_PROXY={}", proxy_url));
+    }
+    if !env_https_set {
+        lines.push(format!("env.HTTPS_PROXY={}", proxy_url));
+    }
+    if !env_no_set {
+        lines.push(format!("env.NO_PROXY={}", no_proxy_def));
+    }
+    if !host_set {
+        lines.push(format!("teamcity.http.proxyHost={}", host));
+    }
+    if !port_set {
+        lines.push(format!("teamcity.http.proxyPort={}", port));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_teamcity_agent_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') || trim.starts_with('!') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "teamcity_http_proxy"
+                    || k_low == "buildagent_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "env.http_proxy"
+                || key == "env.https_proxy"
+                || key == "env.all_proxy"
+                || key == "env.no_proxy"
+                || key == "teamcity.http.proxyhost"
+                || key == "teamcity.http.proxyport"
+                || key == "teamcity.https.proxyhost"
+                || key == "teamcity.https.proxyport"
+                || key == "teamcity_http_proxy"
+                || key == "buildagent_http_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_teamcity_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_teamcity_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_teamcity_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_teamcity_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_teamcity_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_teamcity_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_bamboo_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+    let (host, port) = extract_host_port(proxy_url);
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "all_proxy" || k_low == "bamboo_http_proxy" || k_low == "bamboo_agent_http_proxy" {
+                        lines.push(format!("Environment=\"BAMBOO_HTTP_PROXY={}\"", proxy_url));
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Wrapper.conf format
+    if content.lines().any(|l| l.trim().starts_with("wrapper.")) {
+        let mut lines = Vec::new();
+        let mut max_idx = 0;
+        for line in content.lines() {
+            let trim = line.trim();
+            if trim.contains("-Dhttp.proxyHost")
+                || trim.contains("-Dhttp.proxyPort")
+                || trim.contains("-Dhttps.proxyHost")
+                || trim.contains("-Dhttps.proxyPort")
+                || trim.contains("-Dhttp.nonProxyHosts")
+            {
+                continue;
+            }
+            if let Some(rest) = trim.strip_prefix("wrapper.java.additional.") {
+                if let Some((idx_str, _)) = rest.split_once('=') {
+                    if let Ok(idx) = idx_str.trim().parse::<u32>() {
+                        if idx > max_idx {
+                            max_idx = idx;
+                        }
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        lines.push(format!("wrapper.java.additional.{} = -Dhttp.proxyHost={}", max_idx + 1, host));
+        lines.push(format!("wrapper.java.additional.{} = -Dhttp.proxyPort={}", max_idx + 2, port));
+        lines.push(format!("wrapper.java.additional.{} = -Dhttps.proxyHost={}", max_idx + 3, host));
+        lines.push(format!("wrapper.java.additional.{} = -Dhttps.proxyPort={}", max_idx + 4, port));
+        return lines.join("\n") + "\n";
+    }
+
+    // XML format: bamboo-agent.cfg.xml
+    let is_xml = content.contains("<configuration>") || content.contains("<?xml") || content.trim().is_empty();
+    if is_xml {
+        if content.contains("<configuration>") {
+            let mut lines = Vec::new();
+            let mut host_set = false;
+            let mut port_set = false;
+
+            for line in content.lines() {
+                let trim = line.trim();
+                if (trim.starts_with("<httpProxyHost>") && trim.ends_with("</httpProxyHost>"))
+                    || (trim.starts_with("<proxyHost>") && trim.ends_with("</proxyHost>"))
+                {
+                    lines.push(format!("  <httpProxyHost>{}</httpProxyHost>", host));
+                    host_set = true;
+                    continue;
+                }
+                if (trim.starts_with("<httpProxyPort>") && trim.ends_with("</httpProxyPort>"))
+                    || (trim.starts_with("<proxyPort>") && trim.ends_with("</proxyPort>"))
+                {
+                    lines.push(format!("  <httpProxyPort>{}</httpProxyPort>", port));
+                    port_set = true;
+                    continue;
+                }
+                if trim == "</configuration>" {
+                    if !host_set {
+                        lines.push(format!("  <httpProxyHost>{}</httpProxyHost>", host));
+                    }
+                    if !port_set {
+                        lines.push(format!("  <httpProxyPort>{}</httpProxyPort>", port));
+                    }
+                }
+                lines.push(line.to_string());
+            }
+            return lines.join("\n") + "\n";
+        } else {
+            return format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n  <httpProxyHost>{}</httpProxyHost>\n  <httpProxyPort>{}</httpProxyPort>\n</configuration>\n",
+                host, port
+            );
+        }
+    }
+
+    // Default key=value
+    format!("BAMBOO_HTTP_PROXY=\"{}\"\n", proxy_url)
+}
+
+pub fn remove_bamboo_agent_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut changed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "bamboo_http_proxy"
+                    || k_low == "bamboo_agent_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "no_proxy"
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if (trim.starts_with("<httpProxyHost>") && trim.ends_with("</httpProxyHost>"))
+            || (trim.starts_with("<httpProxyPort>") && trim.ends_with("</httpProxyPort>"))
+            || (trim.starts_with("<proxyHost>") && trim.ends_with("</proxyHost>"))
+            || (trim.starts_with("<proxyPort>") && trim.ends_with("</proxyPort>"))
+        {
+            changed = true;
+            continue;
+        }
+
+        if trim.contains("-Dhttp.proxyHost")
+            || trim.contains("-Dhttp.proxyPort")
+            || trim.contains("-Dhttps.proxyHost")
+            || trim.contains("-Dhttps.proxyPort")
+            || trim.contains("-Dhttp.nonProxyHosts")
+        {
+            changed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            if key == "bamboo_http_proxy"
+                || key == "bamboo_agent_http_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy"
+                || key == "no_proxy"
+            {
+                changed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", changed)
+}
+
+pub fn set_bamboo_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_bamboo_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_bamboo_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_bamboo_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_bamboo_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_bamboo_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -10386,6 +10862,8 @@ pub async fn turn_on(
     act_runner: bool,
     circleci_runner: bool,
     azure_pipelines_agent: bool,
+    teamcity_agent: bool,
+    bamboo_agent: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -10467,6 +10945,8 @@ pub async fn turn_on(
     let set_act_runner = act_runner || all;
     let set_circleci_runner = circleci_runner || all;
     let set_azure_pipelines_agent = azure_pipelines_agent || all;
+    let set_teamcity_agent = teamcity_agent || all;
+    let set_bamboo_agent = bamboo_agent || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -11568,6 +12048,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_teamcity_agent {
+        match set_teamcity_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ TeamCity Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update TeamCity Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_bamboo_agent {
+        match set_bamboo_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Bamboo Remote Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Bamboo Remote Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -11663,6 +12173,8 @@ pub fn turn_off(
     act_runner: bool,
     circleci_runner: bool,
     azure_pipelines_agent: bool,
+    teamcity_agent: bool,
+    bamboo_agent: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -11744,6 +12256,8 @@ pub fn turn_off(
     let unset_act_runner = act_runner || all;
     let unset_circleci_runner = circleci_runner || all;
     let unset_azure_pipelines_agent = azure_pipelines_agent || all;
+    let unset_teamcity_agent = teamcity_agent || all;
+    let unset_bamboo_agent = bamboo_agent || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -12453,6 +12967,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Azure Pipelines Agent daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Azure Pipelines Agent proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Azure Pipelines Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_teamcity_agent {
+        match unset_teamcity_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ TeamCity Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ TeamCity Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset TeamCity Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_bamboo_agent {
+        match unset_bamboo_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Bamboo Remote Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Bamboo Remote Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Bamboo Remote Agent daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -14346,5 +14876,56 @@ check_interval = 0
         let (env_cleaned, env_removed) = remove_azure_pipelines_agent_proxy(&env_updated);
         assert!(env_removed);
         assert!(!env_cleaned.contains("VSTS_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_teamcity_agent_proxy() {
+        // Properties format
+        let props_initial = "serverUrl=http://teamcity:8111\n";
+        let props_updated = apply_teamcity_agent_proxy(props_initial, "http://127.0.0.1:7890");
+        assert!(props_updated.contains("env.HTTP_PROXY=http://127.0.0.1:7890"));
+        assert!(props_updated.contains("teamcity.http.proxyHost=127.0.0.1"));
+        assert!(props_updated.contains("teamcity.http.proxyPort=7890"));
+        let (props_cleaned, props_removed) = remove_teamcity_agent_proxy(&props_updated);
+        assert!(props_removed);
+        assert!(!props_cleaned.contains("env.HTTP_PROXY="));
+        assert!(!props_cleaned.contains("teamcity.http.proxyHost="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_teamcity_agent_proxy(dropin_initial, "http://10.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_teamcity_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_bamboo_agent_proxy() {
+        // XML format
+        let xml_initial = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n  <buildDirectory>/test</buildDirectory>\n</configuration>\n";
+        let xml_updated = apply_bamboo_agent_proxy(xml_initial, "http://127.0.0.1:7890");
+        assert!(xml_updated.contains("<httpProxyHost>127.0.0.1</httpProxyHost>"));
+        assert!(xml_updated.contains("<httpProxyPort>7890</httpProxyPort>"));
+        let (xml_cleaned, xml_removed) = remove_bamboo_agent_proxy(&xml_updated);
+        assert!(xml_removed);
+        assert!(!xml_cleaned.contains("<httpProxyHost>"));
+
+        // Wrapper.conf format
+        let wrap_initial = "wrapper.java.additional.1=-Dparam=true\n";
+        let wrap_updated = apply_bamboo_agent_proxy(wrap_initial, "http://10.0.0.2:8080");
+        assert!(wrap_updated.contains("-Dhttp.proxyHost=10.0.0.2"));
+        assert!(wrap_updated.contains("-Dhttp.proxyPort=8080"));
+        let (wrap_cleaned, wrap_removed) = remove_bamboo_agent_proxy(&wrap_updated);
+        assert!(wrap_removed);
+        assert!(!wrap_cleaned.contains("-Dhttp.proxyHost="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_bamboo_agent_proxy(dropin_initial, "http://10.0.0.1:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.1:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_bamboo_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
     }
 }

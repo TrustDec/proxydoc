@@ -482,6 +482,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "NixOS Binary Cache",
         "https://cache.nixos.org/nix-cache-info",
     ),
+    (
+        "JetBrains Marketplace & Plugins",
+        "https://plugins.jetbrains.com",
+    ),
+    (
+        "Atlassian API & Bitbucket",
+        "https://api.bitbucket.org",
+    ),
+    (
+        "NetBSD CDN",
+        "https://cdn.openbsd.org/pub/OpenBSD/",
+    ),
+    (
+        "Debian Archive CDN",
+        "https://deb.debian.org/debian/",
+    ),
+    (
+        "Ubuntu Archive CDN",
+        "https://archive.ubuntu.com/ubuntu/",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1177,6 +1197,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "NixOS Binary Cache"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "JetBrains Marketplace & Plugins"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Atlassian API & Bitbucket"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "NetBSD CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Debian Archive CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Ubuntu Archive CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

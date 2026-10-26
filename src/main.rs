@@ -305,7 +305,13 @@ enum Commands {
         /// Also configure Azure Pipelines Agent (vsts-agent / azp-agent CI runner daemon) proxy (~/azure-pipelines-agent/.proxy / /etc/azure-pipelines-agent/.proxy / /etc/systemd/system/azure-pipelines-agent.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "azure-pipelines", visible_alias = "vsts-agent", visible_alias = "azp-agent", visible_alias = "azure-agent")]
         azure_pipelines_agent: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, and azure-pipelines-agent proxy
+        /// Also configure JetBrains TeamCity Agent (buildAgent CI runner daemon) proxy (~/buildAgent/conf/buildAgent.properties / /opt/buildagent/conf/buildAgent.properties / /etc/systemd/system/teamcity-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "teamcity", visible_alias = "buildagent", visible_alias = "tc-agent")]
+        teamcity_agent: bool,
+        /// Also configure Atlassian Bamboo Remote Agent (bamboo-agent CI runner daemon) proxy (~/bamboo-agent-home/bamboo-agent.cfg.xml / /opt/bamboo-agent/conf/wrapper.conf / /etc/systemd/system/bamboo-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "bamboo", visible_alias = "atlassian-agent", visible_alias = "bamboo-agent")]
+        bamboo_agent: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, and bamboo-agent proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -554,6 +560,12 @@ enum Commands {
         /// Also unset Azure Pipelines Agent (vsts-agent / azp-agent CI runner daemon) proxy (~/azure-pipelines-agent/.proxy / /etc/azure-pipelines-agent/.proxy / /etc/systemd/system/azure-pipelines-agent.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "azure-pipelines", visible_alias = "vsts-agent", visible_alias = "azp-agent", visible_alias = "azure-agent")]
         azure_pipelines_agent: bool,
+        /// Also unset JetBrains TeamCity Agent (buildAgent CI runner daemon) proxy (~/buildAgent/conf/buildAgent.properties / /opt/buildagent/conf/buildAgent.properties / /etc/systemd/system/teamcity-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "teamcity", visible_alias = "buildagent", visible_alias = "tc-agent")]
+        teamcity_agent: bool,
+        /// Also unset Atlassian Bamboo Remote Agent (bamboo-agent CI runner daemon) proxy (~/bamboo-agent-home/bamboo-agent.cfg.xml / /opt/bamboo-agent/conf/wrapper.conf / /etc/systemd/system/bamboo-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "bamboo", visible_alias = "atlassian-agent", visible_alias = "bamboo-agent")]
+        bamboo_agent: bool,
         /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, and azure-pipelines-agent proxy
         #[arg(short, long)]
         all: bool,
@@ -678,6 +690,8 @@ async fn main() -> Result<()> {
             act_runner,
             circleci_runner,
             azure_pipelines_agent,
+            teamcity_agent,
+            bamboo_agent,
             all,
             shell,
         }) => {
@@ -763,6 +777,8 @@ async fn main() -> Result<()> {
                 act_runner,
                 circleci_runner,
                 azure_pipelines_agent,
+                teamcity_agent,
+                bamboo_agent,
                 all,
                 shell.as_deref(),
             )
@@ -849,6 +865,8 @@ async fn main() -> Result<()> {
             act_runner,
             circleci_runner,
             azure_pipelines_agent,
+            teamcity_agent,
+            bamboo_agent,
             all,
             shell,
         }) => {
@@ -933,6 +951,8 @@ async fn main() -> Result<()> {
                 act_runner,
                 circleci_runner,
                 azure_pipelines_agent,
+                teamcity_agent,
+                bamboo_agent,
                 all,
                 shell.as_deref(),
             )?;
@@ -3019,6 +3039,90 @@ mod tests {
         match cli.command {
             Some(Commands::Off { azure_pipelines_agent, .. }) => {
                 assert!(azure_pipelines_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_teamcity_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--teamcity-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { teamcity_agent, .. }) => {
+                assert!(teamcity_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--teamcity"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { teamcity_agent, .. }) => {
+                assert!(teamcity_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--buildagent"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { teamcity_agent, .. }) => {
+                assert!(teamcity_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--tc-agent"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { teamcity_agent, .. }) => {
+                assert!(teamcity_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_teamcity_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--teamcity-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { teamcity_agent, .. }) => {
+                assert!(teamcity_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_bamboo_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--bamboo-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { bamboo_agent, .. }) => {
+                assert!(bamboo_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--bamboo"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { bamboo_agent, .. }) => {
+                assert!(bamboo_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--atlassian-agent"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { bamboo_agent, .. }) => {
+                assert!(bamboo_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_bamboo_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--bamboo-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { bamboo_agent, .. }) => {
+                assert!(bamboo_agent);
             }
             _ => panic!("Expected Off command"),
         }

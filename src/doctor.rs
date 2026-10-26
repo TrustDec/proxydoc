@@ -10354,6 +10354,488 @@ pub fn get_azure_pipelines_agent_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_teamcity_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TEAMCITY_AGENT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("BUILD_AGENT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join("buildAgent").join("conf").join("buildAgent.properties"),
+            home.join(".buildAgent").join("buildAgent.properties"),
+            home.join("buildagent").join("conf").join("buildAgent.properties"),
+            home.join(".teamcity-agent").join("buildAgent.properties"),
+            home.join(".config").join("systemd").join("user").join("teamcity-agent.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("buildagent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/opt/buildagent/conf/buildAgent.properties"),
+        PathBuf::from("/opt/teamcity-agent/conf/buildAgent.properties"),
+        PathBuf::from("/var/lib/teamcity-agent/conf/buildAgent.properties"),
+        PathBuf::from("/etc/buildagent/conf/buildAgent.properties"),
+        PathBuf::from("/etc/teamcity-agent/conf/buildAgent.properties"),
+        PathBuf::from("/etc/teamcity-agent.properties"),
+        PathBuf::from("/etc/systemd/system/teamcity-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/buildagent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/teamcity-agent"),
+        PathBuf::from("/etc/default/buildagent"),
+        PathBuf::from("/etc/sysconfig/teamcity-agent"),
+        PathBuf::from("/etc/systemd/system/teamcity-agent.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_teamcity_agent_config_path() -> Option<PathBuf> {
+    let paths = get_teamcity_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_teamcity_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_teamcity_agent_write_path() -> PathBuf {
+    if let Some(p) = get_teamcity_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TEAMCITY_AGENT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("BUILD_AGENT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let opt_dir = PathBuf::from("/opt/buildagent/conf");
+    if opt_dir.is_dir() {
+        return opt_dir.join("buildAgent.properties");
+    }
+    let etc_dir = PathBuf::from("/etc/teamcity-agent/conf");
+    if etc_dir.is_dir() {
+        return etc_dir.join("buildAgent.properties");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/teamcity-agent.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join("buildAgent").join("conf").join("buildAgent.properties");
+    }
+    PathBuf::from("/etc/teamcity-agent/conf/buildAgent.properties")
+}
+
+pub fn parse_teamcity_agent_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') || trim.starts_with('!') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "teamcity_http_proxy"
+                        || k_low == "buildagent_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Properties format
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "env.http_proxy"
+                || key == "env.https_proxy"
+                || key == "env.all_proxy"
+                || key == "teamcity_http_proxy"
+                || key == "buildagent_http_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+
+    // Secondary scan for teamcity.http.proxyHost and teamcity.http.proxyPort
+    let mut host: Option<String> = None;
+    let mut port: Option<String> = None;
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') || trim.starts_with('!') {
+            continue;
+        }
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if key == "teamcity.http.proxyhost" || key == "http.proxyhost" {
+                if !val.is_empty() {
+                    host = Some(val.to_string());
+                }
+            } else if key == "teamcity.http.proxyport" || key == "http.proxyport" {
+                if !val.is_empty() {
+                    port = Some(val.to_string());
+                }
+            }
+        }
+    }
+    if let Some(h) = host {
+        let p = port.as_deref().unwrap_or("80");
+        return Some(if h.starts_with("http://") || h.starts_with("https://") {
+            format!("{}:{}", h, p)
+        } else {
+            format!("http://{}:{}", h, p)
+        });
+    }
+
+    None
+}
+
+pub fn get_teamcity_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_teamcity_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_teamcity_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TEAMCITY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TEAMCITY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BUILDAGENT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BUILDAGENT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_bamboo_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("BAMBOO_AGENT_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("BAMBOO_AGENT_HOME") {
+        let p_cfg = PathBuf::from(dir.trim()).join("bamboo-agent.cfg.xml");
+        if p_cfg.exists() && !paths.contains(&p_cfg) {
+            paths.push(p_cfg);
+        }
+        let p_wrap = PathBuf::from(dir.trim()).join("conf").join("wrapper.conf");
+        if p_wrap.exists() && !paths.contains(&p_wrap) {
+            paths.push(p_wrap);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join("bamboo-agent-home").join("bamboo-agent.cfg.xml"),
+            home.join("bamboo-agent-home").join("conf").join("wrapper.conf"),
+            home.join("bamboo-agent").join("conf").join("wrapper.conf"),
+            home.join(".bamboo").join("bamboo-agent.cfg.xml"),
+            home.join(".config").join("systemd").join("user").join("bamboo-agent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/opt/bamboo-agent/bamboo-agent.cfg.xml"),
+        PathBuf::from("/opt/bamboo-agent/conf/wrapper.conf"),
+        PathBuf::from("/var/lib/bamboo-agent/bamboo-agent.cfg.xml"),
+        PathBuf::from("/etc/bamboo-agent/bamboo-agent.cfg.xml"),
+        PathBuf::from("/etc/bamboo-agent/wrapper.conf"),
+        PathBuf::from("/etc/systemd/system/bamboo-agent.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/default/bamboo-agent"),
+        PathBuf::from("/etc/sysconfig/bamboo-agent"),
+        PathBuf::from("/etc/systemd/system/bamboo-agent.service.env"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_bamboo_agent_config_path() -> Option<PathBuf> {
+    let paths = get_bamboo_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_bamboo_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_bamboo_agent_write_path() -> PathBuf {
+    if let Some(p) = get_bamboo_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("BAMBOO_AGENT_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(dir) = std::env::var("BAMBOO_AGENT_HOME") {
+        return PathBuf::from(dir.trim()).join("bamboo-agent.cfg.xml");
+    }
+    let opt_dir = PathBuf::from("/opt/bamboo-agent");
+    if opt_dir.is_dir() {
+        return opt_dir.join("bamboo-agent.cfg.xml");
+    }
+    let etc_dir = PathBuf::from("/etc/bamboo-agent");
+    if etc_dir.is_dir() {
+        return etc_dir.join("bamboo-agent.cfg.xml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/bamboo-agent.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join("bamboo-agent-home").join("bamboo-agent.cfg.xml");
+    }
+    PathBuf::from("/etc/bamboo-agent/bamboo-agent.cfg.xml")
+}
+
+pub fn parse_bamboo_agent_proxy(content: &str) -> Option<String> {
+    let mut host: Option<String> = None;
+    let mut port: Option<String> = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "bamboo_http_proxy"
+                        || k_low == "bamboo_agent_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // XML format: <httpProxyHost>host</httpProxyHost> / <httpProxyPort>port</httpProxyPort>
+        if (trim.contains("<httpProxyHost>") && trim.contains("</httpProxyHost>"))
+            || (trim.contains("<proxyHost>") && trim.contains("</proxyHost>"))
+        {
+            let h = trim
+                .trim_start_matches(|c| c != '>')
+                .trim_start_matches('>')
+                .trim_end_matches(|c| c != '<')
+                .trim_end_matches('<')
+                .trim();
+            if !h.is_empty() {
+                host = Some(h.to_string());
+            }
+        }
+        if (trim.contains("<httpProxyPort>") && trim.contains("</httpProxyPort>"))
+            || (trim.contains("<proxyPort>") && trim.contains("</proxyPort>"))
+        {
+            let p = trim
+                .trim_start_matches(|c| c != '>')
+                .trim_start_matches('>')
+                .trim_end_matches(|c| c != '<')
+                .trim_end_matches('<')
+                .trim();
+            if !p.is_empty() {
+                port = Some(p.to_string());
+            }
+        }
+
+        // wrapper.conf format
+        if trim.contains("-Dhttp.proxyHost=") || trim.contains("-Dhttps.proxyHost=") {
+            if let Some((_, v)) = trim.split_once("-Dhttp.proxyHost=")
+                .or_else(|| trim.split_once("-Dhttps.proxyHost="))
+            {
+                let h = v.split_whitespace().next().unwrap_or("").trim_matches('"').trim_matches('\'').trim();
+                if !h.is_empty() {
+                    host = Some(h.to_string());
+                }
+            }
+        }
+        if trim.contains("-Dhttp.proxyPort=") || trim.contains("-Dhttps.proxyPort=") {
+            if let Some((_, v)) = trim.split_once("-Dhttp.proxyPort=")
+                .or_else(|| trim.split_once("-Dhttps.proxyPort="))
+            {
+                let p = v.split_whitespace().next().unwrap_or("").trim_matches('"').trim_matches('\'').trim();
+                if !p.is_empty() {
+                    port = Some(p.to_string());
+                }
+            }
+        }
+
+        // Key=value format
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "bamboo_http_proxy"
+                || key == "bamboo_agent_http_proxy"
+                || key == "http_proxy"
+                || key == "https_proxy"
+                || key == "all_proxy")
+                && !val.is_empty()
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+
+    if let Some(h) = host {
+        let p = port.as_deref().unwrap_or("80");
+        return Some(if h.starts_with("http://") || h.starts_with("https://") {
+            format!("{}:{}", h, p)
+        } else {
+            format!("http://{}:{}", h, p)
+        });
+    }
+
+    None
+}
+
+pub fn get_bamboo_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_bamboo_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_bamboo_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("BAMBOO_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BAMBOO_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BAMBOO_AGENT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BAMBOO_AGENT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -13879,6 +14361,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Azure Pipelines Agent",
             "~/azure-pipelines-agent/.proxy & /etc/azure-pipelines-agent/.proxy",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // JetBrains TeamCity Agent (buildAgent) CI Daemon Proxy (~/buildAgent/conf/buildAgent.properties / /opt/buildagent/conf/buildAgent.properties / /etc/systemd/system/teamcity-agent.service.d/http-proxy.conf)
+    if let Some((tc_proxy, tc_path)) = get_teamcity_agent_proxy() {
+        let ok = verify_proxy_url(&tc_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "TeamCity Agent CI daemon proxy `{}` in {} is dead! (Build job execution and agent artifact publish will fail)",
+                tc_proxy,
+                tc_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "TeamCity Agent CI",
+            format!("{}", tc_path.display()),
+            tc_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (buildAgent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "TeamCity Agent CI",
+            "~/buildAgent/conf/buildAgent.properties & /opt/buildagent/conf/buildAgent.properties",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Atlassian Bamboo Remote Agent CI Daemon Proxy (~/bamboo-agent-home/bamboo-agent.cfg.xml / /opt/bamboo-agent/conf/wrapper.conf / /etc/systemd/system/bamboo-agent.service.d/http-proxy.conf)
+    if let Some((bam_proxy, bam_path)) = get_bamboo_agent_proxy() {
+        let ok = verify_proxy_url(&bam_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Bamboo Remote Agent CI daemon proxy `{}` in {} is dead! (Build tasks and server communication will fail)",
+                bam_proxy,
+                bam_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Bamboo Agent CI",
+            format!("{}", bam_path.display()),
+            bam_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (bamboo-agent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Bamboo Agent CI",
+            "~/bamboo-agent-home/bamboo-agent.cfg.xml & /opt/bamboo-agent/conf/wrapper.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -17532,5 +18078,83 @@ Environment="HTTP_PROXY=http://10.0.0.3:8080"
         let input_comment = "# http://127.0.0.1:7890\n";
         assert_eq!(parse_azure_pipelines_agent_proxy(input_comment), None);
         assert_eq!(parse_azure_pipelines_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_teamcity_agent_proxy() {
+        // Properties format
+        let props = r#"
+serverUrl=http://teamcity:8111
+env.HTTP_PROXY=http://127.0.0.1:7890
+env.HTTPS_PROXY=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_teamcity_agent_proxy(props),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        // Host and port format
+        let props_hp = r#"
+teamcity.http.proxyHost=10.0.0.5
+teamcity.http.proxyPort=8080
+"#;
+        assert_eq!(
+            parse_teamcity_agent_proxy(props_hp),
+            Some("http://10.0.0.5:8080".to_string())
+        );
+
+        // Systemd drop-in format
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:9090"
+"#;
+        assert_eq!(
+            parse_teamcity_agent_proxy(dropin),
+            Some("http://127.0.0.1:9090".to_string())
+        );
+
+        let input_comment = "# env.HTTP_PROXY=http://127.0.0.1:7890\n";
+        assert_eq!(parse_teamcity_agent_proxy(input_comment), None);
+        assert_eq!(parse_teamcity_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_bamboo_agent_proxy() {
+        // XML configuration format
+        let xml_file = r#"<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <buildDirectory>/home/bamboo/xml-data/build-dir</buildDirectory>
+  <httpProxyHost>127.0.0.1</httpProxyHost>
+  <httpProxyPort>7890</httpProxyPort>
+</configuration>
+"#;
+        assert_eq!(
+            parse_bamboo_agent_proxy(xml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        // Wrapper.conf format
+        let wrap_file = r#"
+wrapper.java.additional.1=-Dhttp.proxyHost=10.0.0.6
+wrapper.java.additional.2=-Dhttp.proxyPort=8118
+"#;
+        assert_eq!(
+            parse_bamboo_agent_proxy(wrap_file),
+            Some("http://10.0.0.6:8118".to_string())
+        );
+
+        // Systemd drop-in format
+        let dropin = r#"
+[Service]
+Environment="BAMBOO_HTTP_PROXY=http://127.0.0.1:8080"
+"#;
+        assert_eq!(
+            parse_bamboo_agent_proxy(dropin),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let input_comment = "# <httpProxyHost>127.0.0.1</httpProxyHost>\n";
+        assert_eq!(parse_bamboo_agent_proxy(input_comment), None);
+        assert_eq!(parse_bamboo_agent_proxy(""), None);
     }
 }
