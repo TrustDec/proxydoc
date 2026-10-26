@@ -642,6 +642,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Skypack CDN",
         "https://cdn.skypack.dev",
     ),
+    (
+        "Prometheus CDN",
+        "https://prometheus.io",
+    ),
+    (
+        "Thanos Monitoring CDN",
+        "https://thanos.io",
+    ),
+    (
+        "Cortex Metrics CDN",
+        "https://cortexmetrics.io",
+    ),
+    (
+        "PagerDuty Events API",
+        "https://events.pagerduty.com",
+    ),
+    (
+        "OpsGenie Alert API",
+        "https://api.opsgenie.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1433,6 +1453,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Skypack CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Prometheus CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Thanos Monitoring CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Cortex Metrics CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "PagerDuty Events API"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpsGenie Alert API"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

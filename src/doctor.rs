@@ -14222,6 +14222,366 @@ pub fn get_logstash_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_prometheus_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PROMETHEUS_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("prometheus").join("prometheus.yml"),
+            home.join(".prometheus").join("prometheus.yml"),
+            home.join(".config").join("systemd").join("user").join("prometheus.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/prometheus/prometheus.yml"),
+        PathBuf::from("/etc/prometheus/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/prometheus"),
+        PathBuf::from("/etc/sysconfig/prometheus"),
+        PathBuf::from("/etc/systemd/system/prometheus.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/prometheus.yml"),
+        PathBuf::from("C:\\Program Files\\Prometheus\\prometheus.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_prometheus_config_path() -> Option<PathBuf> {
+    let paths = get_prometheus_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_prometheus_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_prometheus_write_path() -> PathBuf {
+    if let Some(p) = get_prometheus_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PROMETHEUS_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_prom = PathBuf::from("/etc/prometheus");
+    if etc_prom.is_dir() {
+        return etc_prom.join("prometheus.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/prometheus.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("prometheus").join("prometheus.yml");
+    }
+    PathBuf::from("/etc/prometheus/prometheus.yml")
+}
+
+pub fn parse_prometheus_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "prometheus_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/prometheus
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "prometheus_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML prometheus.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_prometheus_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_prometheus_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_prometheus_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PROMETHEUS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PROMETHEUS_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_alertmanager_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ALERTMANAGER_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("alertmanager").join("alertmanager.yml"),
+            home.join(".alertmanager").join("alertmanager.yml"),
+            home.join(".config").join("systemd").join("user").join("alertmanager.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/alertmanager/alertmanager.yml"),
+        PathBuf::from("/etc/alertmanager/conf.d/proxy.yml"),
+        PathBuf::from("/etc/default/alertmanager"),
+        PathBuf::from("/etc/sysconfig/alertmanager"),
+        PathBuf::from("/etc/systemd/system/alertmanager.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/alertmanager.yml"),
+        PathBuf::from("C:\\Program Files\\Alertmanager\\alertmanager.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_alertmanager_config_path() -> Option<PathBuf> {
+    let paths = get_alertmanager_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_alertmanager_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_alertmanager_write_path() -> PathBuf {
+    if let Some(p) = get_alertmanager_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ALERTMANAGER_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_am = PathBuf::from("/etc/alertmanager");
+    if etc_am.is_dir() {
+        return etc_am.join("alertmanager.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/alertmanager.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("alertmanager").join("alertmanager.yml");
+    }
+    PathBuf::from("/etc/alertmanager/alertmanager.yml")
+}
+
+pub fn parse_alertmanager_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "alertmanager_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/alertmanager
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "alertmanager_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML alertmanager.yml: proxy_url: "..." or http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "http_proxy" || k_low == "proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_alertmanager_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_alertmanager_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_alertmanager_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ALERTMANAGER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ALERTMANAGER_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -18323,6 +18683,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Logstash Log Pipeline",
             "/etc/logstash/logstash.yml & /etc/logstash/jvm.options",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Prometheus Monitoring Daemon Proxy (/etc/prometheus/prometheus.yml / /etc/systemd/system/prometheus.service.d/http-proxy.conf)
+    if let Some((prometheus_proxy, prometheus_path)) = get_prometheus_proxy() {
+        let ok = verify_proxy_url(&prometheus_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Prometheus monitoring daemon proxy `{}` in {} is dead! (Metric scraping, remote_write pushes, and alert notifications will fail)",
+                prometheus_proxy,
+                prometheus_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Prometheus Server",
+            format!("{}", prometheus_path.display()),
+            prometheus_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (prometheus fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Prometheus Server",
+            "/etc/prometheus/prometheus.yml & ~/.config/prometheus/prometheus.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Prometheus Alertmanager Alert Routing Daemon Proxy (/etc/alertmanager/alertmanager.yml / /etc/systemd/system/alertmanager.service.d/http-proxy.conf)
+    if let Some((alertmanager_proxy, alertmanager_path)) = get_alertmanager_proxy() {
+        let ok = verify_proxy_url(&alertmanager_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Alertmanager notification daemon proxy `{}` in {} is dead! (Alert routing, webhook dispatches, PagerDuty, and Slack notifications will fail)",
+                alertmanager_proxy,
+                alertmanager_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Prometheus Alertmanager",
+            format!("{}", alertmanager_path.display()),
+            alertmanager_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (alertmanager fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Prometheus Alertmanager",
+            "/etc/alertmanager/alertmanager.yml & ~/.config/alertmanager/alertmanager.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -22671,5 +23095,71 @@ Environment="LOGSTASH_HTTP_PROXY=http://10.0.0.38:8080"
         let input_comment = "# http.proxy: \"http://127.0.0.1:7890\"\n; -Dhttp.proxyHost=127.0.0.1\n";
         assert_eq!(parse_logstash_proxy(input_comment), None);
         assert_eq!(parse_logstash_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_prometheus_proxy() {
+        let yaml_conf = r#"
+global:
+  scrape_interval: 15s
+  http_config:
+    proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_prometheus_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="PROMETHEUS_HTTP_PROXY=http://10.0.0.40:8080"
+"#;
+        assert_eq!(
+            parse_prometheus_proxy(dropin),
+            Some("http://10.0.0.40:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.41:8080\"\n";
+        assert_eq!(
+            parse_prometheus_proxy(default_env),
+            Some("http://10.0.0.41:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_prometheus_proxy(input_comment), None);
+        assert_eq!(parse_prometheus_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_alertmanager_proxy() {
+        let yaml_conf = r#"
+global:
+  resolve_timeout: 5m
+  http_config:
+    proxy_url: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_alertmanager_proxy(yaml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="ALERTMANAGER_HTTP_PROXY=http://10.0.0.42:8080"
+"#;
+        assert_eq!(
+            parse_alertmanager_proxy(dropin),
+            Some("http://10.0.0.42:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.43:8080\"\n";
+        assert_eq!(
+            parse_alertmanager_proxy(default_env),
+            Some("http://10.0.0.43:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_alertmanager_proxy(input_comment), None);
+        assert_eq!(parse_alertmanager_proxy(""), None);
     }
 }

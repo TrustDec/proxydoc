@@ -14318,6 +14318,438 @@ pub fn unset_logstash_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_prometheus_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_prom = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "prometheus_http_proxy" {
+                        lines.push(format!("Environment=\"PROMETHEUS_HTTP_PROXY={}\"", proxy_url));
+                        replaced_prom = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("prometheus_http_proxy=") {
+                lines.push(format!("PROMETHEUS_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_prom = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_prom {
+            lines.push(format!("Environment=\"PROMETHEUS_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format: prometheus.yml
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy_url: \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    // If proxy_url wasn't found, check if global section exists
+    let mut lines = Vec::new();
+    let mut in_global = false;
+    let mut inserted = false;
+    let has_global = content.lines().any(|l| l.trim().starts_with("global:"));
+
+    if has_global {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            lines.push(line.to_string());
+            if trimmed.starts_with("global:") {
+                in_global = true;
+            } else if in_global && !inserted {
+                if trimmed.starts_with("http_config:") {
+                    lines.push(format!("    proxy_url: \"{}\"", proxy_url));
+                    inserted = true;
+                } else if !trimmed.starts_with('#') && !trimmed.is_empty() && (line.starts_with(' ') || line.starts_with('\t')) {
+                    lines.push("  http_config:".to_string());
+                    lines.push(format!("    proxy_url: \"{}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+        }
+        if !inserted {
+            lines.push("  http_config:".to_string());
+            lines.push(format!("    proxy_url: \"{}\"", proxy_url));
+        }
+    } else {
+        lines.push("global:".to_string());
+        lines.push("  http_config:".to_string());
+        lines.push(format!("    proxy_url: \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_prometheus_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "prometheus_http_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("prometheus_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_prometheus_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_prometheus_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_prometheus_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_prometheus_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_prometheus_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_prometheus_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_alertmanager_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_am = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "alertmanager_http_proxy" {
+                        lines.push(format!("Environment=\"ALERTMANAGER_HTTP_PROXY={}\"", proxy_url));
+                        replaced_am = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("alertmanager_http_proxy=") {
+                lines.push(format!("ALERTMANAGER_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_am = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_am {
+            lines.push(format!("Environment=\"ALERTMANAGER_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format: alertmanager.yml
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy_url: \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    // If proxy_url wasn't found, check if global section exists
+    let mut lines = Vec::new();
+    let mut in_global = false;
+    let mut inserted = false;
+    let has_global = content.lines().any(|l| l.trim().starts_with("global:"));
+
+    if has_global {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            lines.push(line.to_string());
+            if trimmed.starts_with("global:") {
+                in_global = true;
+            } else if in_global && !inserted {
+                if trimmed.starts_with("http_config:") {
+                    lines.push(format!("    proxy_url: \"{}\"", proxy_url));
+                    inserted = true;
+                } else if !trimmed.starts_with('#') && !trimmed.is_empty() && (line.starts_with(' ') || line.starts_with('\t')) {
+                    lines.push("  http_config:".to_string());
+                    lines.push(format!("    proxy_url: \"{}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+        }
+        if !inserted {
+            lines.push("  http_config:".to_string());
+            lines.push(format!("    proxy_url: \"{}\"", proxy_url));
+        }
+    } else {
+        lines.push("global:".to_string());
+        lines.push("  http_config:".to_string());
+        lines.push(format!("    proxy_url: \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_alertmanager_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "alertmanager_http_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("alertmanager_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_alertmanager_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_alertmanager_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_alertmanager_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_alertmanager_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_alertmanager_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_alertmanager_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -14418,6 +14850,8 @@ pub async fn turn_on(
     fluentd: bool,
     telegraf: bool,
     logstash: bool,
+    prometheus: bool,
+    alertmanager: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -14517,6 +14951,8 @@ pub async fn turn_on(
     let set_fluentd = fluentd || all;
     let set_telegraf = telegraf || all;
     let set_logstash = logstash || all;
+    let set_prometheus = prometheus || all;
+    let set_alertmanager = alertmanager || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -15888,6 +16324,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_prometheus {
+        match set_prometheus_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Prometheus monitoring daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Prometheus monitoring config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_alertmanager {
+        match set_alertmanager_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Prometheus Alertmanager daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Alertmanager notification config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -16001,6 +16467,8 @@ pub fn turn_off(
     fluentd: bool,
     telegraf: bool,
     logstash: bool,
+    prometheus: bool,
+    alertmanager: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -16100,6 +16568,8 @@ pub fn turn_off(
     let unset_fluentd = fluentd || all;
     let unset_telegraf = telegraf || all;
     let unset_logstash = logstash || all;
+    let unset_prometheus = prometheus || all;
+    let unset_alertmanager = alertmanager || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -16953,6 +17423,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Logstash pipeline daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Logstash pipeline proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Logstash pipeline daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_prometheus {
+        match unset_prometheus_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Prometheus monitoring daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Prometheus monitoring proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Prometheus monitoring daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_alertmanager {
+        match unset_alertmanager_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Prometheus Alertmanager daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Prometheus Alertmanager proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Prometheus Alertmanager daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -19319,5 +19805,52 @@ pipeline.workers: 2
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("LOGSTASH_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_prometheus_proxy() {
+        let yml_initial = r#"
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+"#;
+        let yml_updated = apply_prometheus_proxy(yml_initial, "http://127.0.0.1:7890");
+        assert!(yml_updated.contains("proxy_url: \"http://127.0.0.1:7890\""));
+        let (yml_cleaned, yml_removed) = remove_prometheus_proxy(&yml_updated);
+        assert!(yml_removed);
+        assert!(!yml_cleaned.contains("proxy_url:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_prometheus_proxy(dropin_initial, "http://10.0.0.15:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.15:8080\""));
+        assert!(dropin_updated.contains("Environment=\"PROMETHEUS_HTTP_PROXY=http://10.0.0.15:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_prometheus_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("PROMETHEUS_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_alertmanager_proxy() {
+        let yml_initial = r#"
+global:
+  resolve_timeout: 5m
+"#;
+        let yml_updated = apply_alertmanager_proxy(yml_initial, "http://127.0.0.1:7890");
+        assert!(yml_updated.contains("proxy_url: \"http://127.0.0.1:7890\""));
+        let (yml_cleaned, yml_removed) = remove_alertmanager_proxy(&yml_updated);
+        assert!(yml_removed);
+        assert!(!yml_cleaned.contains("proxy_url:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_alertmanager_proxy(dropin_initial, "http://10.0.0.16:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.16:8080\""));
+        assert!(dropin_updated.contains("Environment=\"ALERTMANAGER_HTTP_PROXY=http://10.0.0.16:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_alertmanager_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("ALERTMANAGER_HTTP_PROXY="));
     }
 }

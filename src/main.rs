@@ -359,7 +359,13 @@ enum Commands {
         /// Also configure Logstash (logstash log processing & ingestion pipeline daemon) proxy (/etc/logstash/logstash.yml / /etc/logstash/jvm.options / /etc/systemd/system/logstash.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "elastic-logstash")]
         logstash: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, and logstash proxy
+        /// Also configure Prometheus (Prometheus monitoring system & time series database daemon) proxy (/etc/prometheus/prometheus.yml / ~/.config/prometheus/prometheus.yml / /etc/systemd/system/prometheus.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "prom", visible_alias = "prometheus-server")]
+        prometheus: bool,
+        /// Also configure Alertmanager (Prometheus Alertmanager alert routing & notification daemon) proxy (/etc/alertmanager/alertmanager.yml / ~/.config/alertmanager/alertmanager.yml / /etc/systemd/system/alertmanager.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "alert-manager", visible_alias = "prom-alertmanager")]
+        alertmanager: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, and alertmanager proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -662,7 +668,13 @@ enum Commands {
         /// Also unset Logstash (logstash log processing & ingestion pipeline daemon) proxy (/etc/logstash/logstash.yml / /etc/logstash/jvm.options / /etc/systemd/system/logstash.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "elastic-logstash")]
         logstash: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, and logstash proxy
+        /// Also unset Prometheus (Prometheus monitoring system & time series database daemon) proxy (/etc/prometheus/prometheus.yml / ~/.config/prometheus/prometheus.yml / /etc/systemd/system/prometheus.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "prom", visible_alias = "prometheus-server")]
+        prometheus: bool,
+        /// Also unset Alertmanager (Prometheus Alertmanager alert routing & notification daemon) proxy (/etc/alertmanager/alertmanager.yml / ~/.config/alertmanager/alertmanager.yml / /etc/systemd/system/alertmanager.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "alert-manager", visible_alias = "prom-alertmanager")]
+        alertmanager: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, and alertmanager proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -804,6 +816,8 @@ async fn main() -> Result<()> {
             fluentd,
             telegraf,
             logstash,
+            prometheus,
+            alertmanager,
             all,
             shell,
         }) => {
@@ -907,6 +921,8 @@ async fn main() -> Result<()> {
                 fluentd,
                 telegraf,
                 logstash,
+                prometheus,
+                alertmanager,
                 all,
                 shell.as_deref(),
             )
@@ -1011,6 +1027,8 @@ async fn main() -> Result<()> {
             fluentd,
             telegraf,
             logstash,
+            prometheus,
+            alertmanager,
             all,
             shell,
         }) => {
@@ -1113,6 +1131,8 @@ async fn main() -> Result<()> {
                 fluentd,
                 telegraf,
                 logstash,
+                prometheus,
+                alertmanager,
                 all,
                 shell.as_deref(),
             )?;
@@ -3779,6 +3799,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { logstash, .. }) => {
                 assert!(logstash);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_prometheus() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--prometheus"]).unwrap();
+        match cli.command {
+            Some(Commands::On { prometheus, .. }) => {
+                assert!(prometheus);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--prom"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { prometheus, .. }) => {
+                assert!(prometheus);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_prometheus() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--prometheus"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { prometheus, .. }) => {
+                assert!(prometheus);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_alertmanager() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--alertmanager"]).unwrap();
+        match cli.command {
+            Some(Commands::On { alertmanager, .. }) => {
+                assert!(alertmanager);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--alert-manager"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { alertmanager, .. }) => {
+                assert!(alertmanager);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_alertmanager() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--alertmanager"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { alertmanager, .. }) => {
+                assert!(alertmanager);
             }
             _ => panic!("Expected Off command"),
         }
