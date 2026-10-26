@@ -323,7 +323,13 @@ enum Commands {
         /// Also configure Puppet Agent (puppet-agent daemon) proxy (/etc/puppetlabs/puppet/puppet.conf / ~/.puppetlabs/etc/puppet/puppet.conf / /etc/systemd/system/puppet.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "puppet", visible_alias = "puppet-agent")]
         puppet_agent: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, and puppet-agent proxy
+        /// Also configure Chef Infra Client (chef-client daemon) proxy (/etc/chef/client.rb / ~/.chef/client.rb / /etc/systemd/system/chef-client.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "chef", visible_alias = "chef-infra", visible_alias = "chef-agent")]
+        chef_client: bool,
+        /// Also configure SaltStack Salt Minion (salt-minion daemon) proxy (/etc/salt/minion / /etc/salt/minion.d/proxy.conf / /etc/systemd/system/salt-minion.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "salt", visible_alias = "saltstack", visible_alias = "salt-agent")]
+        salt_minion: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, and salt-minion proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -590,7 +596,13 @@ enum Commands {
         /// Also unset Puppet Agent (puppet-agent daemon) proxy (/etc/puppetlabs/puppet/puppet.conf / ~/.puppetlabs/etc/puppet/puppet.conf / /etc/systemd/system/puppet.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "puppet", visible_alias = "puppet-agent")]
         puppet_agent: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, and puppet-agent proxy
+        /// Also unset Chef Infra Client (chef-client daemon) proxy (/etc/chef/client.rb / ~/.chef/client.rb / /etc/systemd/system/chef-client.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "chef", visible_alias = "chef-infra", visible_alias = "chef-agent")]
+        chef_client: bool,
+        /// Also unset SaltStack Salt Minion (salt-minion daemon) proxy (/etc/salt/minion / /etc/salt/minion.d/proxy.conf / /etc/systemd/system/salt-minion.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "salt", visible_alias = "saltstack", visible_alias = "salt-agent")]
+        salt_minion: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, and salt-minion proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -720,6 +732,8 @@ async fn main() -> Result<()> {
             concourse_worker,
             tentacle_agent,
             puppet_agent,
+            chef_client,
+            salt_minion,
             all,
             shell,
         }) => {
@@ -811,6 +825,8 @@ async fn main() -> Result<()> {
                 concourse_worker,
                 tentacle_agent,
                 puppet_agent,
+                chef_client,
+                salt_minion,
                 all,
                 shell.as_deref(),
             )
@@ -903,6 +919,8 @@ async fn main() -> Result<()> {
             concourse_worker,
             tentacle_agent,
             puppet_agent,
+            chef_client,
+            salt_minion,
             all,
             shell,
         }) => {
@@ -993,6 +1011,8 @@ async fn main() -> Result<()> {
                 concourse_worker,
                 tentacle_agent,
                 puppet_agent,
+                chef_client,
+                salt_minion,
                 all,
                 shell.as_deref(),
             )?;
@@ -3299,6 +3319,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { puppet_agent, .. }) => {
                 assert!(puppet_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_chef_client() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--chef-client"]).unwrap();
+        match cli.command {
+            Some(Commands::On { chef_client, .. }) => {
+                assert!(chef_client);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--chef"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { chef_client, .. }) => {
+                assert!(chef_client);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_chef_client() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--chef-client"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { chef_client, .. }) => {
+                assert!(chef_client);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_salt_minion() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--salt-minion"]).unwrap();
+        match cli.command {
+            Some(Commands::On { salt_minion, .. }) => {
+                assert!(salt_minion);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--salt"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { salt_minion, .. }) => {
+                assert!(salt_minion);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_salt_minion() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--salt-minion"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { salt_minion, .. }) => {
+                assert!(salt_minion);
             }
             _ => panic!("Expected Off command"),
         }

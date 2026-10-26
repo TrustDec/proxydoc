@@ -11675,6 +11675,379 @@ pub fn get_puppet_agent_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_chef_client_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CHEF_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("CHEF_HOME") {
+        let d = PathBuf::from(dir.trim());
+        let candidates = [d.join("client.rb"), d.join("config.rb")];
+        for p in candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".chef").join("client.rb"),
+            home.join(".chef").join("config.rb"),
+            home.join(".config").join("chef").join("client.rb"),
+            home.join(".config").join("systemd").join("user").join("chef-client.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/chef/client.rb"),
+        PathBuf::from("/etc/chef/config.rb"),
+        PathBuf::from("/etc/default/chef-client"),
+        PathBuf::from("/etc/sysconfig/chef-client"),
+        PathBuf::from("/etc/systemd/system/chef-client.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\chef\\client.rb"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_chef_client_config_path() -> Option<PathBuf> {
+    let paths = get_chef_client_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_chef_client_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_chef_client_write_path() -> PathBuf {
+    if let Some(p) = get_chef_client_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CHEF_CONFIG_PATH") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_chef = PathBuf::from("/etc/chef");
+    if etc_chef.is_dir() {
+        return etc_chef.join("client.rb");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/chef-client.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".chef").join("client.rb");
+    }
+    PathBuf::from("/etc/chef/client.rb")
+}
+
+pub fn parse_chef_client_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') || trim.starts_with("//") {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "all_proxy" || k_low == "chef_http_proxy" {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // key=val format in default/sysconfig/env
+        if let Some((k, v)) = trim.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if (key == "http_proxy" || key == "https_proxy" || key == "all_proxy" || key == "chef_http_proxy") && !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        // Ruby DSL: http_proxy "http://..." or http_proxy 'http://...' or https_proxy "..."
+        let lower = trim.to_lowercase();
+        for prefix in ["http_proxy", "https_proxy", "all_proxy"] {
+            if lower.starts_with(prefix) {
+                let rest = trim[prefix.len()..].trim();
+                let rest = rest.strip_prefix('=').unwrap_or(rest).trim();
+                let rest = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or(rest).trim();
+                let val = rest.trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() && (val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") || val.contains(':')) {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_chef_client_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_chef_client_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_chef_client_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CHEF_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CHEF_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_salt_minion_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SALT_MINION_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("SALT_CONFIG_DIR") {
+        let d = PathBuf::from(dir.trim());
+        let candidates = [d.join("minion"), d.join("minion.d").join("proxy.conf")];
+        for p in candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".salt").join("minion"),
+            home.join(".config").join("salt").join("minion"),
+            home.join(".config").join("systemd").join("user").join("salt-minion.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/salt/minion.d/proxy.conf"),
+        PathBuf::from("/etc/salt/minion.d/_proxy.conf"),
+        PathBuf::from("/etc/salt/minion"),
+        PathBuf::from("/etc/default/salt-minion"),
+        PathBuf::from("/etc/sysconfig/salt-minion"),
+        PathBuf::from("/etc/systemd/system/salt-minion.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_salt_minion_config_path() -> Option<PathBuf> {
+    let paths = get_salt_minion_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_salt_minion_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_salt_minion_write_path() -> PathBuf {
+    if let Some(p) = get_salt_minion_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SALT_MINION_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    let minion_d = PathBuf::from("/etc/salt/minion.d");
+    if minion_d.is_dir() {
+        return minion_d.join("proxy.conf");
+    }
+    let etc_salt = PathBuf::from("/etc/salt");
+    if etc_salt.is_dir() {
+        return etc_salt.join("minion");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/salt-minion.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".salt").join("minion");
+    }
+    PathBuf::from("/etc/salt/minion.d/proxy.conf")
+}
+
+pub fn parse_salt_minion_proxy(content: &str) -> Option<String> {
+    let mut host: Option<String> = None;
+    let mut port: Option<String> = None;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.is_empty() || trim.starts_with('#') || trim.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trim.starts_with("Environment=") {
+            let env_part = trim.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "proxy_host" || k_low == "salt_proxy_host" {
+                        let h = v.trim_matches('"').trim_matches('\'').trim();
+                        if !h.is_empty() {
+                            host = Some(h.to_string());
+                        }
+                    } else if k_low == "proxy_port" || k_low == "salt_proxy_port" {
+                        let p = v.trim_matches('"').trim_matches('\'').trim();
+                        if !p.is_empty() {
+                            port = Some(p.to_string());
+                        }
+                    } else if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "all_proxy" {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // YAML key: val format (or key = val)
+        let pair = if let Some((k, v)) = trim.split_once(':') {
+            Some((k, v))
+        } else if let Some((k, v)) = trim.split_once('=') {
+            Some((k, v))
+        } else {
+            None
+        };
+
+        if let Some((k, v)) = pair {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if key == "proxy_host" || key == "salt_proxy_host" {
+                if !val.is_empty() {
+                    host = Some(val.to_string());
+                }
+            } else if key == "proxy_port" || key == "salt_proxy_port" {
+                if !val.is_empty() {
+                    port = Some(val.to_string());
+                }
+            } else if (key == "http_proxy" || key == "https_proxy" || key == "all_proxy") && !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+
+    if let Some(h) = host {
+        let p = port.as_deref().unwrap_or("8080");
+        return Some(if h.starts_with("http://") || h.starts_with("https://") {
+            format!("{}:{}", h, p)
+        } else {
+            format!("http://{}:{}", h, p)
+        });
+    }
+
+    None
+}
+
+pub fn get_salt_minion_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_salt_minion_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_salt_minion_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SALT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SALT_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -15392,6 +15765,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Puppet Agent Infra",
             "/etc/puppetlabs/puppet/puppet.conf & ~/.puppetlabs/etc/puppet/puppet.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Chef Infra Client Daemon Proxy (/etc/chef/client.rb / ~/.chef/client.rb / /etc/systemd/system/chef-client.service.d/http-proxy.conf)
+    if let Some((chef_proxy, chef_path)) = get_chef_client_proxy() {
+        let ok = verify_proxy_url(&chef_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Chef Infra Client daemon proxy `{}` in {} is dead! (Cookbook runs and Chef Supermarket downloads will fail)",
+                chef_proxy,
+                chef_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Chef Client Infra",
+            format!("{}", chef_path.display()),
+            chef_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (chef-client fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Chef Client Infra",
+            "/etc/chef/client.rb & ~/.chef/client.rb",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // SaltStack Salt Minion Infrastructure Daemon Proxy (/etc/salt/minion / /etc/salt/minion.d/proxy.conf / /etc/systemd/system/salt-minion.service.d/http-proxy.conf)
+    if let Some((salt_proxy, salt_path)) = get_salt_minion_proxy() {
+        let ok = verify_proxy_url(&salt_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "SaltStack Salt Minion daemon proxy `{}` in {} is dead! (Highstate execution and Salt module downloads will fail)",
+                salt_proxy,
+                salt_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Salt Minion Infra",
+            format!("{}", salt_path.display()),
+            salt_proxy,
+            if ok {
+                "● Reachable Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (salt-minion fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Salt Minion Infra",
+            "/etc/salt/minion & /etc/salt/minion.d/proxy.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -19237,5 +19674,81 @@ Environment="NO_PROXY=localhost,127.0.0.1"
         let input_comment = "# http_proxy_host = 127.0.0.1\n";
         assert_eq!(parse_puppet_agent_proxy(input_comment), None);
         assert_eq!(parse_puppet_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_chef_client_proxy() {
+        let ruby_file = r#"
+log_level :info
+log_location STDOUT
+chef_server_url "https://chef.example.com/organizations/myorg"
+http_proxy "http://127.0.0.1:7890"
+https_proxy "http://127.0.0.1:7890"
+no_proxy "localhost,127.0.0.1"
+"#;
+        assert_eq!(
+            parse_chef_client_proxy(ruby_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ruby_assign = r#"
+http_proxy = "http://10.0.0.5:8080"
+"#;
+        assert_eq!(
+            parse_chef_client_proxy(ruby_assign),
+            Some("http://10.0.0.5:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.3:8080"
+Environment="NO_PROXY=localhost,127.0.0.1"
+"#;
+        assert_eq!(
+            parse_chef_client_proxy(dropin),
+            Some("http://10.0.0.3:8080".to_string())
+        );
+
+        let input_comment = "# http_proxy \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_chef_client_proxy(input_comment), None);
+        assert_eq!(parse_chef_client_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_salt_minion_proxy() {
+        let yaml_file = r#"
+master: salt.example.com
+id: minion-01
+proxy_host: 127.0.0.1
+proxy_port: 7890
+"#;
+        assert_eq!(
+            parse_salt_minion_proxy(yaml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let yaml_http = r#"
+master: salt.example.com
+http_proxy: http://10.0.0.6:8080
+"#;
+        assert_eq!(
+            parse_salt_minion_proxy(yaml_http),
+            Some("http://10.0.0.6:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://10.0.0.4:8080"
+Environment="PROXY_HOST=10.0.0.4"
+Environment="PROXY_PORT=8080"
+"#;
+        assert_eq!(
+            parse_salt_minion_proxy(dropin),
+            Some("http://10.0.0.4:8080".to_string())
+        );
+
+        let input_comment = "# proxy_host: 127.0.0.1\n";
+        assert_eq!(parse_salt_minion_proxy(input_comment), None);
+        assert_eq!(parse_salt_minion_proxy(""), None);
     }
 }

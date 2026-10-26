@@ -11781,6 +11781,397 @@ pub fn unset_puppet_agent_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_chef_client_proxy(content: &str, proxy_url: &str) -> String {
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // Ruby DSL format: http_proxy "...", https_proxy "...", no_proxy "..."
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_no = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("http_proxy") && !lower.starts_with("http_proxy_") {
+            lines.push(format!("http_proxy \"{}\"", proxy_url));
+            replaced_http = true;
+            continue;
+        } else if lower.starts_with("https_proxy") && !lower.starts_with("https_proxy_") {
+            lines.push(format!("https_proxy \"{}\"", proxy_url));
+            replaced_https = true;
+            continue;
+        } else if lower.starts_with("no_proxy") {
+            lines.push(format!("no_proxy \"{}\"", no_proxy_def));
+            replaced_no = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        lines.push(format!("http_proxy \"{}\"", proxy_url));
+    }
+    if !replaced_https {
+        lines.push(format!("https_proxy \"{}\"", proxy_url));
+    }
+    if !replaced_no {
+        lines.push(format!("no_proxy \"{}\"", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_chef_client_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') || trim.starts_with("//") {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "no_proxy" || k_low == "all_proxy" {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if (lower.starts_with("http_proxy") && !lower.starts_with("http_proxy_"))
+            || (lower.starts_with("https_proxy") && !lower.starts_with("https_proxy_"))
+            || lower.starts_with("no_proxy")
+            || lower.starts_with("all_proxy")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_chef_client_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_chef_client_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_chef_client_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_chef_client_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_chef_client_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_chef_client_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_salt_minion_proxy(content: &str, proxy_url: &str) -> String {
+    let (proxy_host, proxy_port) = extract_host_port(proxy_url);
+    let no_proxy_def = "localhost,127.0.0.1,.local";
+
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_host = false;
+        let mut replaced_port = false;
+        let mut replaced_no = false;
+
+        for line in content.lines() {
+            let trim = line.trim();
+            let lower = trim.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trim["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "proxy_host" || k_low == "salt_proxy_host" {
+                        lines.push(format!("Environment=\"PROXY_HOST={}\"", proxy_host));
+                        replaced_host = true;
+                        continue;
+                    } else if k_low == "proxy_port" || k_low == "salt_proxy_port" {
+                        lines.push(format!("Environment=\"PROXY_PORT={}\"", proxy_port));
+                        replaced_port = true;
+                        continue;
+                    } else if k_low == "no_proxy" {
+                        lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+                        replaced_no = true;
+                        continue;
+                    }
+                }
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_host {
+            lines.push(format!("Environment=\"PROXY_HOST={}\"", proxy_host));
+        }
+        if !replaced_port {
+            lines.push(format!("Environment=\"PROXY_PORT={}\"", proxy_port));
+        }
+        if !replaced_no {
+            lines.push(format!("Environment=\"NO_PROXY={}\"", no_proxy_def));
+        }
+
+        let mut res = lines.join("\n");
+        if !has_service_section {
+            res = format!("[Service]\n{}", res);
+        }
+        return res + "\n";
+    }
+
+    // YAML key: val format in minion / minion.d/proxy.conf
+    let mut lines = Vec::new();
+    let mut set_host = false;
+    let mut set_port = false;
+    let mut set_no = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        let pair = if let Some((k, v)) = trim.split_once(':') {
+            Some((k, v))
+        } else if let Some((k, v)) = trim.split_once('=') {
+            Some((k, v))
+        } else {
+            None
+        };
+
+        if let Some((k, _)) = pair {
+            let key = k.trim().to_lowercase();
+            if key == "proxy_host" || key == "salt_proxy_host" {
+                lines.push(format!("proxy_host: {}", proxy_host));
+                set_host = true;
+                continue;
+            } else if key == "proxy_port" || key == "salt_proxy_port" {
+                lines.push(format!("proxy_port: {}", proxy_port));
+                set_port = true;
+                continue;
+            } else if key == "no_proxy" {
+                lines.push(format!("no_proxy: {}", no_proxy_def));
+                set_no = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !set_host {
+        lines.push(format!("proxy_host: {}", proxy_host));
+    }
+    if !set_port {
+        lines.push(format!("proxy_port: {}", proxy_port));
+    }
+    if !set_no {
+        lines.push(format!("no_proxy: {}", no_proxy_def));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_salt_minion_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trim = line.trim();
+        if trim.starts_with('#') || trim.starts_with(';') {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let lower = trim.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trim["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "proxy_host" || k_low == "proxy_port" || k_low == "no_proxy" || k_low == "all_proxy" {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trim.split_once(':') {
+            Some((k, v))
+        } else if let Some((k, v)) = trim.split_once('=') {
+            Some((k, v))
+        } else {
+            None
+        };
+
+        if let Some((k, _)) = pair {
+            let key = k.trim().to_lowercase();
+            if key == "proxy_host" || key == "salt_proxy_host" || key == "proxy_port" || key == "salt_proxy_port" || key == "http_proxy" || key == "https_proxy" || key == "no_proxy" || key == "all_proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_salt_minion_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_salt_minion_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_salt_minion_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_salt_minion_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_salt_minion_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_salt_minion_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -11869,6 +12260,8 @@ pub async fn turn_on(
     concourse_worker: bool,
     tentacle_agent: bool,
     puppet_agent: bool,
+    chef_client: bool,
+    salt_minion: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -11956,6 +12349,8 @@ pub async fn turn_on(
     let set_concourse_worker = concourse_worker || all;
     let set_tentacle_agent = tentacle_agent || all;
     let set_puppet_agent = puppet_agent || all;
+    let set_chef_client = chef_client || all;
+    let set_salt_minion = salt_minion || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -13147,6 +13542,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_chef_client {
+        match set_chef_client_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Chef Infra Client daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Chef Infra Client daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_salt_minion {
+        match set_salt_minion_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ SaltStack Salt Minion daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update SaltStack Salt Minion daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -13248,6 +13673,8 @@ pub fn turn_off(
     concourse_worker: bool,
     tentacle_agent: bool,
     puppet_agent: bool,
+    chef_client: bool,
+    salt_minion: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -13335,6 +13762,8 @@ pub fn turn_off(
     let unset_concourse_worker = concourse_worker || all;
     let unset_tentacle_agent = tentacle_agent || all;
     let unset_puppet_agent = puppet_agent || all;
+    let unset_chef_client = chef_client || all;
+    let unset_salt_minion = salt_minion || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -14092,6 +14521,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Puppet Agent daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Puppet Agent proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Puppet Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_chef_client {
+        match unset_chef_client_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Chef Infra Client daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Chef Infra Client proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Chef Infra Client daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_salt_minion {
+        match unset_salt_minion_proxy() {
+            Ok(true) => eprintln!("{}", "✔ SaltStack Salt Minion daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ SaltStack Salt Minion proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset SaltStack Salt Minion daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -16130,5 +16575,56 @@ server = puppet.local
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("HTTP_PROXY_HOST="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_chef_client_proxy() {
+        let ruby_initial = r#"
+log_level :info
+chef_server_url "https://chef.local/organizations/test"
+"#;
+        let ruby_updated = apply_chef_client_proxy(ruby_initial, "http://127.0.0.1:7890");
+        assert!(ruby_updated.contains("http_proxy \"http://127.0.0.1:7890\""));
+        assert!(ruby_updated.contains("https_proxy \"http://127.0.0.1:7890\""));
+        let (ruby_cleaned, ruby_removed) = remove_chef_client_proxy(&ruby_updated);
+        assert!(ruby_removed);
+        assert!(!ruby_cleaned.contains("\nhttp_proxy \""));
+        assert!(!ruby_cleaned.contains("\nhttps_proxy \""));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_chef_client_proxy(dropin_initial, "http://10.0.0.3:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.3:8080\""));
+        assert!(dropin_updated.contains("Environment=\"HTTPS_PROXY=http://10.0.0.3:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_chef_client_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("HTTPS_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_salt_minion_proxy() {
+        let yaml_initial = r#"
+master: salt.local
+id: node-1
+"#;
+        let yaml_updated = apply_salt_minion_proxy(yaml_initial, "http://127.0.0.1:7890");
+        assert!(yaml_updated.contains("proxy_host: 127.0.0.1"));
+        assert!(yaml_updated.contains("proxy_port: 7890"));
+        let (yaml_cleaned, yaml_removed) = remove_salt_minion_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("proxy_host:"));
+        assert!(!yaml_cleaned.contains("proxy_port:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_salt_minion_proxy(dropin_initial, "http://10.0.0.4:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.4:8080\""));
+        assert!(dropin_updated.contains("Environment=\"PROXY_HOST=10.0.0.4\""));
+        assert!(dropin_updated.contains("Environment=\"PROXY_PORT=8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_salt_minion_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("PROXY_HOST="));
     }
 }

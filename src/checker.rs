@@ -534,6 +534,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Debian Security CDN",
         "https://security.debian.org",
     ),
+    (
+        "Chef Supermarket API",
+        "https://supermarket.chef.io",
+    ),
+    (
+        "Salt Project Package CDN",
+        "https://repo.saltproject.io",
+    ),
+    (
+        "Kali Linux Package CDN",
+        "https://http.kali.org",
+    ),
+    (
+        "Arch Linux Archive CDN",
+        "https://archive.archlinux.org",
+    ),
+    (
+        "Amazon Linux CDN",
+        "https://cdn.amazonlinux.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
