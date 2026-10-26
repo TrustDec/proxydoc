@@ -574,6 +574,26 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Raspberry Pi OS Archive CDN",
         "https://archive.raspberrypi.com",
     ),
+    (
+        "Elastic Package Registry CDN",
+        "https://epr.elastic.co",
+    ),
+    (
+        "Elastic Artifacts CDN",
+        "https://artifacts.elastic.co",
+    ),
+    (
+        "Grafana Labs Package CDN",
+        "https://packages.grafana.com",
+    ),
+    (
+        "OpenTelemetry CDN",
+        "https://opentelemetry.io",
+    ),
+    (
+        "Manjaro Linux Package CDN",
+        "https://repo.manjaro.org",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1314,6 +1334,21 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Raspberry Pi OS Archive CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Elastic Package Registry CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Elastic Artifacts CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Grafana Labs Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenTelemetry CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Manjaro Linux Package CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

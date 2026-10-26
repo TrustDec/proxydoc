@@ -12558,6 +12558,378 @@ pub fn unset_newrelic_infra_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_elastic_agent_proxy(content: &str, proxy_url: &str) -> String {
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_ea = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "elastic_agent_proxy" {
+                        lines.push(format!("Environment=\"ELASTIC_AGENT_PROXY={}\"", proxy_url));
+                        replaced_ea = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("elastic_agent_proxy=") {
+                lines.push(format!("ELASTIC_AGENT_PROXY=\"{}\"", proxy_url));
+                replaced_ea = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_ea {
+            lines.push(format!("Environment=\"ELASTIC_AGENT_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML format in elastic-agent.yml
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy_url: {}", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy {
+        if !lines.is_empty() && !lines.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
+            lines.push(String::new());
+        }
+        lines.push(format!("proxy_url: {}", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_elastic_agent_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "elastic_agent_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("elastic_agent_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            if k.trim().trim_matches('"').trim_matches('\'').eq_ignore_ascii_case("proxy_url") {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_elastic_agent_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_elastic_agent_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_elastic_agent_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_elastic_agent_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_elastic_agent_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_elastic_agent_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_grafana_alloy_proxy(content: &str, proxy_url: &str) -> String {
+    let has_service_section = content.lines().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+    let has_environment = content.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("environment="));
+
+    if has_service_section || has_environment {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_alloy = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "alloy_http_proxy" {
+                        lines.push(format!("Environment=\"ALLOY_HTTP_PROXY={}\"", proxy_url));
+                        replaced_alloy = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("alloy_http_proxy=") {
+                lines.push(format!("ALLOY_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_alloy = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_alloy {
+            lines.push(format!("Environment=\"ALLOY_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // River / Alloy format or YAML
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy_url = \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        } else if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy_url: \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy {
+        if !lines.is_empty() && !lines.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
+            lines.push(String::new());
+        }
+        lines.push(format!("proxy_url = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_grafana_alloy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "alloy_http_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("alloy_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once('=') {
+            if k.trim().trim_matches('"').trim_matches('\'').eq_ignore_ascii_case("proxy_url") {
+                removed = true;
+                continue;
+            }
+        }
+        if let Some((k, _)) = trimmed.split_once(':') {
+            if k.trim().trim_matches('"').trim_matches('\'').eq_ignore_ascii_case("proxy_url") {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_grafana_alloy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_grafana_alloy_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_grafana_alloy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_grafana_alloy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_grafana_alloy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_grafana_alloy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -12650,6 +13022,8 @@ pub async fn turn_on(
     salt_minion: bool,
     datadog_agent: bool,
     newrelic_infra: bool,
+    elastic_agent: bool,
+    grafana_alloy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -12741,6 +13115,8 @@ pub async fn turn_on(
     let set_salt_minion = salt_minion || all;
     let set_datadog_agent = datadog_agent || all;
     let set_newrelic_infra = newrelic_infra || all;
+    let set_elastic_agent = elastic_agent || all;
+    let set_grafana_alloy = grafana_alloy || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -13992,6 +14368,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_elastic_agent {
+        match set_elastic_agent_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Elastic Agent daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Elastic Agent daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_grafana_alloy {
+        match set_grafana_alloy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Grafana Alloy telemetry proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Grafana Alloy telemetry config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -14097,6 +14503,8 @@ pub fn turn_off(
     salt_minion: bool,
     datadog_agent: bool,
     newrelic_infra: bool,
+    elastic_agent: bool,
+    grafana_alloy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -14188,6 +14596,8 @@ pub fn turn_off(
     let unset_salt_minion = salt_minion || all;
     let unset_datadog_agent = datadog_agent || all;
     let unset_newrelic_infra = newrelic_infra || all;
+    let unset_elastic_agent = elastic_agent || all;
+    let unset_grafana_alloy = grafana_alloy || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -14977,6 +15387,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ New Relic Infrastructure Agent daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ New Relic Infrastructure Agent proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset New Relic Infrastructure Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_elastic_agent {
+        match unset_elastic_agent_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Elastic Agent daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Elastic Agent proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Elastic Agent daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_grafana_alloy {
+        match unset_grafana_alloy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Grafana Alloy telemetry proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Grafana Alloy telemetry proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Grafana Alloy telemetry proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -17117,5 +17543,56 @@ log:
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("NRIA_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_elastic_agent_proxy() {
+        let yaml_initial = r#"
+outputs:
+  default:
+    type: elasticsearch
+    hosts: ["https://es:9200"]
+"#;
+        let yaml_updated = apply_elastic_agent_proxy(yaml_initial, "http://127.0.0.1:7890");
+        assert!(yaml_updated.contains("proxy_url: http://127.0.0.1:7890"));
+        let (yaml_cleaned, yaml_removed) = remove_elastic_agent_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("proxy_url:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_elastic_agent_proxy(dropin_initial, "http://10.0.0.7:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.7:8080\""));
+        assert!(dropin_updated.contains("Environment=\"ELASTIC_AGENT_PROXY=http://10.0.0.7:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_elastic_agent_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("ELASTIC_AGENT_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_grafana_alloy_proxy() {
+        let river_initial = r#"
+prometheus.remote_write "default" {
+  endpoint {
+    url = "https://prometheus-prod.grafana.net/api/prom/push"
+  }
+}
+"#;
+        let river_updated = apply_grafana_alloy_proxy(river_initial, "http://127.0.0.1:7890");
+        assert!(river_updated.contains("proxy_url = \"http://127.0.0.1:7890\""));
+        let (river_cleaned, river_removed) = remove_grafana_alloy_proxy(&river_updated);
+        assert!(river_removed);
+        assert!(!river_cleaned.contains("proxy_url"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_grafana_alloy_proxy(dropin_initial, "http://10.0.0.8:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.8:8080\""));
+        assert!(dropin_updated.contains("Environment=\"ALLOY_HTTP_PROXY=http://10.0.0.8:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_grafana_alloy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("ALLOY_HTTP_PROXY="));
     }
 }

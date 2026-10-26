@@ -12456,6 +12456,431 @@ pub fn get_newrelic_infra_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_elastic_agent_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ELASTIC_AGENT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("ELASTIC_AGENT_HOME") {
+        let d = PathBuf::from(dir.trim());
+        let candidate = d.join("elastic-agent.yml");
+        if candidate.exists() && !paths.contains(&candidate) {
+            paths.push(candidate);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".elastic-agent").join("elastic-agent.yml"),
+            home.join(".config").join("elastic-agent").join("elastic-agent.yml"),
+            home.join(".config").join("systemd").join("user").join("elastic-agent.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/elastic-agent/elastic-agent.yml"),
+        PathBuf::from("/opt/Elastic/Agent/elastic-agent.yml"),
+        PathBuf::from("/etc/default/elastic-agent"),
+        PathBuf::from("/etc/sysconfig/elastic-agent"),
+        PathBuf::from("/etc/systemd/system/elastic-agent.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\Program Files\\Elastic\\Agent\\elastic-agent.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_elastic_agent_config_path() -> Option<PathBuf> {
+    let paths = get_elastic_agent_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_elastic_agent_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_elastic_agent_write_path() -> PathBuf {
+    if let Some(p) = get_elastic_agent_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ELASTIC_AGENT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_ea = PathBuf::from("/etc/elastic-agent");
+    if etc_ea.is_dir() {
+        return etc_ea.join("elastic-agent.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/elastic-agent.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".elastic-agent").join("elastic-agent.yml");
+    }
+    PathBuf::from("/etc/elastic-agent/elastic-agent.yml")
+}
+
+pub fn parse_elastic_agent_proxy(content: &str) -> Option<String> {
+    let mut in_fleet_block = false;
+    let mut fleet_indent = 0;
+    let mut in_proxy_block = false;
+    let mut proxy_indent = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "elastic_agent_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/elastic-agent
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "elastic_agent_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML parsing
+        let indent = line.len() - line.trim_start().len();
+
+        if trimmed == "fleet:" || trimmed.starts_with("fleet:") {
+            in_fleet_block = true;
+            fleet_indent = indent;
+            continue;
+        }
+
+        if in_fleet_block {
+            if indent <= fleet_indent && !trimmed.starts_with('-') && trimmed != "fleet:" {
+                in_fleet_block = false;
+                in_proxy_block = false;
+            } else if trimmed == "proxy:" || trimmed.starts_with("proxy:") {
+                in_proxy_block = true;
+                proxy_indent = indent;
+                continue;
+            } else if in_proxy_block {
+                if indent <= proxy_indent && !trimmed.starts_with('-') && trimmed != "proxy:" {
+                    in_proxy_block = false;
+                } else if let Some((k, v)) = trimmed.split_once(':') {
+                    let k_low = k.trim().to_lowercase();
+                    if k_low == "url" || k_low == "proxy_url" {
+                        let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Top level or output proxy_url:
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" || k_low == "fleet.proxy.url" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_elastic_agent_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_elastic_agent_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_elastic_agent_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ELASTIC_AGENT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ELASTIC_AGENT_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_grafana_alloy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ALLOY_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("ALLOY_HOME") {
+        let d = PathBuf::from(dir.trim());
+        let candidate = d.join("config.alloy");
+        if candidate.exists() && !paths.contains(&candidate) {
+            paths.push(candidate);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".alloy").join("config.alloy"),
+            home.join(".config").join("alloy").join("config.alloy"),
+            home.join(".config").join("systemd").join("user").join("alloy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/alloy/config.alloy"),
+        PathBuf::from("/etc/grafana-agent.yaml"),
+        PathBuf::from("/etc/default/alloy"),
+        PathBuf::from("/etc/sysconfig/alloy"),
+        PathBuf::from("/etc/systemd/system/alloy.service.d/http-proxy.conf"),
+        PathBuf::from("C:\\Program Files\\Grafana Labs\\Alloy\\config.alloy"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_grafana_alloy_config_path() -> Option<PathBuf> {
+    let paths = get_grafana_alloy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_grafana_alloy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_grafana_alloy_write_path() -> PathBuf {
+    if let Some(p) = get_grafana_alloy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ALLOY_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_alloy = PathBuf::from("/etc/alloy");
+    if etc_alloy.is_dir() {
+        return etc_alloy.join("config.alloy");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/alloy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("alloy").join("config.alloy");
+    }
+    PathBuf::from("/etc/alloy/config.alloy")
+}
+
+pub fn parse_grafana_alloy_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "alloy_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/alloy
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "alloy_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "proxy_url"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // River / Alloy format: proxy_url = "http://..."
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML format (e.g. legacy grafana-agent): proxy_url: "http://..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy_url" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_grafana_alloy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_grafana_alloy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_grafana_alloy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ALLOY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ALLOY_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -16301,6 +16726,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "New Relic Infra Agent",
             "/etc/newrelic-infra.yml & ~/.newrelic/newrelic-infra.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Elastic Agent Infrastructure Daemon Proxy (/etc/elastic-agent/elastic-agent.yml / ~/.elastic-agent/elastic-agent.yml / /etc/systemd/system/elastic-agent.service.d/http-proxy.conf)
+    if let Some((ea_proxy, ea_path)) = get_elastic_agent_proxy() {
+        let ok = verify_proxy_url(&ea_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Elastic Agent daemon proxy `{}` in {} is dead! (Fleet enrollments, Elasticsearch outputs, and Beats intakes will fail)",
+                ea_proxy,
+                ea_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Elastic Agent Infra",
+            format!("{}", ea_path.display()),
+            ea_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (elastic-agent fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Elastic Agent Infra",
+            "/etc/elastic-agent/elastic-agent.yml & ~/.elastic-agent/elastic-agent.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Grafana Alloy Telemetry Collector Daemon Proxy (/etc/alloy/config.alloy / /etc/default/alloy / /etc/systemd/system/alloy.service.d/http-proxy.conf)
+    if let Some((alloy_proxy, alloy_path)) = get_grafana_alloy_proxy() {
+        let ok = verify_proxy_url(&alloy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Grafana Alloy telemetry proxy `{}` in {} is dead! (Prometheus scraping, Loki logs, and Tempo traces will fail)",
+                alloy_proxy,
+                alloy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Grafana Alloy Telemetry",
+            format!("{}", alloy_path.display()),
+            alloy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (alloy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Grafana Alloy Telemetry",
+            "/etc/alloy/config.alloy & /etc/default/alloy",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -20309,5 +20798,98 @@ Environment="NRIA_PROXY=http://10.0.0.11:8080"
         let input_comment = "# proxy: http://127.0.0.1:7890\n";
         assert_eq!(parse_newrelic_infra_proxy(input_comment), None);
         assert_eq!(parse_newrelic_infra_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_elastic_agent_proxy() {
+        let yaml_file = r#"
+outputs:
+  default:
+    type: elasticsearch
+    hosts: ["https://my-es-cluster:9200"]
+    proxy_url: http://127.0.0.1:7890
+fleet:
+  enabled: true
+"#;
+        assert_eq!(
+            parse_elastic_agent_proxy(yaml_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let yaml_fleet = r#"
+fleet:
+  enabled: true
+  proxy:
+    url: "http://10.0.0.13:8080"
+"#;
+        assert_eq!(
+            parse_elastic_agent_proxy(yaml_fleet),
+            Some("http://10.0.0.13:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="ELASTIC_AGENT_PROXY=http://10.0.0.14:8080"
+"#;
+        assert_eq!(
+            parse_elastic_agent_proxy(dropin),
+            Some("http://10.0.0.14:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.15:8080\"\n";
+        assert_eq!(
+            parse_elastic_agent_proxy(default_env),
+            Some("http://10.0.0.15:8080".to_string())
+        );
+
+        let input_comment = "# proxy_url: http://127.0.0.1:7890\n";
+        assert_eq!(parse_elastic_agent_proxy(input_comment), None);
+        assert_eq!(parse_elastic_agent_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_grafana_alloy_proxy() {
+        let river_file = r#"
+prometheus.remote_write "default" {
+  endpoint {
+    url = "https://prometheus-prod.grafana.net/api/prom/push"
+    proxy_url = "http://127.0.0.1:7890"
+  }
+}
+"#;
+        assert_eq!(
+            parse_grafana_alloy_proxy(river_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let yaml_file = r#"
+server:
+  log_level: info
+client:
+  proxy_url: "http://10.0.0.16:8080"
+"#;
+        assert_eq!(
+            parse_grafana_alloy_proxy(yaml_file),
+            Some("http://10.0.0.16:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="ALLOY_HTTP_PROXY=http://10.0.0.17:8080"
+"#;
+        assert_eq!(
+            parse_grafana_alloy_proxy(dropin),
+            Some("http://10.0.0.17:8080".to_string())
+        );
+
+        let default_env = "ALLOY_HTTP_PROXY=\"http://10.0.0.18:8080\"\n";
+        assert_eq!(
+            parse_grafana_alloy_proxy(default_env),
+            Some("http://10.0.0.18:8080".to_string())
+        );
+
+        let input_comment = "// proxy_url = \"http://127.0.0.1:7890\"\n# proxy_url: http://127.0.0.1:7890\n";
+        assert_eq!(parse_grafana_alloy_proxy(input_comment), None);
+        assert_eq!(parse_grafana_alloy_proxy(""), None);
     }
 }

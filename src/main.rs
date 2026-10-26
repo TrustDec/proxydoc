@@ -335,7 +335,13 @@ enum Commands {
         /// Also configure New Relic Infrastructure Agent (newrelic-infra daemon) proxy (/etc/newrelic-infra.yml / /etc/systemd/system/newrelic-infra.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "newrelic", visible_alias = "newrelic-infra", visible_alias = "nr-agent")]
         newrelic_infra: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, and newrelic-infra proxy
+        /// Also configure Elastic Agent (Fleet & Beats observability daemon) proxy (/etc/elastic-agent/elastic-agent.yml / ~/.elastic-agent/elastic-agent.yml / /etc/systemd/system/elastic-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "elastic", visible_alias = "fleet-agent", visible_alias = "elastic-agent")]
+        elastic_agent: bool,
+        /// Also configure Grafana Alloy (Grafana Agent successor telemetry collector daemon) proxy (/etc/alloy/config.alloy / /etc/default/alloy / /etc/systemd/system/alloy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "alloy", visible_alias = "grafana-agent", visible_alias = "grafana-alloy")]
+        grafana_alloy: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, and grafana-alloy proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -614,7 +620,13 @@ enum Commands {
         /// Also unset New Relic Infrastructure Agent (newrelic-infra daemon) proxy (/etc/newrelic-infra.yml / /etc/systemd/system/newrelic-infra.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "newrelic", visible_alias = "newrelic-infra", visible_alias = "nr-agent")]
         newrelic_infra: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, and newrelic-infra proxy
+        /// Also unset Elastic Agent (Fleet & Beats observability daemon) proxy (/etc/elastic-agent/elastic-agent.yml / ~/.elastic-agent/elastic-agent.yml / /etc/systemd/system/elastic-agent.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "elastic", visible_alias = "fleet-agent", visible_alias = "elastic-agent")]
+        elastic_agent: bool,
+        /// Also unset Grafana Alloy (Grafana Agent successor telemetry collector daemon) proxy (/etc/alloy/config.alloy / /etc/default/alloy / /etc/systemd/system/alloy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "alloy", visible_alias = "grafana-agent", visible_alias = "grafana-alloy")]
+        grafana_alloy: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, and grafana-alloy proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -748,6 +760,8 @@ async fn main() -> Result<()> {
             salt_minion,
             datadog_agent,
             newrelic_infra,
+            elastic_agent,
+            grafana_alloy,
             all,
             shell,
         }) => {
@@ -843,6 +857,8 @@ async fn main() -> Result<()> {
                 salt_minion,
                 datadog_agent,
                 newrelic_infra,
+                elastic_agent,
+                grafana_alloy,
                 all,
                 shell.as_deref(),
             )
@@ -939,6 +955,8 @@ async fn main() -> Result<()> {
             salt_minion,
             datadog_agent,
             newrelic_infra,
+            elastic_agent,
+            grafana_alloy,
             all,
             shell,
         }) => {
@@ -1033,6 +1051,8 @@ async fn main() -> Result<()> {
                 salt_minion,
                 datadog_agent,
                 newrelic_infra,
+                elastic_agent,
+                grafana_alloy,
                 all,
                 shell.as_deref(),
             )?;
@@ -3459,6 +3479,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { newrelic_infra, .. }) => {
                 assert!(newrelic_infra);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_elastic_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--elastic-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::On { elastic_agent, .. }) => {
+                assert!(elastic_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--elastic"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { elastic_agent, .. }) => {
+                assert!(elastic_agent);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_elastic_agent() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--elastic-agent"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { elastic_agent, .. }) => {
+                assert!(elastic_agent);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_grafana_alloy() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--grafana-alloy"]).unwrap();
+        match cli.command {
+            Some(Commands::On { grafana_alloy, .. }) => {
+                assert!(grafana_alloy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--alloy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { grafana_alloy, .. }) => {
+                assert!(grafana_alloy);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_grafana_alloy() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--grafana-alloy"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { grafana_alloy, .. }) => {
+                assert!(grafana_alloy);
             }
             _ => panic!("Expected Off command"),
         }
