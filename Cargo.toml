@@ -1,6 +1,6 @@
 [package]
 name = "proxydoc"
-version = "0.84.0"
+version = "0.85.0"
 edition = "2021"
 authors = ["TrustDec <https://github.com/TrustDec>"]
 description = "🩺 All-in-one terminal & dev tools proxy diagnostics and manager for developers."

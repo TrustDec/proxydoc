@@ -25620,6 +25620,463 @@ pub fn get_cloak_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_wireproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("WIREPROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("wireproxy").join("config.yaml"),
+            home.join(".config").join("wireproxy").join("wireproxy.conf"),
+            home.join(".wireproxy").join("config.yaml"),
+            home.join(".wireproxy").join("wireproxy.conf"),
+            home.join(".config").join("systemd").join("user").join("wireproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/wireproxy/config.yaml"),
+        PathBuf::from("/etc/wireproxy/wireproxy.conf"),
+        PathBuf::from("/usr/local/etc/wireproxy/config.yaml"),
+        PathBuf::from("/etc/default/wireproxy"),
+        PathBuf::from("/etc/sysconfig/wireproxy"),
+        PathBuf::from("/etc/systemd/system/wireproxy.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_wireproxy_config_path() -> Option<PathBuf> {
+    let paths = get_wireproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_wireproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_wireproxy_write_path() -> PathBuf {
+    if let Some(p) = get_wireproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("WIREPROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("wireproxy");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/wireproxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/wireproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("wireproxy").join("config.yaml");
+    }
+    PathBuf::from("/etc/wireproxy/config.yaml")
+}
+
+pub fn parse_wireproxy_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "wireproxy_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "wireproxy_proxy"
+                        || k_low == "wireproxy_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "wireproxy_proxy"
+                || k_low == "wireproxy_http_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_wireproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_wireproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_wireproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("WIREPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WIREPROXY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("WIREPROXY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WIREPROXY_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_mtg_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MTG_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("mtg").join("config.toml"),
+            home.join(".config").join("mtg").join("config.yaml"),
+            home.join(".mtg").join("config.toml"),
+            home.join(".mtg").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("mtg.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/mtg.toml"),
+        PathBuf::from("/etc/mtg/config.toml"),
+        PathBuf::from("/etc/mtg/config.yaml"),
+        PathBuf::from("/usr/local/etc/mtg.toml"),
+        PathBuf::from("/etc/default/mtg"),
+        PathBuf::from("/etc/sysconfig/mtg"),
+        PathBuf::from("/etc/systemd/system/mtg.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_mtg_config_path() -> Option<PathBuf> {
+    let paths = get_mtg_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_mtg_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_mtg_write_path() -> PathBuf {
+    if let Some(p) = get_mtg_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MTG_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("mtg");
+        if dir.is_dir() {
+            return dir.join("config.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/mtg");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/mtg.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("mtg").join("config.toml");
+    }
+    PathBuf::from("/etc/mtg.toml")
+}
+
+pub fn parse_mtg_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "mtg_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "mtg_proxy"
+                        || k_low == "mtg_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "mtg_proxy"
+                || k_low == "mtg_http_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_mtg_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_mtg_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_mtg_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MTG_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MTG_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MTG_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MTG_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -31385,6 +31842,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Cloak Daemon Proxy",
             "~/.config/cloak/ckclient.json & /etc/cloak/ckclient.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Wireproxy Daemon Proxy (/etc/wireproxy/config.yaml / ~/.config/wireproxy/config.yaml / /etc/systemd/system/wireproxy.service.d/http-proxy.conf)
+    if let Some((wire_proxy, wire_path)) = get_wireproxy_proxy() {
+        let ok = verify_proxy_url(&wire_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Wireproxy daemon proxy `{}` in {} is dead! (wireproxy tunnel will fail)",
+                wire_proxy,
+                wire_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Wireproxy Daemon Proxy",
+            format!("{}", wire_path.display()),
+            wire_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (wireproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Wireproxy Daemon Proxy",
+            "~/.config/wireproxy/config.yaml & /etc/wireproxy/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // MTG Daemon Proxy (/etc/mtg.toml / ~/.config/mtg/config.toml / /etc/systemd/system/mtg.service.d/http-proxy.conf)
+    if let Some((mtg_proxy, mtg_path)) = get_mtg_proxy() {
+        let ok = verify_proxy_url(&mtg_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "MTG daemon proxy `{}` in {} is dead! (mtg MTProto relay will fail)",
+                mtg_proxy,
+                mtg_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "MTG Daemon Proxy",
+            format!("{}", mtg_path.display()),
+            mtg_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (mtg fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "MTG Daemon Proxy",
+            "~/.config/mtg/config.toml & /etc/mtg.toml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -37696,5 +38217,91 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; cloak_proxy = http://127.0.0.1:7890\n";
         assert_eq!(parse_cloak_proxy(input_comment), None);
         assert_eq!(parse_cloak_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_wireproxy_proxy() {
+        let wire_json = r#"{
+            "device": "wg0",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_wireproxy_proxy(wire_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let wire_yaml = r#"
+device: wg0
+wireproxy_proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_wireproxy_proxy(wire_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let wire_env = r#"
+# Wireproxy environment config
+WIREPROXY_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_wireproxy_proxy(wire_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_wireproxy_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; wireproxy_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_wireproxy_proxy(input_comment), None);
+        assert_eq!(parse_wireproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_mtg_proxy() {
+        let mtg_json = r#"{
+            "secret": "ee1234",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_mtg_proxy(mtg_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let mtg_toml = r#"
+secret = "ee1234"
+mtg_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mtg_proxy(mtg_toml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let mtg_env = r#"
+# MTG environment config
+MTG_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mtg_proxy(mtg_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mtg_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; mtg_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_mtg_proxy(input_comment), None);
+        assert_eq!(parse_mtg_proxy(""), None);
     }
 }

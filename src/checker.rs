@@ -1254,6 +1254,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Kimi-k1.5 AI CDN",
         "https://github.com/MoonshotAI/Kimi-k1.5",
     ),
+    (
+        "Wireproxy Proxy CDN",
+        "https://github.com/pufferffish/wireproxy/releases",
+    ),
+    (
+        "MTG Proxy CDN",
+        "https://github.com/9seconds/mtg/releases",
+    ),
+    (
+        "Qwen2.5-Coder AI CDN",
+        "https://github.com/QwenLM/Qwen2.5-Coder",
+    ),
+    (
+        "DeepSeek-VL2 AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-VL2",
+    ),
+    (
+        "SWE-agent AI CDN",
+        "https://github.com/princeton-nlp/SWE-agent",
+    ),
+    (
+        "Fish-Speech AI CDN",
+        "https://github.com/fishaudio/fish-speech",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2504,6 +2528,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Kimi-k1.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Wireproxy Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MTG Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen2.5-Coder AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-VL2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SWE-agent AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fish-Speech AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

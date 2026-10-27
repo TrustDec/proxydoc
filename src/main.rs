@@ -515,7 +515,13 @@ enum Commands {
         /// Also configure Cloak daemon proxy (/etc/cloak/ckclient.json / ~/.config/cloak/ckclient.json / /etc/systemd/system/cloak.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "cloak-proxy", visible_alias = "ck-client")]
         cloak: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, and cloak proxy
+        /// Also configure Wireproxy daemon proxy (/etc/wireproxy/config.yaml / ~/.config/wireproxy/config.yaml / /etc/systemd/system/wireproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "wireproxy-daemon", visible_alias = "wireproxy-proxy")]
+        wireproxy: bool,
+        /// Also configure MTG daemon proxy (/etc/mtg.toml / ~/.config/mtg/config.toml / /etc/systemd/system/mtg.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "mtg-daemon", visible_alias = "mtg-proxy")]
+        mtg: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, and mtg proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -974,7 +980,13 @@ enum Commands {
         /// Also unset Cloak daemon proxy (/etc/cloak/ckclient.json / ~/.config/cloak/ckclient.json / /etc/systemd/system/cloak.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "cloak-proxy", visible_alias = "ck-client")]
         cloak: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, and cloak proxy
+        /// Also unset Wireproxy daemon proxy (/etc/wireproxy/config.yaml / ~/.config/wireproxy/config.yaml / /etc/systemd/system/wireproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "wireproxy-daemon", visible_alias = "wireproxy-proxy")]
+        wireproxy: bool,
+        /// Also unset MTG daemon proxy (/etc/mtg.toml / ~/.config/mtg/config.toml / /etc/systemd/system/mtg.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "mtg-daemon", visible_alias = "mtg-proxy")]
+        mtg: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, and mtg proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1168,6 +1180,8 @@ async fn main() -> Result<()> {
             tun2socks,
             wstunnel,
             cloak,
+            wireproxy,
+            mtg,
             all,
             shell,
         }) => {
@@ -1323,6 +1337,8 @@ async fn main() -> Result<()> {
                 tun2socks,
                 wstunnel,
                 cloak,
+                wireproxy,
+                mtg,
                 all,
                 shell.as_deref(),
             )
@@ -1479,6 +1495,8 @@ async fn main() -> Result<()> {
             tun2socks,
             wstunnel,
             cloak,
+            wireproxy,
+            mtg,
             all,
             shell,
         }) => {
@@ -1633,6 +1651,8 @@ async fn main() -> Result<()> {
                 tun2socks,
                 wstunnel,
                 cloak,
+                wireproxy,
+                mtg,
                 all,
                 shell.as_deref(),
             )?;
@@ -5923,6 +5943,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { cloak, .. }) => {
                 assert!(cloak);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_wireproxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--wireproxy"]).unwrap();
+        match cli.command {
+            Some(Commands::On { wireproxy, .. }) => {
+                assert!(wireproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--wireproxy-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { wireproxy, .. }) => {
+                assert!(wireproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_wireproxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--wireproxy"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { wireproxy, .. }) => {
+                assert!(wireproxy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_mtg() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--mtg"]).unwrap();
+        match cli.command {
+            Some(Commands::On { mtg, .. }) => {
+                assert!(mtg);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--mtg-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { mtg, .. }) => {
+                assert!(mtg);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_mtg() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--mtg"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { mtg, .. }) => {
+                assert!(mtg);
             }
             _ => panic!("Expected Off command"),
         }
