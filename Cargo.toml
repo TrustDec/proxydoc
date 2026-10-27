@@ -1,6 +1,6 @@
 [package]
 name = "proxydoc"
-version = "0.67.0"
+version = "0.68.0"
 edition = "2021"
 authors = ["TrustDec <https://github.com/TrustDec>"]
 description = "🩺 All-in-one terminal & dev tools proxy diagnostics and manager for developers."
@@ -22,3 +22,7 @@ indicatif = "0.17"
 tabled = { version = "0.15", features = ["derive", "ansi"] }
 anyhow = "1.0"
 url = "2.5"
+
+[profile.test]
+opt-level = 1
+

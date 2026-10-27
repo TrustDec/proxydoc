@@ -18150,6 +18150,428 @@ pub fn unset_kong_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_apisix_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_apisix = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "apisix_http_proxy" {
+                        lines.push(format!("Environment=\"APISIX_HTTP_PROXY={}\"", proxy_url));
+                        replaced_apisix = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("apisix_http_proxy=") {
+                lines.push(format!("APISIX_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_apisix = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_apisix {
+            lines.push(format!("Environment=\"APISIX_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML key: value format
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy" || key == "https_proxy" || key == "upstream_proxy" || key == "apisix_http_proxy" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}{}: \"{}\"", "", k.trim(), proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push("proxy:".to_string());
+    out.push(format!("  http_proxy: \"{}\"", proxy_url));
+    out.push(format!("  https_proxy: \"{}\"", proxy_url));
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_apisix_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "apisix_http_proxy"
+                    || k_low == "apisix_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "upstream_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("apisix_http_proxy=")
+            || lower.starts_with("apisix_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("upstream_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().to_ascii_lowercase();
+            if key == "http_proxy"
+                || key == "https_proxy"
+                || key == "upstream_proxy"
+                || key == "apisix_http_proxy"
+                || key == "apisix_https_proxy"
+                || key == "proxy"
+            {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_apisix_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_apisix_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_apisix_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_apisix_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_apisix_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_apisix_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_squid_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_squid = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "squid_http_proxy" {
+                        lines.push(format!("Environment=\"SQUID_HTTP_PROXY={}\"", proxy_url));
+                        replaced_squid = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("squid_http_proxy=") {
+                lines.push(format!("SQUID_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_squid = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_squid {
+            lines.push(format!("Environment=\"SQUID_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // Extract host and port for cache_peer directive
+    let (host, port) = if let Ok(u) = url::Url::parse(proxy_url) {
+        let h = u.host_str().unwrap_or("127.0.0.1").to_string();
+        let p = u.port().unwrap_or(8080);
+        (h, p)
+    } else {
+        ("127.0.0.1".to_string(), 7890)
+    };
+
+    // squid.conf format: cache_peer <host> parent <port> 0 no-query default
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let clean = trimmed.trim_end_matches(';').trim();
+        let parts: Vec<&str> = clean.split_whitespace().collect();
+        if parts.len() >= 4 && parts[0].eq_ignore_ascii_case("cache_peer") && parts[2].eq_ignore_ascii_case("parent") {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}cache_peer {} parent {} 0 no-query default", "", host, port, indent = indent));
+            replaced_proxy = true;
+            continue;
+        }
+        if parts.len() >= 2 && (parts[0].eq_ignore_ascii_case("http_proxy") || parts[0].eq_ignore_ascii_case("https_proxy") || parts[0].eq_ignore_ascii_case("proxy")) {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}http_proxy {}", "", proxy_url, indent = indent));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(format!("cache_peer {} parent {} 0 no-query default", host, port));
+    out.push("never_direct allow all".to_string());
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_squid_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "squid_http_proxy"
+                    || k_low == "squid_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "upstream_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("squid_http_proxy=")
+            || lower.starts_with("squid_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("upstream_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_end_matches(';').trim();
+        let parts: Vec<&str> = clean.split_whitespace().collect();
+        if parts.len() >= 4 && parts[0].eq_ignore_ascii_case("cache_peer") && parts[2].eq_ignore_ascii_case("parent") {
+            removed = true;
+            continue;
+        }
+        if clean.eq_ignore_ascii_case("never_direct allow all") {
+            removed = true;
+            continue;
+        }
+        if parts.len() >= 2 && (parts[0].eq_ignore_ascii_case("http_proxy") || parts[0].eq_ignore_ascii_case("https_proxy") || parts[0].eq_ignore_ascii_case("proxy")) {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_squid_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_squid_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_squid_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_squid_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_squid_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_squid_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -18268,6 +18690,8 @@ pub async fn turn_on(
     haproxy: bool,
     nginx: bool,
     kong: bool,
+    apisix: bool,
+    squid: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -18385,6 +18809,8 @@ pub async fn turn_on(
     let set_haproxy = haproxy || all;
     let set_nginx = nginx || all;
     let set_kong = kong || all;
+    let set_apisix = apisix || all;
+    let set_squid = squid || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -20026,6 +20452,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_apisix {
+        match set_apisix_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Apache APISIX gateway daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Apache APISIX daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_squid {
+        match set_squid_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Squid caching proxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Squid daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -20157,6 +20613,8 @@ pub fn turn_off(
     haproxy: bool,
     nginx: bool,
     kong: bool,
+    apisix: bool,
+    squid: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -20274,6 +20732,8 @@ pub fn turn_off(
     let unset_haproxy = haproxy || all;
     let unset_nginx = nginx || all;
     let unset_kong = kong || all;
+    let unset_apisix = apisix || all;
+    let unset_squid = squid || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -21271,6 +21731,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Kong API gateway daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Kong API gateway proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Kong API gateway daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_apisix {
+        match unset_apisix_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Apache APISIX gateway daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Apache APISIX gateway proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Apache APISIX gateway daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_squid {
+        match unset_squid_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Squid caching proxy daemon removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Squid caching proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Squid caching proxy daemon: {}", "▲".yellow(), e),
         }
     }
 
@@ -24060,5 +24536,55 @@ https_proxy = http://127.0.0.1:7890
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("KONG_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_apisix_proxy() {
+        let yaml_initial = r#"
+apisix:
+  proxy_cache:
+    zone_total_size: 10m
+proxy:
+  http_proxy: "http://127.0.0.1:7890"
+"#;
+        let yaml_updated = apply_apisix_proxy(yaml_initial, "http://10.0.0.42:8080");
+        assert!(yaml_updated.contains("http_proxy: \"http://10.0.0.42:8080\""));
+        let (yaml_cleaned, yaml_removed) = remove_apisix_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("http_proxy:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_apisix_proxy(dropin_initial, "http://10.0.0.42:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.42:8080\""));
+        assert!(dropin_updated.contains("Environment=\"APISIX_HTTP_PROXY=http://10.0.0.42:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_apisix_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("APISIX_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_squid_proxy() {
+        let squid_initial = r#"
+cache_peer 127.0.0.1 parent 7890 0 no-query default
+never_direct allow all
+"#;
+        let squid_updated = apply_squid_proxy(squid_initial, "http://10.0.0.43:8080");
+        assert!(squid_updated.contains("cache_peer 10.0.0.43 parent 8080 0 no-query default"));
+        let (squid_cleaned, squid_removed) = remove_squid_proxy(&squid_updated);
+        assert!(squid_removed);
+        assert!(!squid_cleaned.contains("cache_peer"));
+        assert!(!squid_cleaned.contains("never_direct allow all"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_squid_proxy(dropin_initial, "http://10.0.0.43:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.43:8080\""));
+        assert!(dropin_updated.contains("Environment=\"SQUID_HTTP_PROXY=http://10.0.0.43:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_squid_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("SQUID_HTTP_PROXY="));
     }
 }

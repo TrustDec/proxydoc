@@ -413,7 +413,13 @@ enum Commands {
         /// Also configure Kong API gateway daemon proxy (/etc/kong/kong.conf / ~/.kong/kong.conf / /etc/systemd/system/kong.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "kong-gateway", visible_alias = "kong-api")]
         kong: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, and kong proxy
+        /// Also configure Apache APISIX API gateway daemon proxy (/etc/apisix/config.yaml / /usr/local/apisix/conf/config.yaml / /etc/systemd/system/apisix.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "apisix-gateway", visible_alias = "apisix-proxy")]
+        apisix: bool,
+        /// Also configure Squid caching proxy daemon (/etc/squid/squid.conf / /etc/squid/conf.d/proxy.conf / /etc/systemd/system/squid.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "squid-proxy", visible_alias = "squid-cache")]
+        squid: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, and squid proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -770,7 +776,13 @@ enum Commands {
         /// Also unset Kong API gateway daemon proxy (/etc/kong/kong.conf / ~/.kong/kong.conf / /etc/systemd/system/kong.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "kong-gateway", visible_alias = "kong-api")]
         kong: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, and kong proxy
+        /// Also unset Apache APISIX API gateway daemon proxy (/etc/apisix/config.yaml / /usr/local/apisix/conf/config.yaml / /etc/systemd/system/apisix.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "apisix-gateway", visible_alias = "apisix-proxy")]
+        apisix: bool,
+        /// Also unset Squid caching proxy daemon (/etc/squid/squid.conf / /etc/squid/conf.d/proxy.conf / /etc/systemd/system/squid.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "squid-proxy", visible_alias = "squid-cache")]
+        squid: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, and squid proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -930,6 +942,8 @@ async fn main() -> Result<()> {
             haproxy,
             nginx,
             kong,
+            apisix,
+            squid,
             all,
             shell,
         }) => {
@@ -1051,6 +1065,8 @@ async fn main() -> Result<()> {
                 haproxy,
                 nginx,
                 kong,
+                apisix,
+                squid,
                 all,
                 shell.as_deref(),
             )
@@ -1173,6 +1189,8 @@ async fn main() -> Result<()> {
             haproxy,
             nginx,
             kong,
+            apisix,
+            squid,
             all,
             shell,
         }) => {
@@ -1293,6 +1311,8 @@ async fn main() -> Result<()> {
                 haproxy,
                 nginx,
                 kong,
+                apisix,
+                squid,
                 all,
                 shell.as_deref(),
             )?;
@@ -4499,6 +4519,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { kong, .. }) => {
                 assert!(kong);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_apisix() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--apisix"]).unwrap();
+        match cli.command {
+            Some(Commands::On { apisix, .. }) => {
+                assert!(apisix);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--apisix-gateway"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { apisix, .. }) => {
+                assert!(apisix);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_apisix() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--apisix"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { apisix, .. }) => {
+                assert!(apisix);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_squid() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--squid"]).unwrap();
+        match cli.command {
+            Some(Commands::On { squid, .. }) => {
+                assert!(squid);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--squid-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { squid, .. }) => {
+                assert!(squid);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_squid() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--squid"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { squid, .. }) => {
+                assert!(squid);
             }
             _ => panic!("Expected Off command"),
         }

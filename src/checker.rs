@@ -846,6 +846,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "DuckDB CDN",
         "https://duckdb.org",
     ),
+    (
+        "Apache Doris CDN",
+        "https://doris.apache.org",
+    ),
+    (
+        "Apache Hudi CDN",
+        "https://hudi.apache.org",
+    ),
+    (
+        "Polars CDN",
+        "https://pola.rs",
+    ),
+    (
+        "Ray CDN",
+        "https://www.ray.io",
+    ),
+    (
+        "Apache APISIX CDN",
+        "https://apisix.apache.org",
+    ),
+    (
+        "Squid Cache CDN",
+        "https://www.squid-cache.org",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1790,6 +1814,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "DuckDB CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Doris CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Hudi CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Polars CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Ray CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache APISIX CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Squid Cache CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

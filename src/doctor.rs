@@ -17738,6 +17738,435 @@ pub fn get_kong_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_apisix_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("APISIX_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("APISIX_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("APISIX_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".apisix").join("config.yaml"),
+            home.join(".config").join("apisix").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("apisix.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/apisix/config.yaml"),
+        PathBuf::from("/usr/local/apisix/conf/config.yaml"),
+        PathBuf::from("/etc/default/apisix"),
+        PathBuf::from("/etc/sysconfig/apisix"),
+        PathBuf::from("/etc/systemd/system/apisix.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/apisix/config.yaml"),
+        PathBuf::from("C:\\ProgramData\\APISIX\\config.yaml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_apisix_config_path() -> Option<PathBuf> {
+    let paths = get_apisix_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_apisix_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_apisix_write_path() -> PathBuf {
+    if let Some(p) = get_apisix_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("APISIX_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_apisix = PathBuf::from("/etc/apisix");
+    if etc_apisix.is_dir() {
+        return etc_apisix.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/apisix.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".apisix").join("config.yaml");
+    }
+    PathBuf::from("/etc/apisix/config.yaml")
+}
+
+pub fn parse_apisix_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "apisix_http_proxy"
+                        || k_low == "apisix_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "upstream_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/apisix
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "apisix_http_proxy"
+                || k_low == "apisix_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML key: value format
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "apisix_http_proxy"
+                || k_low == "apisix_https_proxy"
+                || k_low == "proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_apisix_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_apisix_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_apisix_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("APISIX_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:APISIX_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_squid_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SQUID_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SQUID_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("SQUID_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("squid.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("squid").join("squid.conf"),
+            home.join(".squid").join("squid.conf"),
+            home.join(".config").join("systemd").join("user").join("squid.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/squid/squid.conf"),
+        PathBuf::from("/etc/squid/conf.d/proxy.conf"),
+        PathBuf::from("/etc/squid3/squid.conf"),
+        PathBuf::from("/etc/default/squid"),
+        PathBuf::from("/etc/sysconfig/squid"),
+        PathBuf::from("/etc/systemd/system/squid.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/squid/etc/squid.conf"),
+        PathBuf::from("/usr/local/etc/squid/squid.conf"),
+        PathBuf::from("C:\\Squid\\etc\\squid\\squid.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_squid_config_path() -> Option<PathBuf> {
+    let paths = get_squid_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_squid_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_squid_write_path() -> PathBuf {
+    if let Some(p) = get_squid_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SQUID_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let conf_d = PathBuf::from("/etc/squid/conf.d");
+    if conf_d.is_dir() {
+        return conf_d.join("proxy.conf");
+    }
+    let etc_squid = PathBuf::from("/etc/squid");
+    if etc_squid.is_dir() {
+        return etc_squid.join("squid.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/squid.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("squid").join("squid.conf");
+    }
+    PathBuf::from("/etc/squid/squid.conf")
+}
+
+pub fn parse_squid_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "squid_http_proxy"
+                        || k_low == "squid_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "upstream_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/squid
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "squid_http_proxy"
+                || k_low == "squid_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Squid cache_peer directive format:
+        // cache_peer 127.0.0.1 parent 7890 0 no-query default
+        let clean = trimmed.trim_end_matches(';').trim();
+        let parts: Vec<&str> = clean.split_whitespace().collect();
+        if parts.len() >= 4 && parts[0].eq_ignore_ascii_case("cache_peer") && parts[2].eq_ignore_ascii_case("parent") {
+            let host = parts[1];
+            let port = parts[3];
+            let proxy_url = if host.starts_with("http://") || host.starts_with("https://") || host.starts_with("socks") {
+                host.to_string()
+            } else {
+                format!("http://{}:{}", host, port)
+            };
+            return Some(proxy_url);
+        }
+
+        // Squid http_proxy directive format:
+        // http_proxy http://127.0.0.1:7890
+        // http_proxy = http://127.0.0.1:7890
+        if parts.len() >= 2 && (parts[0].eq_ignore_ascii_case("http_proxy") || parts[0].eq_ignore_ascii_case("https_proxy") || parts[0].eq_ignore_ascii_case("proxy")) {
+            let val = parts[1].trim_start_matches('=').trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_squid_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_squid_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_squid_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SQUID_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SQUID_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -22415,6 +22844,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Kong API Gateway",
             "/etc/kong/kong.conf & ~/.kong/kong.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Apache APISIX Cloud-Native API Gateway (/etc/apisix/config.yaml / /usr/local/apisix/conf/config.yaml / /etc/systemd/system/apisix.service.d/http-proxy.conf)
+    if let Some((apisix_proxy, apisix_path)) = get_apisix_proxy() {
+        let ok = verify_proxy_url(&apisix_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Apache APISIX API gateway daemon proxy `{}` in {} is dead! (APISIX plugin routing, upstream proxying, and control plane sync will fail)",
+                apisix_proxy,
+                apisix_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Apache APISIX Gateway",
+            format!("{}", apisix_path.display()),
+            apisix_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (apisix fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Apache APISIX Gateway",
+            "/etc/apisix/config.yaml & ~/.apisix/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Squid Caching Proxy Daemon (/etc/squid/squid.conf / /etc/squid/conf.d/proxy.conf / /etc/systemd/system/squid.service.d/http-proxy.conf)
+    if let Some((squid_proxy, squid_path)) = get_squid_proxy() {
+        let ok = verify_proxy_url(&squid_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Squid caching proxy daemon parent/forwarding proxy `{}` in {} is dead! (Squid upstream peer forwarding and cache peer requests will fail)",
+                squid_proxy,
+                squid_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Squid Caching Proxy",
+            format!("{}", squid_path.display()),
+            squid_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (squid fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Squid Caching Proxy",
+            "/etc/squid/squid.conf & /etc/squid/conf.d/proxy.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -27380,5 +27873,72 @@ Environment="KONG_HTTP_PROXY=http://10.0.0.104:8080"
         let input_comment = "# http_proxy = http://127.0.0.1:7890\n; http_proxy = http://127.0.0.1:7890\n// http_proxy = http://127.0.0.1:7890\n";
         assert_eq!(parse_kong_proxy(input_comment), None);
         assert_eq!(parse_kong_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_apisix_proxy() {
+        let apisix_yaml = r#"
+apisix:
+  proxy_cache:
+    zone_total_size: 10m
+proxy:
+  http_proxy: "http://127.0.0.1:7890"
+  https_proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_apisix_proxy(apisix_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="APISIX_HTTP_PROXY=http://10.0.0.106:8080"
+"#;
+        assert_eq!(
+            parse_apisix_proxy(dropin),
+            Some("http://10.0.0.106:8080".to_string())
+        );
+
+        let env_file = "APISIX_HTTP_PROXY=\"http://10.0.0.107:8080\"\n";
+        assert_eq!(
+            parse_apisix_proxy(env_file),
+            Some("http://10.0.0.107:8080".to_string())
+        );
+
+        let input_comment = "# http_proxy: http://127.0.0.1:7890\n// http_proxy: http://127.0.0.1:7890\n";
+        assert_eq!(parse_apisix_proxy(input_comment), None);
+        assert_eq!(parse_apisix_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_squid_proxy() {
+        let squid_conf = r#"
+acl localnet src 0.0.0.1-0.255.255.255
+cache_peer 127.0.0.1 parent 7890 0 no-query default
+never_direct allow all
+"#;
+        assert_eq!(
+            parse_squid_proxy(squid_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="SQUID_HTTP_PROXY=http://10.0.0.108:8080"
+"#;
+        assert_eq!(
+            parse_squid_proxy(dropin),
+            Some("http://10.0.0.108:8080".to_string())
+        );
+
+        let directive = "http_proxy http://10.0.0.109:8080\n";
+        assert_eq!(
+            parse_squid_proxy(directive),
+            Some("http://10.0.0.109:8080".to_string())
+        );
+
+        let input_comment = "# cache_peer 127.0.0.1 parent 7890 0 no-query\n; http_proxy http://127.0.0.1:7890\n";
+        assert_eq!(parse_squid_proxy(input_comment), None);
+        assert_eq!(parse_squid_proxy(""), None);
     }
 }
