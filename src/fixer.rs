@@ -23,6 +23,7 @@ use crate::doctor::{
     get_pacman_proxy, get_pkg_proxy, get_portage_proxy, get_docker_daemon_proxy,
     get_flatpak_proxy, get_snap_proxy, get_ollama_proxy, get_containerd_proxy, get_buildkit_proxy, get_k3s_proxy, get_microk8s_proxy, get_k0s_proxy, get_rke2_proxy, get_nomad_proxy, get_kubelet_proxy, get_gitlab_runner_proxy, get_actions_runner_proxy, get_jenkins_proxy, get_buildkite_agent_proxy, get_woodpecker_agent_proxy, get_drone_runner_proxy, get_act_runner_proxy, get_circleci_runner_proxy, get_azure_pipelines_agent_proxy, get_teamcity_agent_proxy, get_bamboo_agent_proxy, get_tfc_agent_proxy, get_concourse_worker_proxy, get_tentacle_agent_proxy, get_puppet_agent_proxy, get_chef_client_proxy, get_salt_minion_proxy, get_datadog_agent_proxy, get_newrelic_infra_proxy, get_elastic_agent_proxy, get_grafana_alloy_proxy, get_otelcol_proxy, get_vector_proxy, get_fluent_bit_proxy, get_fluentd_proxy, get_telegraf_proxy, get_logstash_proxy, get_prometheus_proxy, get_alertmanager_proxy, get_promtail_proxy, get_vmagent_proxy, get_filebeat_proxy, get_metricbeat_proxy, get_heartbeat_proxy, get_auditbeat_proxy, get_packetbeat_proxy, get_winlogbeat_proxy, get_consul_proxy, get_vault_proxy, get_traefik_proxy, get_caddy_proxy, get_envoy_proxy, get_haproxy_proxy, get_nginx_proxy, get_kong_proxy, get_apisix_proxy, get_squid_proxy, get_privoxy_proxy, get_tinyproxy_proxy, get_mitmproxy_proxy, get_tor_proxy, get_cloudflared_proxy, get_ngrok_proxy, get_frpc_proxy, get_tailscale_proxy, get_zerotier_proxy, get_gost_proxy, get_rathole_proxy, get_chisel_proxy, get_nebula_proxy, get_bore_proxy, get_brook_proxy, get_npc_proxy, get_shadowsocks_proxy, get_v2ray_proxy, get_sing_box_proxy, get_hysteria_proxy, get_trojan_proxy, get_naive_proxy, get_tuic_proxy, get_juicity_proxy, get_snell_proxy, get_leaf_proxy, get_mihomo_proxy, get_stunnel_proxy, get_shadow_tls_proxy, get_tun2socks_proxy, get_wstunnel_proxy, get_cloak_proxy, get_wireproxy_proxy, get_mtg_proxy, get_kcptun_proxy, get_glider_proxy, get_redsocks_proxy, get_dante_proxy, get_threeproxy_proxy, get_polipo_proxy, get_pproxy_proxy, get_microsocks_proxy, get_cntlm_proxy, get_cow_proxy, get_sniproxy_proxy, get_dnsproxy_proxy, get_apk_repositories_paths,
     parse_apk_repositories, clean_apk_repositories,
+    get_mosdns_proxy, get_smartdns_proxy,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bazel_proxy, unset_bun_proxy,
@@ -41,6 +42,7 @@ use crate::manager::{
     unset_buildkit_proxy, unset_k3s_proxy, unset_microk8s_proxy, unset_k0s_proxy,
     unset_rke2_proxy, unset_nomad_proxy, unset_kubelet_proxy, unset_gitlab_runner_proxy,
     unset_actions_runner_proxy, unset_jenkins_proxy, unset_buildkite_agent_proxy, unset_woodpecker_agent_proxy, unset_drone_runner_proxy, unset_act_runner_proxy, unset_circleci_runner_proxy, unset_azure_pipelines_agent_proxy, unset_teamcity_agent_proxy, unset_bamboo_agent_proxy, unset_tfc_agent_proxy, unset_concourse_worker_proxy, unset_tentacle_agent_proxy, unset_puppet_agent_proxy, unset_chef_client_proxy, unset_salt_minion_proxy, unset_datadog_agent_proxy, unset_newrelic_infra_proxy, unset_elastic_agent_proxy, unset_grafana_alloy_proxy, unset_otelcol_proxy, unset_vector_proxy, unset_fluent_bit_proxy, unset_fluentd_proxy, unset_telegraf_proxy, unset_logstash_proxy, unset_prometheus_proxy, unset_alertmanager_proxy, unset_promtail_proxy, unset_vmagent_proxy, unset_filebeat_proxy, unset_metricbeat_proxy, unset_heartbeat_proxy, unset_auditbeat_proxy, unset_packetbeat_proxy, unset_winlogbeat_proxy, unset_consul_proxy, unset_vault_proxy, unset_traefik_proxy, unset_caddy_proxy, unset_envoy_proxy, unset_haproxy_proxy, unset_nginx_proxy, unset_kong_proxy, unset_apisix_proxy, unset_squid_proxy, unset_privoxy_proxy, unset_tinyproxy_proxy, unset_mitmproxy_proxy, unset_tor_proxy, unset_cloudflared_proxy, unset_ngrok_proxy, unset_frpc_proxy, unset_tailscale_proxy, unset_zerotier_proxy, unset_gost_proxy, unset_rathole_proxy, unset_chisel_proxy, unset_nebula_proxy, unset_bore_proxy, unset_brook_proxy, unset_npc_proxy, unset_shadowsocks_proxy, unset_v2ray_proxy, unset_sing_box_proxy, unset_hysteria_proxy, unset_trojan_proxy, unset_naive_proxy, unset_tuic_proxy, unset_juicity_proxy, unset_snell_proxy, unset_leaf_proxy, unset_mihomo_proxy, unset_stunnel_proxy, unset_shadow_tls_proxy, unset_tun2socks_proxy, unset_wstunnel_proxy, unset_cloak_proxy, unset_wireproxy_proxy, unset_mtg_proxy, unset_kcptun_proxy, unset_glider_proxy, unset_redsocks_proxy, unset_dante_proxy, unset_threeproxy_proxy, unset_polipo_proxy, unset_pproxy_proxy, unset_microsocks_proxy, unset_cntlm_proxy, unset_cow_proxy, unset_sniproxy_proxy, unset_dnsproxy_proxy,
+    unset_mosdns_proxy, unset_smartdns_proxy,
 };
 use crate::scanner;
 
@@ -4558,7 +4560,7 @@ pub async fn run() -> Result<()> {
     if let Some((sniproxy_proxy, sniproxy_path)) = get_sniproxy_proxy() {
         if !verify_proxy_url(&sniproxy_proxy).await {
             println!(
-                "  [165/171] Found dead Sniproxy proxy (`{}` in {}), cleaning with backup...",
+                "  [165/173] Found dead Sniproxy proxy (`{}` in {}), cleaning with backup...",
                 sniproxy_proxy.yellow(),
                 sniproxy_path.display()
             );
@@ -4575,17 +4577,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [165/171] Sniproxy proxy: {}", "Reachable".green());
+            println!("  [165/173] Sniproxy proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [165/171] Sniproxy proxy: {}", "Clean or not set".dimmed());
+        println!("  [165/173] Sniproxy proxy: {}", "Clean or not set".dimmed());
     }
 
     // 166. Clean dead Dnsproxy AdGuard DNS proxy daemon in config / systemd
     if let Some((dnsproxy_proxy, dnsproxy_path)) = get_dnsproxy_proxy() {
         if !verify_proxy_url(&dnsproxy_proxy).await {
             println!(
-                "  [166/171] Found dead Dnsproxy proxy (`{}` in {}), cleaning with backup...",
+                "  [166/173] Found dead Dnsproxy proxy (`{}` in {}), cleaning with backup...",
                 dnsproxy_proxy.yellow(),
                 dnsproxy_path.display()
             );
@@ -4602,13 +4604,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [166/171] Dnsproxy proxy: {}", "Reachable".green());
+            println!("  [166/173] Dnsproxy proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [166/171] Dnsproxy proxy: {}", "Clean or not set".dimmed());
+        println!("  [166/173] Dnsproxy proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 167. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 167. Clean dead Mosdns Pluggable DNS forwarder daemon in config / systemd
+    if let Some((mosdns_proxy, mosdns_path)) = get_mosdns_proxy() {
+        if !verify_proxy_url(&mosdns_proxy).await {
+            println!(
+                "  [167/173] Found dead Mosdns proxy (`{}` in {}), cleaning with backup...",
+                mosdns_proxy.yellow(),
+                mosdns_path.display()
+            );
+            if mosdns_path.exists() {
+                let backup = mosdns_path.with_extension("bak");
+                let _ = std::fs::copy(&mosdns_path, &backup);
+            }
+            if let Ok(true) = unset_mosdns_proxy() {
+                println!(
+                    "  {} Cleared broken Mosdns proxy in {} (backup saved)",
+                    "✔".green(),
+                    mosdns_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [167/173] Mosdns proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [167/173] Mosdns proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 168. Clean dead SmartDNS local DNS proxy daemon in config / systemd
+    if let Some((smartdns_proxy, smartdns_path)) = get_smartdns_proxy() {
+        if !verify_proxy_url(&smartdns_proxy).await {
+            println!(
+                "  [168/173] Found dead SmartDNS proxy (`{}` in {}), cleaning with backup...",
+                smartdns_proxy.yellow(),
+                smartdns_path.display()
+            );
+            if smartdns_path.exists() {
+                let backup = smartdns_path.with_extension("bak");
+                let _ = std::fs::copy(&smartdns_path, &backup);
+            }
+            if let Ok(true) = unset_smartdns_proxy() {
+                println!(
+                    "  {} Cleared broken SmartDNS proxy in {} (backup saved)",
+                    "✔".green(),
+                    smartdns_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [168/173] SmartDNS proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [168/173] SmartDNS proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 169. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -4622,7 +4678,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [167/171] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [169/173] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -4639,17 +4695,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [167/171] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [169/173] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [167/171] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [169/173] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [167/171] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [169/173] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 168. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 170. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -4663,7 +4719,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [168/171] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [170/173] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -4681,17 +4737,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [168/171] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [170/173] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [168/171] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [170/173] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [168/171] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [170/173] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 169. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 171. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -4705,7 +4761,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [169/171] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [171/173] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -4723,17 +4779,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [169/171] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [171/173] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [169/171] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [171/173] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [169/171] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [171/173] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 170. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 172. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -4752,7 +4808,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [170/171] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [172/173] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -4780,12 +4836,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [170/171] No active local proxy client found. Ensure your proxy software is open."
+            "  [172/173] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 171. Flush local DNS cache
-    println!("  [171/171] Flushing local DNS cache to fix resolution stalls...");
+    // 173. Flush local DNS cache
+    println!("  [173/173] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

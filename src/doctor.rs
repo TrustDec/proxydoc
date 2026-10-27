@@ -28923,6 +28923,474 @@ pub fn get_dnsproxy_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_mosdns_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MOSDNS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("mosdns").join("config.yaml"),
+            home.join(".config").join("mosdns").join("config.json"),
+            home.join(".config").join("mosdns").join("mosdns.yaml"),
+            home.join(".mosdns").join("config.yaml"),
+            home.join(".mosdns.yaml"),
+            home.join(".config").join("systemd").join("user").join("mosdns.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/mosdns/config.yaml"),
+        PathBuf::from("/etc/mosdns.yaml"),
+        PathBuf::from("/etc/mosdns/config.json"),
+        PathBuf::from("/usr/local/etc/mosdns/config.yaml"),
+        PathBuf::from("/etc/default/mosdns"),
+        PathBuf::from("/etc/sysconfig/mosdns"),
+        PathBuf::from("/etc/systemd/system/mosdns.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_mosdns_config_path() -> Option<PathBuf> {
+    let paths = get_mosdns_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_mosdns_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_mosdns_write_path() -> PathBuf {
+    if let Some(p) = get_mosdns_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MOSDNS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("mosdns");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/mosdns");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/mosdns.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("mosdns").join("config.yaml");
+    }
+    PathBuf::from("/etc/mosdns/config.yaml")
+}
+
+pub fn parse_mosdns_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "http-proxy",
+                "http_proxy",
+                "https_proxy",
+                "proxy",
+                "upstream-proxy",
+                "all_proxy",
+                "mosdns_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "mosdns_proxy"
+                        || k_low == "mosdns_http_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "http-proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "proxy"
+                || k_low == "upstream-proxy"
+                || k_low == "all_proxy"
+                || k_low == "mosdns_proxy"
+                || k_low == "socks5"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_mosdns_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_mosdns_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_mosdns_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MOSDNS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MOSDNS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MOSDNS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MOSDNS_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_smartdns_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SMARTDNS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("smartdns").join("smartdns.conf"),
+            home.join(".config").join("smartdns").join("config"),
+            home.join(".smartdns.conf"),
+            home.join(".config").join("systemd").join("user").join("smartdns.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/smartdns/smartdns.conf"),
+        PathBuf::from("/etc/smartdns.conf"),
+        PathBuf::from("/usr/local/etc/smartdns/smartdns.conf"),
+        PathBuf::from("/etc/default/smartdns"),
+        PathBuf::from("/etc/sysconfig/smartdns"),
+        PathBuf::from("/etc/systemd/system/smartdns.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_smartdns_config_path() -> Option<PathBuf> {
+    let paths = get_smartdns_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_smartdns_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_smartdns_write_path() -> PathBuf {
+    if let Some(p) = get_smartdns_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SMARTDNS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("smartdns");
+        if dir.is_dir() {
+            return dir.join("smartdns.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/smartdns");
+    if etc_dir.is_dir() {
+        return etc_dir.join("smartdns.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/smartdns.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("smartdns").join("smartdns.conf");
+    }
+    PathBuf::from("/etc/smartdns/smartdns.conf")
+}
+
+pub fn parse_smartdns_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy-server",
+                "proxy_server",
+                "proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "smartdns_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "smartdns_proxy"
+                        || k_low == "smartdns_http_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("proxy-server ") || lower.starts_with("proxy-server\t") {
+            let val = trimmed["proxy-server".len()..].trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy-server"
+                || k_low == "proxy_server"
+                || k_low == "proxy"
+                || k_low == "http-proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "smartdns_proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_smartdns_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_smartdns_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_smartdns_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SMARTDNS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SMARTDNS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SMARTDNS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SMARTDNS_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -35136,6 +35604,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Dnsproxy Daemon Proxy",
             "~/.config/dnsproxy/config.yaml & /etc/dnsproxy/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Mosdns Pluggable DNS Forwarder Daemon (~/.config/mosdns/config.yaml / /etc/mosdns/config.yaml / /etc/systemd/system/mosdns.service.d/http-proxy.conf)
+    if let Some((mosdns_proxy, mosdns_path)) = get_mosdns_proxy() {
+        let ok = verify_proxy_url(&mosdns_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Mosdns proxy `{}` in {} is dead! (mosdns forwarding will fail)",
+                mosdns_proxy,
+                mosdns_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Mosdns Daemon Proxy",
+            format!("{}", mosdns_path.display()),
+            mosdns_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (mosdns fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Mosdns Daemon Proxy",
+            "~/.config/mosdns/config.yaml & /etc/mosdns/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // SmartDNS Local DNS Proxy Daemon (~/.config/smartdns/smartdns.conf / /etc/smartdns/smartdns.conf / /etc/systemd/system/smartdns.service.d/http-proxy.conf)
+    if let Some((smartdns_proxy, smartdns_path)) = get_smartdns_proxy() {
+        let ok = verify_proxy_url(&smartdns_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "SmartDNS proxy `{}` in {} is dead! (smartdns resolution will fail)",
+                smartdns_proxy,
+                smartdns_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "SmartDNS Daemon Proxy",
+            format!("{}", smartdns_path.display()),
+            smartdns_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (smartdns fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "SmartDNS Daemon Proxy",
+            "~/.config/smartdns/smartdns.conf & /etc/smartdns/smartdns.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -42086,5 +42618,97 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http-proxy: http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_dnsproxy_proxy(input_comment), None);
         assert_eq!(parse_dnsproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_mosdns_proxy() {
+        let mos_yaml = r#"
+log:
+  level: info
+http-proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mosdns_proxy(mos_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let mos_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_mosdns_proxy(mos_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let mos_env = r#"
+MOSDNS_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mosdns_proxy(mos_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mosdns_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http-proxy: http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_mosdns_proxy(input_comment), None);
+        assert_eq!(parse_mosdns_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_smartdns_proxy() {
+        let smart_conf = r#"
+server-name smartdns
+proxy-server socks5://127.0.0.1:1080
+server 8.8.8.8
+"#;
+        assert_eq!(
+            parse_smartdns_proxy(smart_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let smart_conf_http = r#"
+proxy-server http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_smartdns_proxy(smart_conf_http),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let smart_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_smartdns_proxy(smart_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let smart_env = r#"
+SMARTDNS_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_smartdns_proxy(smart_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_smartdns_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy-server socks5://127.0.0.1:1080\n; proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_smartdns_proxy(input_comment), None);
+        assert_eq!(parse_smartdns_proxy(""), None);
     }
 }

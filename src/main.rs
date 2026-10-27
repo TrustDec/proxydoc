@@ -557,7 +557,13 @@ enum Commands {
         /// Also configure Dnsproxy AdGuard DNS proxy daemon (~/.config/dnsproxy/config.yaml / /etc/dnsproxy/config.yaml / /etc/systemd/system/dnsproxy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "dnsproxy-daemon", visible_alias = "dnsproxy-proxy")]
         dnsproxy: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, and dnsproxy proxy
+        /// Also configure Mosdns Pluggable DNS forwarder daemon (~/.config/mosdns/config.yaml / /etc/mosdns/config.yaml / /etc/systemd/system/mosdns.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "mosdns-daemon", visible_alias = "mosdns-proxy")]
+        mosdns: bool,
+        /// Also configure SmartDNS local DNS proxy daemon (~/.config/smartdns/smartdns.conf / /etc/smartdns/smartdns.conf / /etc/systemd/system/smartdns.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "smartdns-daemon", visible_alias = "smartdns-proxy")]
+        smartdns: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, and smartdns proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1058,7 +1064,13 @@ enum Commands {
         /// Also unset Dnsproxy AdGuard DNS proxy daemon (~/.config/dnsproxy/config.yaml / /etc/dnsproxy/config.yaml / /etc/systemd/system/dnsproxy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "dnsproxy-daemon", visible_alias = "dnsproxy-proxy")]
         dnsproxy: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, and dnsproxy proxy
+        /// Also unset Mosdns Pluggable DNS forwarder daemon (~/.config/mosdns/config.yaml / /etc/mosdns/config.yaml / /etc/systemd/system/mosdns.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "mosdns-daemon", visible_alias = "mosdns-proxy")]
+        mosdns: bool,
+        /// Also unset SmartDNS local DNS proxy daemon (~/.config/smartdns/smartdns.conf / /etc/smartdns/smartdns.conf / /etc/systemd/system/smartdns.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "smartdns-daemon", visible_alias = "smartdns-proxy")]
+        smartdns: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, and smartdns proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1266,6 +1278,8 @@ async fn main() -> Result<()> {
             cow,
             sniproxy,
             dnsproxy,
+            mosdns,
+            smartdns,
             all,
             shell,
         }) => {
@@ -1435,6 +1449,8 @@ async fn main() -> Result<()> {
                 cow,
                 sniproxy,
                 dnsproxy,
+                mosdns,
+                smartdns,
                 all,
                 shell.as_deref(),
             )
@@ -1605,6 +1621,8 @@ async fn main() -> Result<()> {
             cow,
             sniproxy,
             dnsproxy,
+            mosdns,
+            smartdns,
             all,
             shell,
         }) => {
@@ -1773,6 +1791,8 @@ async fn main() -> Result<()> {
                 cow,
                 sniproxy,
                 dnsproxy,
+                mosdns,
+                smartdns,
                 all,
                 shell.as_deref(),
             )?;
@@ -6483,6 +6503,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { dnsproxy, .. }) => {
                 assert!(dnsproxy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_mosdns() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--mosdns"]).unwrap();
+        match cli.command {
+            Some(Commands::On { mosdns, .. }) => {
+                assert!(mosdns);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--mosdns-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { mosdns, .. }) => {
+                assert!(mosdns);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_mosdns() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--mosdns"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { mosdns, .. }) => {
+                assert!(mosdns);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_smartdns() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--smartdns"]).unwrap();
+        match cli.command {
+            Some(Commands::On { smartdns, .. }) => {
+                assert!(smartdns);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--smartdns-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { smartdns, .. }) => {
+                assert!(smartdns);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_smartdns() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--smartdns"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { smartdns, .. }) => {
+                assert!(smartdns);
             }
             _ => panic!("Expected Off command"),
         }
