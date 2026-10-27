@@ -30379,6 +30379,500 @@ pub fn get_unbound_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_dnsmasq_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DNSMASQ_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DNSMASQ_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("dnsmasq").join("dnsmasq.conf"),
+            home.join(".dnsmasq.conf"),
+            home.join(".config").join("dnsmasq.conf"),
+            home.join(".config").join("systemd").join("user").join("dnsmasq.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/dnsmasq.conf"),
+        PathBuf::from("/etc/dnsmasq.d/proxy.conf"),
+        PathBuf::from("/etc/dnsmasq.d/default.conf"),
+        PathBuf::from("/usr/local/etc/dnsmasq.conf"),
+        PathBuf::from("/opt/homebrew/etc/dnsmasq.conf"),
+        PathBuf::from("/etc/default/dnsmasq"),
+        PathBuf::from("/etc/sysconfig/dnsmasq"),
+        PathBuf::from("/etc/systemd/system/dnsmasq.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_dnsmasq_config_path() -> Option<PathBuf> {
+    let paths = get_dnsmasq_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_dnsmasq_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_dnsmasq_write_path() -> PathBuf {
+    if let Some(p) = get_dnsmasq_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DNSMASQ_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("DNSMASQ_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("dnsmasq");
+        if dir.is_dir() {
+            return dir.join("dnsmasq.conf");
+        }
+    }
+    let d_dir = PathBuf::from("/etc/dnsmasq.d");
+    if d_dir.is_dir() {
+        return d_dir.join("proxy.conf");
+    }
+    let etc_dir = PathBuf::from("/etc");
+    if etc_dir.is_dir() {
+        return etc_dir.join("dnsmasq.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/dnsmasq.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("dnsmasq").join("dnsmasq.conf");
+    }
+    PathBuf::from("/etc/dnsmasq.conf")
+}
+
+pub fn parse_dnsmasq_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "server",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "dnsmasq_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            let clean = if let Some((h, p)) = trim.split_once('#') {
+                                format!("{}:{}", h, p)
+                            } else {
+                                trim.to_string()
+                            };
+                            return Some(if clean.starts_with("http://")
+                                || clean.starts_with("https://")
+                                || clean.starts_with("socks")
+                            {
+                                clean
+                            } else {
+                                format!("http://{}", clean)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dnsmasq_proxy"
+                    || k_low == "dnsmasq_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "server"
+                || k_low == "http-proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "proxy"
+                || k_low == "all_proxy"
+                || k_low == "dnsmasq_proxy"
+                || k_low == "socks5"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':')
+                        || val.contains('#'))
+                {
+                    let target_part = if val.starts_with('/') {
+                        val.rsplit('/').next().unwrap_or(val).trim()
+                    } else {
+                        val
+                    };
+                    let clean = if let Some((h, p)) = target_part.split_once('#') {
+                        format!("{}:{}", h, p)
+                    } else {
+                        target_part.to_string()
+                    };
+                    return Some(if clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks")
+                    {
+                        clean
+                    } else {
+                        format!("http://{}", clean)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_dnsmasq_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_dnsmasq_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_dnsmasq_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DNSMASQ_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DNSMASQ_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DNSMASQ_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DNSMASQ_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_pihole_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PIHOLE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PIHOLE_FTL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PIHOLE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("pihole").join("pihole-FTL.conf"),
+            home.join(".pihole").join("pihole-FTL.conf"),
+            home.join(".config").join("pihole-FTL.conf"),
+            home.join(".config").join("systemd").join("user").join("pihole-FTL.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/pihole/pihole-FTL.conf"),
+        PathBuf::from("/etc/pihole/setupVars.conf"),
+        PathBuf::from("/usr/local/etc/pihole/pihole-FTL.conf"),
+        PathBuf::from("/etc/default/pihole-FTL"),
+        PathBuf::from("/etc/sysconfig/pihole-FTL"),
+        PathBuf::from("/etc/systemd/system/pihole-FTL.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_pihole_config_path() -> Option<PathBuf> {
+    let paths = get_pihole_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_pihole_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_pihole_write_path() -> PathBuf {
+    if let Some(p) = get_pihole_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PIHOLE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("PIHOLE_FTL_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_dir = PathBuf::from("/etc/pihole");
+    if etc_dir.is_dir() {
+        return etc_dir.join("pihole-FTL.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/pihole-FTL.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("pihole").join("pihole-FTL.conf");
+    }
+    PathBuf::from("/etc/pihole/pihole-FTL.conf")
+}
+
+pub fn parse_pihole_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_settings",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "pihole_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pihole_proxy"
+                    || k_low == "pihole_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy_settings"
+                || k_low == "proxy"
+                || k_low == "pihole_proxy"
+                || k_low == "http-proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "socks5"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':')
+                        || val.contains('@'))
+                {
+                    let clean = if let Some((h, p)) = val.split_once('@') {
+                        format!("{}:{}", h, p)
+                    } else {
+                        val.to_string()
+                    };
+                    return Some(if clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks")
+                    {
+                        clean
+                    } else {
+                        format!("http://{}", clean)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pihole_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pihole_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pihole_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PIHOLE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PIHOLE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PIHOLE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PIHOLE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -36784,6 +37278,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Unbound Daemon Proxy",
             "~/.config/unbound/unbound.conf & /etc/unbound/unbound.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Dnsmasq Lightweight DNS & DHCP Proxy Daemon (~/.config/dnsmasq/dnsmasq.conf / /etc/dnsmasq.conf / /etc/systemd/system/dnsmasq.service.d/http-proxy.conf)
+    if let Some((dnsmasq_proxy, dnsmasq_path)) = get_dnsmasq_proxy() {
+        let ok = verify_proxy_url(&dnsmasq_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Dnsmasq proxy `{}` in {} is dead! (dnsmasq forward resolution will fail)",
+                dnsmasq_proxy,
+                dnsmasq_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Dnsmasq Daemon Proxy",
+            format!("{}", dnsmasq_path.display()),
+            dnsmasq_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (dnsmasq fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Dnsmasq Daemon Proxy",
+            "~/.config/dnsmasq/dnsmasq.conf & /etc/dnsmasq.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Pi-hole FTL DNS & Sinkhole Proxy Daemon (~/.config/pihole/pihole-FTL.conf / /etc/pihole/pihole-FTL.conf / /etc/systemd/system/pihole-FTL.service.d/http-proxy.conf)
+    if let Some((pihole_proxy, pihole_path)) = get_pihole_proxy() {
+        let ok = verify_proxy_url(&pihole_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Pi-hole proxy `{}` in {} is dead! (pihole adlist/gravity update and DNS resolution will fail)",
+                pihole_proxy,
+                pihole_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Pi-hole Daemon Proxy",
+            format!("{}", pihole_path.display()),
+            pihole_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (pihole fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Pi-hole Daemon Proxy",
+            "~/.config/pihole/pihole-FTL.conf & /etc/pihole/pihole-FTL.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -44031,5 +44589,111 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http-proxy: http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_unbound_proxy(input_comment), None);
         assert_eq!(parse_unbound_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_dnsmasq_proxy() {
+        let dnsmasq_conf = r#"
+# Configuration file for dnsmasq.
+server=127.0.0.1#7890
+"#;
+        assert_eq!(
+            parse_dnsmasq_proxy(dnsmasq_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dnsmasq_domain = r#"
+server=/example.com/10.0.0.1#1080
+"#;
+        assert_eq!(
+            parse_dnsmasq_proxy(dnsmasq_domain),
+            Some("http://10.0.0.1:1080".to_string())
+        );
+
+        let dnsmasq_http = r#"
+http-proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnsmasq_proxy(dnsmasq_http),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dnsmasq_socks = r#"
+proxy = "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_dnsmasq_proxy(dnsmasq_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dnsmasq_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_dnsmasq_proxy(dnsmasq_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dnsmasq_env = r#"
+DNSMASQ_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnsmasq_proxy(dnsmasq_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnsmasq_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# server=127.0.0.1#7890\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_dnsmasq_proxy(input_comment), None);
+        assert_eq!(parse_dnsmasq_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pihole_proxy() {
+        let pihole_ftl = r#"
+# Pi-hole FTL config
+PROXY_SETTINGS=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_pihole_proxy(pihole_ftl),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let pihole_proxy = r#"
+PIHOLE_PROXY=socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_pihole_proxy(pihole_proxy),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let pihole_json = r#"{
+            "proxy_settings": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_pihole_proxy(pihole_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pihole_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# PROXY_SETTINGS=http://127.0.0.1:7890\n; PIHOLE_PROXY=socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_pihole_proxy(input_comment), None);
+        assert_eq!(parse_pihole_proxy(""), None);
     }
 }

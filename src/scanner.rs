@@ -93,6 +93,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (3000, false, "AdGuard Home DNS & Web Proxy Daemon (HTTP/DNS)"),
     (5354, false, "DNSCrypt-proxy Encrypted DNS Proxy Daemon (DoH/DNSCrypt)"),
     (5336, false, "Unbound Validating Recursive DNS Proxy (DNS/DoT)"),
+    (5355, false, "Dnsmasq Lightweight DNS & DHCP Proxy Daemon (DNS)"),
+    (4711, false, "Pi-hole FTL DNS & Sinkhole Proxy Daemon (FTL/DNS)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

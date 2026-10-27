@@ -1494,6 +1494,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Plandex AI CDN",
         "https://github.com/plandex-ai/plandex",
     ),
+    (
+        "Dnsmasq Proxy CDN",
+        "https://github.com/imp/dnsmasq",
+    ),
+    (
+        "Pi-hole Proxy CDN",
+        "https://github.com/pi-hole/pi-hole",
+    ),
+    (
+        "MetaGPT AI CDN",
+        "https://github.com/geekan/MetaGPT",
+    ),
+    (
+        "ChatDev AI CDN",
+        "https://github.com/OpenBMB/ChatDev",
+    ),
+    (
+        "FastGPT AI CDN",
+        "https://github.com/labring/FastGPT",
+    ),
+    (
+        "BabyAGI AI CDN",
+        "https://github.com/yoheinakajima/babyagi",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2924,6 +2948,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Plandex AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Dnsmasq Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pi-hole Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MetaGPT AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ChatDev AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FastGPT AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "BabyAGI AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

@@ -575,7 +575,13 @@ enum Commands {
         /// Also configure Unbound validating recursive DNS proxy daemon (~/.config/unbound/unbound.conf / /etc/unbound/unbound.conf / /etc/systemd/system/unbound.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "unbound-daemon", visible_alias = "unbound-proxy")]
         unbound: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, and unbound proxy
+        /// Also configure Dnsmasq lightweight DNS and DHCP proxy daemon (~/.config/dnsmasq/dnsmasq.conf / /etc/dnsmasq.conf / /etc/systemd/system/dnsmasq.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dnsmasq-daemon", visible_alias = "dnsmasq-proxy")]
+        dnsmasq: bool,
+        /// Also configure Pi-hole FTL DNS and sinkhole proxy daemon (~/.config/pihole/pihole-FTL.conf / /etc/pihole/pihole-FTL.conf / /etc/systemd/system/pihole-FTL.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "pihole-daemon", visible_alias = "pihole-ftl", visible_alias = "pi-hole")]
+        pihole: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, and pihole proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1094,7 +1100,13 @@ enum Commands {
         /// Also unset Unbound validating recursive DNS proxy daemon (~/.config/unbound/unbound.conf / /etc/unbound/unbound.conf / /etc/systemd/system/unbound.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "unbound-daemon", visible_alias = "unbound-proxy")]
         unbound: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, and unbound proxy
+        /// Also unset Dnsmasq lightweight DNS and DHCP proxy daemon (~/.config/dnsmasq/dnsmasq.conf / /etc/dnsmasq.conf / /etc/systemd/system/dnsmasq.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dnsmasq-daemon", visible_alias = "dnsmasq-proxy")]
+        dnsmasq: bool,
+        /// Also unset Pi-hole FTL DNS and sinkhole proxy daemon (~/.config/pihole/pihole-FTL.conf / /etc/pihole/pihole-FTL.conf / /etc/systemd/system/pihole-FTL.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "pihole-daemon", visible_alias = "pihole-ftl", visible_alias = "pi-hole")]
+        pihole: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, and pihole proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1308,6 +1320,8 @@ async fn main() -> Result<()> {
             adguard,
             dnscrypt,
             unbound,
+            dnsmasq,
+            pihole,
             all,
             shell,
         }) => {
@@ -1483,6 +1497,8 @@ async fn main() -> Result<()> {
                 adguard,
                 dnscrypt,
                 unbound,
+                dnsmasq,
+                pihole,
                 all,
                 shell.as_deref(),
             )
@@ -1659,6 +1675,8 @@ async fn main() -> Result<()> {
             adguard,
             dnscrypt,
             unbound,
+            dnsmasq,
+            pihole,
             all,
             shell,
         }) => {
@@ -1833,6 +1851,8 @@ async fn main() -> Result<()> {
                 adguard,
                 dnscrypt,
                 unbound,
+                dnsmasq,
+                pihole,
                 all,
                 shell.as_deref(),
             )?;
@@ -6739,6 +6759,90 @@ mod tests {
         match cli.command {
             Some(Commands::Off { unbound, .. }) => {
                 assert!(unbound);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_dnsmasq() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--dnsmasq"]).unwrap();
+        match cli.command {
+            Some(Commands::On { dnsmasq, .. }) => {
+                assert!(dnsmasq);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--dnsmasq-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { dnsmasq, .. }) => {
+                assert!(dnsmasq);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--dnsmasq-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { dnsmasq, .. }) => {
+                assert!(dnsmasq);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_dnsmasq() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--dnsmasq"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { dnsmasq, .. }) => {
+                assert!(dnsmasq);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_pihole() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--pihole"]).unwrap();
+        match cli.command {
+            Some(Commands::On { pihole, .. }) => {
+                assert!(pihole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--pihole-ftl"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { pihole, .. }) => {
+                assert!(pihole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--pihole-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { pihole, .. }) => {
+                assert!(pihole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--pi-hole"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { pihole, .. }) => {
+                assert!(pihole);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_pihole() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--pihole"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { pihole, .. }) => {
+                assert!(pihole);
             }
             _ => panic!("Expected Off command"),
         }
