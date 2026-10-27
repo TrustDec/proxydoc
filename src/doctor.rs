@@ -18167,6 +18167,504 @@ pub fn get_squid_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_privoxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PRIVOXY_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PRIVOXY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PRIVOXY_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("privoxy").join("config"),
+            home.join(".privoxy").join("config"),
+            home.join(".config").join("systemd").join("user").join("privoxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/privoxy/config"),
+        PathBuf::from("/etc/privoxy/config.txt"),
+        PathBuf::from("/etc/default/privoxy"),
+        PathBuf::from("/etc/sysconfig/privoxy"),
+        PathBuf::from("/etc/systemd/system/privoxy.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/privoxy/config"),
+        PathBuf::from("/opt/homebrew/etc/privoxy/config"),
+        PathBuf::from("C:\\Program Files\\Privoxy\\config.txt"),
+        PathBuf::from("C:\\Program Files (x86)\\Privoxy\\config.txt"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_privoxy_config_path() -> Option<PathBuf> {
+    let paths = get_privoxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_privoxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_privoxy_write_path() -> PathBuf {
+    if let Some(p) = get_privoxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PRIVOXY_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let opt_brew = PathBuf::from("/opt/homebrew/etc/privoxy");
+    if opt_brew.is_dir() {
+        return opt_brew.join("config");
+    }
+    let usr_local = PathBuf::from("/usr/local/etc/privoxy");
+    if usr_local.is_dir() {
+        return usr_local.join("config");
+    }
+    let etc_privoxy = PathBuf::from("/etc/privoxy");
+    if etc_privoxy.is_dir() {
+        return etc_privoxy.join("config");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/privoxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("privoxy").join("config");
+    }
+    PathBuf::from("/etc/privoxy/config")
+}
+
+pub fn parse_privoxy_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "privoxy_http_proxy"
+                        || k_low == "privoxy_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "upstream_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "parent_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/privoxy
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "privoxy_http_proxy"
+                || k_low == "privoxy_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "all_proxy"
+                || k_low == "parent_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Privoxy forward directive format:
+        // forward / 127.0.0.1:7890
+        // forward-socks5 / 127.0.0.1:1080 .
+        // forward-socks5t / 127.0.0.1:1080 .
+        // forward-socks4a / 127.0.0.1:1080 .
+        // forward-socks4 / 127.0.0.1:1080 .
+        let clean = trimmed.trim_end_matches(';').trim();
+        let parts: Vec<&str> = clean.split_whitespace().collect();
+        if !parts.is_empty() {
+            let directive = parts[0].to_ascii_lowercase();
+            if directive == "forward"
+                || directive == "forward-socks5"
+                || directive == "forward-socks5t"
+                || directive == "forward-socks4a"
+                || directive == "forward-socks4"
+            {
+                // forward target_pattern http_parent[:port]
+                // forward / . means direct, ignore it
+                let target = if parts.len() >= 3 {
+                    parts[2]
+                } else if parts.len() == 2 {
+                    parts[1]
+                } else {
+                    ""
+                };
+                if !target.is_empty() && target != "." {
+                    let scheme = if directive == "forward-socks5" || directive == "forward-socks5t" {
+                        "socks5://"
+                    } else if directive == "forward-socks4" || directive == "forward-socks4a" {
+                        "socks4://"
+                    } else {
+                        "http://"
+                    };
+                    return Some(if target.starts_with("http://") || target.starts_with("https://") || target.starts_with("socks") {
+                        target.to_string()
+                    } else {
+                        format!("{}{}", scheme, target)
+                    });
+                }
+            }
+
+            // http_proxy http://127.0.0.1:7890 or parent_proxy 127.0.0.1:7890
+            if (directive == "http_proxy" || directive == "https_proxy" || directive == "parent_proxy") && parts.len() >= 2 {
+                let val = parts[1].trim_start_matches('=').trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && val != "." {
+                    return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_privoxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_privoxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_privoxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PRIVOXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PRIVOXY_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_tinyproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TINYPROXY_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TINYPROXY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TINYPROXY_DIR") {
+        let p = PathBuf::from(dir.trim()).join("tinyproxy.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("tinyproxy").join("tinyproxy.conf"),
+            home.join(".tinyproxy").join("tinyproxy.conf"),
+            home.join(".config").join("systemd").join("user").join("tinyproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tinyproxy/tinyproxy.conf"),
+        PathBuf::from("/etc/tinyproxy.conf"),
+        PathBuf::from("/etc/default/tinyproxy"),
+        PathBuf::from("/etc/sysconfig/tinyproxy"),
+        PathBuf::from("/etc/systemd/system/tinyproxy.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/tinyproxy/tinyproxy.conf"),
+        PathBuf::from("/usr/local/etc/tinyproxy.conf"),
+        PathBuf::from("/opt/homebrew/etc/tinyproxy/tinyproxy.conf"),
+        PathBuf::from("/opt/homebrew/etc/tinyproxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_tinyproxy_config_path() -> Option<PathBuf> {
+    let paths = get_tinyproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tinyproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tinyproxy_write_path() -> PathBuf {
+    if let Some(p) = get_tinyproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TINYPROXY_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let opt_brew = PathBuf::from("/opt/homebrew/etc/tinyproxy");
+    if opt_brew.is_dir() {
+        return opt_brew.join("tinyproxy.conf");
+    }
+    let opt_brew_file = PathBuf::from("/opt/homebrew/etc/tinyproxy.conf");
+    if opt_brew_file.exists() {
+        return opt_brew_file;
+    }
+    let usr_local = PathBuf::from("/usr/local/etc/tinyproxy");
+    if usr_local.is_dir() {
+        return usr_local.join("tinyproxy.conf");
+    }
+    let usr_local_file = PathBuf::from("/usr/local/etc/tinyproxy.conf");
+    if usr_local_file.exists() {
+        return usr_local_file;
+    }
+    let etc_tinyproxy = PathBuf::from("/etc/tinyproxy");
+    if etc_tinyproxy.is_dir() {
+        return etc_tinyproxy.join("tinyproxy.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tinyproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("tinyproxy").join("tinyproxy.conf");
+    }
+    PathBuf::from("/etc/tinyproxy/tinyproxy.conf")
+}
+
+pub fn parse_tinyproxy_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "tinyproxy_http_proxy"
+                        || k_low == "tinyproxy_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "upstream_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/tinyproxy
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "tinyproxy_http_proxy"
+                || k_low == "tinyproxy_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Tinyproxy Upstream directive format:
+        // Upstream http 127.0.0.1:8080
+        // Upstream socks5 127.0.0.1:1080
+        // Upstream socks4 127.0.0.1:1080
+        // Upstream 127.0.0.1:8080
+        // Upstream none "domain" -> ignored
+        let clean = trimmed.trim_end_matches(';').trim();
+        let parts: Vec<&str> = clean.split_whitespace().collect();
+        if !parts.is_empty() && parts[0].eq_ignore_ascii_case("upstream") {
+            if parts.len() >= 3 {
+                let kind = parts[1].to_ascii_lowercase();
+                if kind == "none" {
+                    continue;
+                }
+                let target = parts[2].trim_matches('"').trim_matches('\'');
+                let scheme = match kind.as_str() {
+                    "socks5" => "socks5://",
+                    "socks4" => "socks4://",
+                    _ => "http://",
+                };
+                return Some(if target.starts_with("http://") || target.starts_with("https://") || target.starts_with("socks") {
+                    target.to_string()
+                } else {
+                    format!("{}{}", scheme, target)
+                });
+            } else if parts.len() == 2 {
+                let target = parts[1].trim_matches('"').trim_matches('\'');
+                if target.eq_ignore_ascii_case("none") {
+                    continue;
+                }
+                return Some(if target.starts_with("http://") || target.starts_with("https://") || target.starts_with("socks") {
+                    target.to_string()
+                } else {
+                    format!("http://{}", target)
+                });
+            }
+        }
+
+        // http_proxy http://127.0.0.1:7890
+        if parts.len() >= 2 && (parts[0].eq_ignore_ascii_case("http_proxy") || parts[0].eq_ignore_ascii_case("https_proxy") || parts[0].eq_ignore_ascii_case("proxy")) {
+            let val = parts[1].trim_start_matches('=').trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_tinyproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tinyproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tinyproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TINYPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TINYPROXY_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -22908,6 +23406,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Squid Caching Proxy",
             "/etc/squid/squid.conf & /etc/squid/conf.d/proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Privoxy Forwarding Proxy Daemon (/etc/privoxy/config / /usr/local/etc/privoxy/config / /opt/homebrew/etc/privoxy/config / /etc/systemd/system/privoxy.service.d/http-proxy.conf)
+    if let Some((privoxy_proxy, privoxy_path)) = get_privoxy_proxy() {
+        let ok = verify_proxy_url(&privoxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Privoxy forwarding proxy daemon upstream proxy `{}` in {} is dead! (Privoxy forward requests will fail)",
+                privoxy_proxy,
+                privoxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Privoxy Forwarding Proxy",
+            format!("{}", privoxy_path.display()),
+            privoxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (privoxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Privoxy Forwarding Proxy",
+            "/etc/privoxy/config & /usr/local/etc/privoxy/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Tinyproxy HTTP Proxy Daemon (/etc/tinyproxy/tinyproxy.conf / /etc/tinyproxy.conf / /usr/local/etc/tinyproxy.conf / /etc/systemd/system/tinyproxy.service.d/http-proxy.conf)
+    if let Some((tinyproxy_proxy, tinyproxy_path)) = get_tinyproxy_proxy() {
+        let ok = verify_proxy_url(&tinyproxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Tinyproxy HTTP proxy daemon upstream proxy `{}` in {} is dead! (Tinyproxy upstream forwarding will fail)",
+                tinyproxy_proxy,
+                tinyproxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Tinyproxy HTTP Proxy",
+            format!("{}", tinyproxy_path.display()),
+            tinyproxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tinyproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Tinyproxy HTTP Proxy",
+            "/etc/tinyproxy/tinyproxy.conf & /etc/tinyproxy.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -27940,5 +28502,72 @@ Environment="SQUID_HTTP_PROXY=http://10.0.0.108:8080"
         let input_comment = "# cache_peer 127.0.0.1 parent 7890 0 no-query\n; http_proxy http://127.0.0.1:7890\n";
         assert_eq!(parse_squid_proxy(input_comment), None);
         assert_eq!(parse_squid_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_privoxy_proxy() {
+        let privoxy_conf = r#"
+user-manual /usr/share/doc/privoxy/user-manual
+forward / 127.0.0.1:7890
+listen-address  127.0.0.1:8118
+"#;
+        assert_eq!(
+            parse_privoxy_proxy(privoxy_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let socks_conf = "forward-socks5 / 127.0.0.1:1080 .\n";
+        assert_eq!(
+            parse_privoxy_proxy(socks_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="PRIVOXY_HTTP_PROXY=http://10.0.0.110:8080"
+"#;
+        assert_eq!(
+            parse_privoxy_proxy(dropin),
+            Some("http://10.0.0.110:8080".to_string())
+        );
+
+        let direct = "forward / .\n";
+        assert_eq!(parse_privoxy_proxy(direct), None);
+
+        let input_comment = "# forward / 127.0.0.1:7890\n; forward / 127.0.0.1:7890\n";
+        assert_eq!(parse_privoxy_proxy(input_comment), None);
+        assert_eq!(parse_privoxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tinyproxy_proxy() {
+        let tinyproxy_conf = r#"
+Port 8888
+Upstream http 127.0.0.1:7890
+Upstream none ".internal.net"
+"#;
+        assert_eq!(
+            parse_tinyproxy_proxy(tinyproxy_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let socks_conf = "Upstream socks5 127.0.0.1:1080\n";
+        assert_eq!(
+            parse_tinyproxy_proxy(socks_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="TINYPROXY_HTTP_PROXY=http://10.0.0.111:8080"
+"#;
+        assert_eq!(
+            parse_tinyproxy_proxy(dropin),
+            Some("http://10.0.0.111:8080".to_string())
+        );
+
+        let input_comment = "# Upstream http 127.0.0.1:7890\n; Upstream http 127.0.0.1:7890\n";
+        assert_eq!(parse_tinyproxy_proxy(input_comment), None);
+        assert_eq!(parse_tinyproxy_proxy(""), None);
     }
 }

@@ -419,7 +419,13 @@ enum Commands {
         /// Also configure Squid caching proxy daemon (/etc/squid/squid.conf / /etc/squid/conf.d/proxy.conf / /etc/systemd/system/squid.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "squid-proxy", visible_alias = "squid-cache")]
         squid: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, and squid proxy
+        /// Also configure Privoxy forwarding proxy daemon (/etc/privoxy/config / /usr/local/etc/privoxy/config / /opt/homebrew/etc/privoxy/config / /etc/systemd/system/privoxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "privoxy-proxy", visible_alias = "privoxy-daemon")]
+        privoxy: bool,
+        /// Also configure Tinyproxy HTTP proxy daemon (/etc/tinyproxy/tinyproxy.conf / /etc/tinyproxy.conf / /usr/local/etc/tinyproxy.conf / /etc/systemd/system/tinyproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tinyproxy-proxy", visible_alias = "tinyproxy-daemon")]
+        tinyproxy: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, and tinyproxy proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -782,7 +788,13 @@ enum Commands {
         /// Also unset Squid caching proxy daemon (/etc/squid/squid.conf / /etc/squid/conf.d/proxy.conf / /etc/systemd/system/squid.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "squid-proxy", visible_alias = "squid-cache")]
         squid: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, and squid proxy
+        /// Also unset Privoxy forwarding proxy daemon (/etc/privoxy/config / /usr/local/etc/privoxy/config / /opt/homebrew/etc/privoxy/config / /etc/systemd/system/privoxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "privoxy-proxy", visible_alias = "privoxy-daemon")]
+        privoxy: bool,
+        /// Also unset Tinyproxy HTTP proxy daemon (/etc/tinyproxy/tinyproxy.conf / /etc/tinyproxy.conf / /usr/local/etc/tinyproxy.conf / /etc/systemd/system/tinyproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tinyproxy-proxy", visible_alias = "tinyproxy-daemon")]
+        tinyproxy: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, and tinyproxy proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -944,6 +956,8 @@ async fn main() -> Result<()> {
             kong,
             apisix,
             squid,
+            privoxy,
+            tinyproxy,
             all,
             shell,
         }) => {
@@ -1067,6 +1081,8 @@ async fn main() -> Result<()> {
                 kong,
                 apisix,
                 squid,
+                privoxy,
+                tinyproxy,
                 all,
                 shell.as_deref(),
             )
@@ -1191,6 +1207,8 @@ async fn main() -> Result<()> {
             kong,
             apisix,
             squid,
+            privoxy,
+            tinyproxy,
             all,
             shell,
         }) => {
@@ -1313,6 +1331,8 @@ async fn main() -> Result<()> {
                 kong,
                 apisix,
                 squid,
+                privoxy,
+                tinyproxy,
                 all,
                 shell.as_deref(),
             )?;
@@ -4579,6 +4599,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { squid, .. }) => {
                 assert!(squid);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_privoxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--privoxy"]).unwrap();
+        match cli.command {
+            Some(Commands::On { privoxy, .. }) => {
+                assert!(privoxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--privoxy-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { privoxy, .. }) => {
+                assert!(privoxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_privoxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--privoxy"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { privoxy, .. }) => {
+                assert!(privoxy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_tinyproxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--tinyproxy"]).unwrap();
+        match cli.command {
+            Some(Commands::On { tinyproxy, .. }) => {
+                assert!(tinyproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--tinyproxy-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { tinyproxy, .. }) => {
+                assert!(tinyproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_tinyproxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--tinyproxy"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { tinyproxy, .. }) => {
+                assert!(tinyproxy);
             }
             _ => panic!("Expected Off command"),
         }

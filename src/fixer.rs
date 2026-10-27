@@ -21,7 +21,7 @@ use crate::doctor::{
     get_vagrant_proxy, get_choco_proxy, get_colima_proxy, get_minikube_proxy, get_spack_proxy,
     get_macports_proxy, get_apt_proxy, get_dnf_proxy, get_zypper_proxy,
     get_pacman_proxy, get_pkg_proxy, get_portage_proxy, get_docker_daemon_proxy,
-    get_flatpak_proxy, get_snap_proxy, get_ollama_proxy, get_containerd_proxy, get_buildkit_proxy, get_k3s_proxy, get_microk8s_proxy, get_k0s_proxy, get_rke2_proxy, get_nomad_proxy, get_kubelet_proxy, get_gitlab_runner_proxy, get_actions_runner_proxy, get_jenkins_proxy, get_buildkite_agent_proxy, get_woodpecker_agent_proxy, get_drone_runner_proxy, get_act_runner_proxy, get_circleci_runner_proxy, get_azure_pipelines_agent_proxy, get_teamcity_agent_proxy, get_bamboo_agent_proxy, get_tfc_agent_proxy, get_concourse_worker_proxy, get_tentacle_agent_proxy, get_puppet_agent_proxy, get_chef_client_proxy, get_salt_minion_proxy, get_datadog_agent_proxy, get_newrelic_infra_proxy, get_elastic_agent_proxy, get_grafana_alloy_proxy, get_otelcol_proxy, get_vector_proxy, get_fluent_bit_proxy, get_fluentd_proxy, get_telegraf_proxy, get_logstash_proxy, get_prometheus_proxy, get_alertmanager_proxy, get_promtail_proxy, get_vmagent_proxy, get_filebeat_proxy, get_metricbeat_proxy, get_heartbeat_proxy, get_auditbeat_proxy, get_packetbeat_proxy, get_winlogbeat_proxy, get_consul_proxy, get_vault_proxy, get_traefik_proxy, get_caddy_proxy, get_envoy_proxy, get_haproxy_proxy, get_nginx_proxy, get_kong_proxy, get_apisix_proxy, get_squid_proxy, get_apk_repositories_paths,
+    get_flatpak_proxy, get_snap_proxy, get_ollama_proxy, get_containerd_proxy, get_buildkit_proxy, get_k3s_proxy, get_microk8s_proxy, get_k0s_proxy, get_rke2_proxy, get_nomad_proxy, get_kubelet_proxy, get_gitlab_runner_proxy, get_actions_runner_proxy, get_jenkins_proxy, get_buildkite_agent_proxy, get_woodpecker_agent_proxy, get_drone_runner_proxy, get_act_runner_proxy, get_circleci_runner_proxy, get_azure_pipelines_agent_proxy, get_teamcity_agent_proxy, get_bamboo_agent_proxy, get_tfc_agent_proxy, get_concourse_worker_proxy, get_tentacle_agent_proxy, get_puppet_agent_proxy, get_chef_client_proxy, get_salt_minion_proxy, get_datadog_agent_proxy, get_newrelic_infra_proxy, get_elastic_agent_proxy, get_grafana_alloy_proxy, get_otelcol_proxy, get_vector_proxy, get_fluent_bit_proxy, get_fluentd_proxy, get_telegraf_proxy, get_logstash_proxy, get_prometheus_proxy, get_alertmanager_proxy, get_promtail_proxy, get_vmagent_proxy, get_filebeat_proxy, get_metricbeat_proxy, get_heartbeat_proxy, get_auditbeat_proxy, get_packetbeat_proxy, get_winlogbeat_proxy, get_consul_proxy, get_vault_proxy, get_traefik_proxy, get_caddy_proxy, get_envoy_proxy, get_haproxy_proxy, get_nginx_proxy, get_kong_proxy, get_apisix_proxy, get_squid_proxy, get_privoxy_proxy, get_tinyproxy_proxy, get_apk_repositories_paths,
     parse_apk_repositories, clean_apk_repositories,
 };
 use crate::manager::{
@@ -40,7 +40,7 @@ use crate::manager::{
     unset_flatpak_proxy, unset_snap_proxy, unset_ollama_proxy, unset_containerd_proxy,
     unset_buildkit_proxy, unset_k3s_proxy, unset_microk8s_proxy, unset_k0s_proxy,
     unset_rke2_proxy, unset_nomad_proxy, unset_kubelet_proxy, unset_gitlab_runner_proxy,
-    unset_actions_runner_proxy, unset_jenkins_proxy, unset_buildkite_agent_proxy, unset_woodpecker_agent_proxy, unset_drone_runner_proxy, unset_act_runner_proxy, unset_circleci_runner_proxy, unset_azure_pipelines_agent_proxy, unset_teamcity_agent_proxy, unset_bamboo_agent_proxy, unset_tfc_agent_proxy, unset_concourse_worker_proxy, unset_tentacle_agent_proxy, unset_puppet_agent_proxy, unset_chef_client_proxy, unset_salt_minion_proxy, unset_datadog_agent_proxy, unset_newrelic_infra_proxy, unset_elastic_agent_proxy, unset_grafana_alloy_proxy, unset_otelcol_proxy, unset_vector_proxy, unset_fluent_bit_proxy, unset_fluentd_proxy, unset_telegraf_proxy, unset_logstash_proxy, unset_prometheus_proxy, unset_alertmanager_proxy, unset_promtail_proxy, unset_vmagent_proxy, unset_filebeat_proxy, unset_metricbeat_proxy, unset_heartbeat_proxy, unset_auditbeat_proxy, unset_packetbeat_proxy, unset_winlogbeat_proxy, unset_consul_proxy, unset_vault_proxy, unset_traefik_proxy, unset_caddy_proxy, unset_envoy_proxy, unset_haproxy_proxy, unset_nginx_proxy, unset_kong_proxy, unset_apisix_proxy, unset_squid_proxy,
+    unset_actions_runner_proxy, unset_jenkins_proxy, unset_buildkite_agent_proxy, unset_woodpecker_agent_proxy, unset_drone_runner_proxy, unset_act_runner_proxy, unset_circleci_runner_proxy, unset_azure_pipelines_agent_proxy, unset_teamcity_agent_proxy, unset_bamboo_agent_proxy, unset_tfc_agent_proxy, unset_concourse_worker_proxy, unset_tentacle_agent_proxy, unset_puppet_agent_proxy, unset_chef_client_proxy, unset_salt_minion_proxy, unset_datadog_agent_proxy, unset_newrelic_infra_proxy, unset_elastic_agent_proxy, unset_grafana_alloy_proxy, unset_otelcol_proxy, unset_vector_proxy, unset_fluent_bit_proxy, unset_fluentd_proxy, unset_telegraf_proxy, unset_logstash_proxy, unset_prometheus_proxy, unset_alertmanager_proxy, unset_promtail_proxy, unset_vmagent_proxy, unset_filebeat_proxy, unset_metricbeat_proxy, unset_heartbeat_proxy, unset_auditbeat_proxy, unset_packetbeat_proxy, unset_winlogbeat_proxy, unset_consul_proxy, unset_vault_proxy, unset_traefik_proxy, unset_caddy_proxy, unset_envoy_proxy, unset_haproxy_proxy, unset_nginx_proxy, unset_kong_proxy, unset_apisix_proxy, unset_squid_proxy, unset_privoxy_proxy, unset_tinyproxy_proxy,
 };
 use crate::scanner;
 
@@ -3343,7 +3343,7 @@ pub async fn run() -> Result<()> {
     if let Some((squid_proxy, squid_path)) = get_squid_proxy() {
         if !verify_proxy_url(&squid_proxy).await {
             println!(
-                "  [120/125] Found dead Squid caching proxy daemon (`{}` in {}), cleaning with backup...",
+                "  [120/127] Found dead Squid caching proxy daemon (`{}` in {}), cleaning with backup...",
                 squid_proxy.yellow(),
                 squid_path.display()
             );
@@ -3360,13 +3360,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [120/125] Squid caching proxy daemon: {}", "Reachable".green());
+            println!("  [120/127] Squid caching proxy daemon: {}", "Reachable".green());
         }
     } else {
-        println!("  [120/125] Squid caching proxy daemon: {}", "Clean or not set".dimmed());
+        println!("  [120/127] Squid caching proxy daemon: {}", "Clean or not set".dimmed());
     }
 
-    // 121. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 121. Clean dead Privoxy forwarding proxy daemon in config / default / systemd
+    if let Some((privoxy_proxy, privoxy_path)) = get_privoxy_proxy() {
+        if !verify_proxy_url(&privoxy_proxy).await {
+            println!(
+                "  [121/127] Found dead Privoxy forwarding proxy daemon (`{}` in {}), cleaning with backup...",
+                privoxy_proxy.yellow(),
+                privoxy_path.display()
+            );
+            if privoxy_path.exists() {
+                let backup = privoxy_path.with_extension("bak");
+                let _ = std::fs::copy(&privoxy_path, &backup);
+            }
+            if let Ok(true) = unset_privoxy_proxy() {
+                println!(
+                    "  {} Cleared broken Privoxy proxy in {} (backup saved)",
+                    "✔".green(),
+                    privoxy_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [121/127] Privoxy forwarding proxy daemon: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [121/127] Privoxy forwarding proxy daemon: {}", "Clean or not set".dimmed());
+    }
+
+    // 122. Clean dead Tinyproxy HTTP proxy daemon in tinyproxy.conf / default / systemd
+    if let Some((tinyproxy_proxy, tinyproxy_path)) = get_tinyproxy_proxy() {
+        if !verify_proxy_url(&tinyproxy_proxy).await {
+            println!(
+                "  [122/127] Found dead Tinyproxy HTTP proxy daemon (`{}` in {}), cleaning with backup...",
+                tinyproxy_proxy.yellow(),
+                tinyproxy_path.display()
+            );
+            if tinyproxy_path.exists() {
+                let backup = tinyproxy_path.with_extension("bak");
+                let _ = std::fs::copy(&tinyproxy_path, &backup);
+            }
+            if let Ok(true) = unset_tinyproxy_proxy() {
+                println!(
+                    "  {} Cleared broken Tinyproxy proxy in {} (backup saved)",
+                    "✔".green(),
+                    tinyproxy_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [122/127] Tinyproxy HTTP proxy daemon: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [122/127] Tinyproxy HTTP proxy daemon: {}", "Clean or not set".dimmed());
+    }
+
+    // 123. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -3380,7 +3434,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [121/125] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [123/127] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -3397,17 +3451,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [121/125] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [123/127] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [121/125] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [123/127] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [121/125] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [123/127] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 122. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 124. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -3421,7 +3475,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [122/125] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [124/127] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -3439,17 +3493,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [122/125] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [124/127] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [122/125] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [124/127] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [122/125] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [124/127] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 123. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 125. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -3463,7 +3517,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [123/125] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [125/127] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -3481,17 +3535,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [123/125] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [125/127] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [123/125] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [125/127] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [123/125] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [125/127] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 124. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 126. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -3510,7 +3564,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [124/125] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [126/127] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -3538,12 +3592,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [124/125] No active local proxy client found. Ensure your proxy software is open."
+            "  [126/127] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 125. Flush local DNS cache
-    println!("  [125/125] Flushing local DNS cache to fix resolution stalls...");
+    // 127. Flush local DNS cache
+    println!("  [127/127] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

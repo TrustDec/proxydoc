@@ -18572,6 +18572,468 @@ pub fn unset_squid_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_privoxy_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_privoxy = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "privoxy_http_proxy" {
+                        lines.push(format!("Environment=\"PRIVOXY_HTTP_PROXY={}\"", proxy_url));
+                        replaced_privoxy = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("privoxy_http_proxy=") {
+                lines.push(format!("PRIVOXY_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_privoxy = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_privoxy {
+            lines.push(format!("Environment=\"PRIVOXY_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let (is_socks5, host_port) = if let Ok(u) = url::Url::parse(proxy_url) {
+        let is_socks = u.scheme().starts_with("socks");
+        let h = u.host_str().unwrap_or("127.0.0.1");
+        let p = u.port().unwrap_or(if is_socks { 1080 } else { 8080 });
+        (is_socks, format!("{}:{}", h, p))
+    } else {
+        (false, "127.0.0.1:7890".to_string())
+    };
+
+    let target_line = if is_socks5 {
+        format!("forward-socks5 / {} .", host_port)
+    } else {
+        format!("forward / {}", host_port)
+    };
+
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if !parts.is_empty() {
+            let d = parts[0].to_ascii_lowercase();
+            if d == "forward"
+                || d == "forward-socks5"
+                || d == "forward-socks5t"
+                || d == "forward-socks4a"
+                || d == "forward-socks4"
+            {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}{}", "", target_line, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+            if parts.len() >= 2 && (d == "http_proxy" || d == "https_proxy" || d == "parent_proxy") {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}forward / {}", "", host_port, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(target_line);
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_privoxy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "privoxy_http_proxy"
+                    || k_low == "privoxy_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "upstream_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "parent_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("privoxy_http_proxy=")
+            || lower.starts_with("privoxy_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("parent_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if !parts.is_empty() {
+            let d = parts[0].to_ascii_lowercase();
+            if d == "forward"
+                || d == "forward-socks5"
+                || d == "forward-socks5t"
+                || d == "forward-socks4a"
+                || d == "forward-socks4"
+            {
+                let target = if parts.len() >= 3 {
+                    parts[2]
+                } else if parts.len() == 2 {
+                    parts[1]
+                } else {
+                    ""
+                };
+                if target != "." && !target.is_empty() {
+                    removed = true;
+                    continue;
+                }
+            }
+            if parts.len() >= 2 && (d == "http_proxy" || d == "https_proxy" || d == "parent_proxy") {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_privoxy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_privoxy_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_privoxy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_privoxy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_privoxy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_privoxy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_tinyproxy_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_tinyproxy = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "tinyproxy_http_proxy" {
+                        lines.push(format!("Environment=\"TINYPROXY_HTTP_PROXY={}\"", proxy_url));
+                        replaced_tinyproxy = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("tinyproxy_http_proxy=") {
+                lines.push(format!("TINYPROXY_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_tinyproxy = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_tinyproxy {
+            lines.push(format!("Environment=\"TINYPROXY_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let (is_socks5, host_port) = if let Ok(u) = url::Url::parse(proxy_url) {
+        let is_socks = u.scheme().starts_with("socks");
+        let h = u.host_str().unwrap_or("127.0.0.1");
+        let p = u.port().unwrap_or(if is_socks { 1080 } else { 8080 });
+        (is_socks, format!("{}:{}", h, p))
+    } else {
+        (false, "127.0.0.1:7890".to_string())
+    };
+
+    let target_line = if is_socks5 {
+        format!("Upstream socks5 {}", host_port)
+    } else {
+        format!("Upstream http {}", host_port)
+    };
+
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if !parts.is_empty() && parts[0].eq_ignore_ascii_case("upstream") {
+            if parts.len() >= 2 && parts[1].eq_ignore_ascii_case("none") {
+                lines.push(line.to_string());
+                continue;
+            }
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}{}", "", target_line, indent = indent));
+            replaced_proxy = true;
+            continue;
+        }
+        if parts.len() >= 2 && (parts[0].eq_ignore_ascii_case("http_proxy") || parts[0].eq_ignore_ascii_case("https_proxy") || parts[0].eq_ignore_ascii_case("proxy")) {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}{}", "", target_line, indent = indent));
+            replaced_proxy = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(target_line);
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_tinyproxy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tinyproxy_http_proxy"
+                    || k_low == "tinyproxy_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "upstream_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("tinyproxy_http_proxy=")
+            || lower.starts_with("tinyproxy_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if !parts.is_empty() && parts[0].eq_ignore_ascii_case("upstream") {
+            if parts.len() >= 2 && parts[1].eq_ignore_ascii_case("none") {
+                lines.push(line.to_string());
+                continue;
+            }
+            removed = true;
+            continue;
+        }
+
+        if parts.len() >= 2 && (parts[0].eq_ignore_ascii_case("http_proxy") || parts[0].eq_ignore_ascii_case("https_proxy") || parts[0].eq_ignore_ascii_case("proxy")) {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_tinyproxy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tinyproxy_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_tinyproxy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_tinyproxy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tinyproxy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tinyproxy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -18692,6 +19154,8 @@ pub async fn turn_on(
     kong: bool,
     apisix: bool,
     squid: bool,
+    privoxy: bool,
+    tinyproxy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -18811,6 +19275,8 @@ pub async fn turn_on(
     let set_kong = kong || all;
     let set_apisix = apisix || all;
     let set_squid = squid || all;
+    let set_privoxy = privoxy || all;
+    let set_tinyproxy = tinyproxy || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -20482,6 +20948,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_privoxy {
+        match set_privoxy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Privoxy forwarding proxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Privoxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_tinyproxy {
+        match set_tinyproxy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Tinyproxy HTTP proxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Tinyproxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -20615,6 +21111,8 @@ pub fn turn_off(
     kong: bool,
     apisix: bool,
     squid: bool,
+    privoxy: bool,
+    tinyproxy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -20734,6 +21232,8 @@ pub fn turn_off(
     let unset_kong = kong || all;
     let unset_apisix = apisix || all;
     let unset_squid = squid || all;
+    let unset_privoxy = privoxy || all;
+    let unset_tinyproxy = tinyproxy || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -21747,6 +22247,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Squid caching proxy daemon removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Squid caching proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Squid caching proxy daemon: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_privoxy {
+        match unset_privoxy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Privoxy forwarding proxy daemon removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Privoxy forwarding proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Privoxy forwarding proxy daemon: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tinyproxy {
+        match unset_tinyproxy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Tinyproxy HTTP proxy daemon removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Tinyproxy HTTP proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Tinyproxy HTTP proxy daemon: {}", "▲".yellow(), e),
         }
     }
 
@@ -24586,5 +25102,62 @@ never_direct allow all
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("SQUID_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_privoxy_proxy() {
+        let privoxy_initial = r#"
+user-manual /usr/share/doc/privoxy/user-manual
+forward / 127.0.0.1:7890
+listen-address  127.0.0.1:8118
+"#;
+        let privoxy_updated = apply_privoxy_proxy(privoxy_initial, "http://10.0.0.44:8080");
+        assert!(privoxy_updated.contains("forward / 10.0.0.44:8080"));
+        let (privoxy_cleaned, privoxy_removed) = remove_privoxy_proxy(&privoxy_updated);
+        assert!(privoxy_removed);
+        assert!(!privoxy_cleaned.contains("forward / 10.0.0.44:8080"));
+
+        // SOCKS5 format
+        let socks_updated = apply_privoxy_proxy(privoxy_initial, "socks5://10.0.0.45:1080");
+        assert!(socks_updated.contains("forward-socks5 / 10.0.0.45:1080 ."));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_privoxy_proxy(dropin_initial, "http://10.0.0.44:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.44:8080\""));
+        assert!(dropin_updated.contains("Environment=\"PRIVOXY_HTTP_PROXY=http://10.0.0.44:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_privoxy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("PRIVOXY_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tinyproxy_proxy() {
+        let tinyproxy_initial = r#"
+Port 8888
+Upstream http 127.0.0.1:7890
+Upstream none ".internal.net"
+"#;
+        let tinyproxy_updated = apply_tinyproxy_proxy(tinyproxy_initial, "http://10.0.0.46:8080");
+        assert!(tinyproxy_updated.contains("Upstream http 10.0.0.46:8080"));
+        let (tinyproxy_cleaned, tinyproxy_removed) = remove_tinyproxy_proxy(&tinyproxy_updated);
+        assert!(tinyproxy_removed);
+        assert!(!tinyproxy_cleaned.contains("Upstream http 10.0.0.46:8080"));
+        assert!(tinyproxy_cleaned.contains("Upstream none \".internal.net\""));
+
+        // SOCKS5 format
+        let socks_updated = apply_tinyproxy_proxy(tinyproxy_initial, "socks5://10.0.0.47:1080");
+        assert!(socks_updated.contains("Upstream socks5 10.0.0.47:1080"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_tinyproxy_proxy(dropin_initial, "http://10.0.0.46:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.46:8080\""));
+        assert!(dropin_updated.contains("Environment=\"TINYPROXY_HTTP_PROXY=http://10.0.0.46:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_tinyproxy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TINYPROXY_HTTP_PROXY="));
     }
 }
