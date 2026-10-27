@@ -473,7 +473,13 @@ enum Commands {
         /// Also configure V2Ray & Xray daemon proxy (/etc/v2ray/config.json / ~/.config/v2ray/config.json / /etc/systemd/system/v2ray.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "v2ray-proxy", visible_alias = "xray")]
         v2ray: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, and v2ray proxy
+        /// Also configure Sing-box daemon proxy (/etc/sing-box/config.json / ~/.config/sing-box/config.json / /etc/systemd/system/sing-box.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "singbox", visible_alias = "sb")]
+        sing_box: bool,
+        /// Also configure Hysteria & Hysteria 2 daemon proxy (/etc/hysteria/config.yaml / ~/.config/hysteria/config.yaml / /etc/systemd/system/hysteria.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "hysteria2", visible_alias = "hy2")]
+        hysteria: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, and hysteria proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -890,7 +896,13 @@ enum Commands {
         /// Also unset V2Ray & Xray daemon proxy (/etc/v2ray/config.json / ~/.config/v2ray/config.json / /etc/systemd/system/v2ray.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "v2ray-proxy", visible_alias = "xray")]
         v2ray: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, and v2ray proxy
+        /// Also unset Sing-box daemon proxy (/etc/sing-box/config.json / ~/.config/sing-box/config.json / /etc/systemd/system/sing-box.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "singbox", visible_alias = "sb")]
+        sing_box: bool,
+        /// Also unset Hysteria & Hysteria 2 daemon proxy (/etc/hysteria/config.yaml / ~/.config/hysteria/config.yaml / /etc/systemd/system/hysteria.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "hysteria2", visible_alias = "hy2")]
+        hysteria: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, and hysteria proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1070,6 +1082,8 @@ async fn main() -> Result<()> {
             npc,
             shadowsocks,
             v2ray,
+            sing_box,
+            hysteria,
             all,
             shell,
         }) => {
@@ -1211,6 +1225,8 @@ async fn main() -> Result<()> {
                 npc,
                 shadowsocks,
                 v2ray,
+                sing_box,
+                hysteria,
                 all,
                 shell.as_deref(),
             )
@@ -1353,6 +1369,8 @@ async fn main() -> Result<()> {
             npc,
             shadowsocks,
             v2ray,
+            sing_box,
+            hysteria,
             all,
             shell,
         }) => {
@@ -1493,6 +1511,8 @@ async fn main() -> Result<()> {
                 npc,
                 shadowsocks,
                 v2ray,
+                sing_box,
+                hysteria,
                 all,
                 shell.as_deref(),
             )?;
@@ -5331,6 +5351,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { v2ray, .. }) => {
                 assert!(v2ray);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_sing_box() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--sing-box"]).unwrap();
+        match cli.command {
+            Some(Commands::On { sing_box, .. }) => {
+                assert!(sing_box);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--singbox"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { sing_box, .. }) => {
+                assert!(sing_box);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--sb"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { sing_box, .. }) => {
+                assert!(sing_box);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_sing_box() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--sing-box"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { sing_box, .. }) => {
+                assert!(sing_box);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_hysteria() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--hysteria"]).unwrap();
+        match cli.command {
+            Some(Commands::On { hysteria, .. }) => {
+                assert!(hysteria);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--hysteria2"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { hysteria, .. }) => {
+                assert!(hysteria);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--hy2"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { hysteria, .. }) => {
+                assert!(hysteria);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_hysteria() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--hysteria"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { hysteria, .. }) => {
+                assert!(hysteria);
             }
             _ => panic!("Expected Off command"),
         }

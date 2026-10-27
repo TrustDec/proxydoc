@@ -59,6 +59,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8024, false, "NPS / NPC Intranet Penetration Client (Control)"),
     (8388, false, "Shadowsocks Service / Daemon (TCP/UDP)"),
     (10085, false, "V2Ray / Xray gRPC API Daemon (gRPC)"),
+    (6450, false, "Sing-box Universal Proxy Daemon (Control/Mixed)"),
+    (5678, false, "Hysteria Proxy Client Daemon (HTTP/SOCKS5)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

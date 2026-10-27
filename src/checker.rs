@@ -1086,6 +1086,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "LlamaParse AI CDN",
         "https://llamaparse.ai",
     ),
+    (
+        "Sing-box Proxy CDN",
+        "https://github.com/SagerNet/sing-box/releases",
+    ),
+    (
+        "Hysteria Proxy CDN",
+        "https://github.com/apernet/hysteria/releases",
+    ),
+    (
+        "Jan AI CDN",
+        "https://jan.ai",
+    ),
+    (
+        "MarkItDown AI CDN",
+        "https://github.com/microsoft/markitdown",
+    ),
+    (
+        "LM Studio AI CDN",
+        "https://lmstudio.ai",
+    ),
+    (
+        "Fish Audio CDN",
+        "https://fish.audio",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2210,6 +2234,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "LlamaParse AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Sing-box Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Hysteria Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Jan AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MarkItDown AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LM Studio AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fish Audio CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

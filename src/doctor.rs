@@ -22215,6 +22215,511 @@ pub fn get_v2ray_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_sing_box_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SING_BOX_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SINGBOX_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SING_BOX_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("sing-box").join("config.json"),
+            home.join(".sing-box").join("config.json"),
+            home.join(".config").join("sing-box.json"),
+            home.join(".config").join("systemd").join("user").join("sing-box.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/sing-box/config.json"),
+        PathBuf::from("/etc/sing-box.json"),
+        PathBuf::from("/usr/local/etc/sing-box/config.json"),
+        PathBuf::from("/etc/default/sing-box"),
+        PathBuf::from("/etc/sysconfig/sing-box"),
+        PathBuf::from("/etc/systemd/system/sing-box.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/sing-box@.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_sing_box_config_path() -> Option<PathBuf> {
+    let paths = get_sing_box_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_sing_box_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_sing_box_write_path() -> PathBuf {
+    if let Some(p) = get_sing_box_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SING_BOX_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("SINGBOX_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("sing-box");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/sing-box");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/sing-box.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("sing-box").join("config.json");
+    }
+    PathBuf::from("/etc/sing-box/config.json")
+}
+
+pub fn parse_sing_box_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "outbound_proxy",
+                "proxy",
+                "sing_box_proxy",
+                "singbox_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+            if let Some(outbounds) = obj.get("outbounds").and_then(|v| v.as_array()) {
+                for outbound in outbounds {
+                    let tag = outbound.get("tag").and_then(|t| t.as_str()).unwrap_or("");
+                    let o_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    if tag == "proxy" || tag == "outbound_proxy" || o_type == "http" || o_type == "socks" {
+                        if let Some(server) = outbound.get("server").and_then(|s| s.as_str()) {
+                            let port = outbound.get("server_port").and_then(|p| p.as_u64()).unwrap_or(0);
+                            if !server.is_empty() && port > 0 {
+                                let scheme = if o_type == "socks" { "socks5" } else { "http" };
+                                return Some(format!("{}://{}:{}", scheme, server, port));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "sing_box_proxy"
+                        || k_low == "singbox_proxy"
+                        || k_low == "sing_box_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "sing_box_proxy"
+                || k_low == "singbox_proxy"
+                || k_low == "sing_box_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_sing_box_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_sing_box_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_sing_box_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SING_BOX_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SING_BOX_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SINGBOX_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SINGBOX_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_hysteria_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("HYSTERIA_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("HYSTERIA_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("HY2_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("hysteria").join("config.yaml"),
+            home.join(".config").join("hysteria").join("config.json"),
+            home.join(".hysteria").join("config.yaml"),
+            home.join(".hysteria").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("hysteria.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("hysteria-client.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/hysteria/config.yaml"),
+        PathBuf::from("/etc/hysteria/config.json"),
+        PathBuf::from("/etc/hysteria.yaml"),
+        PathBuf::from("/usr/local/etc/hysteria/config.yaml"),
+        PathBuf::from("/usr/local/etc/hysteria/config.json"),
+        PathBuf::from("/etc/default/hysteria"),
+        PathBuf::from("/etc/default/hysteria-client"),
+        PathBuf::from("/etc/sysconfig/hysteria"),
+        PathBuf::from("/etc/systemd/system/hysteria.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/hysteria-client.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/hysteria-server.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_hysteria_config_path() -> Option<PathBuf> {
+    let paths = get_hysteria_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_hysteria_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_hysteria_write_path() -> PathBuf {
+    if let Some(p) = get_hysteria_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("HYSTERIA_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("HY2_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("hysteria");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/hysteria");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/hysteria.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("hysteria").join("config.yaml");
+    }
+    PathBuf::from("/etc/hysteria/config.yaml")
+}
+
+pub fn parse_hysteria_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "outbound_proxy",
+                "proxy",
+                "hysteria_proxy",
+                "hy2_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "hysteria_proxy"
+                        || k_low == "hy2_proxy"
+                        || k_low == "hysteria_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "hysteria_proxy"
+                || k_low == "hy2_proxy"
+                || k_low == "hysteria_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_hysteria_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_hysteria_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_hysteria_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("HYSTERIA_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HYSTERIA_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HY2_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HY2_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -27532,6 +28037,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "V2Ray Daemon Proxy",
             "~/.config/v2ray/config.json & /etc/v2ray/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Sing-box Daemon Proxy (/etc/sing-box/config.json / ~/.config/sing-box/config.json / /etc/systemd/system/sing-box.service.d/http-proxy.conf)
+    if let Some((sb_proxy, sb_path)) = get_sing_box_proxy() {
+        let ok = verify_proxy_url(&sb_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Sing-box daemon proxy `{}` in {} is dead! (sing-box client upstream forwarding will fail)",
+                sb_proxy,
+                sb_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Sing-box Daemon Proxy",
+            format!("{}", sb_path.display()),
+            sb_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (sing-box fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Sing-box Daemon Proxy",
+            "~/.config/sing-box/config.json & /etc/sing-box/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Hysteria Daemon Proxy (/etc/hysteria/config.yaml / ~/.config/hysteria/config.yaml / /etc/systemd/system/hysteria.service.d/http-proxy.conf)
+    if let Some((hy_proxy, hy_path)) = get_hysteria_proxy() {
+        let ok = verify_proxy_url(&hy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Hysteria daemon proxy `{}` in {} is dead! (hysteria client bridge/upstream routing will fail)",
+                hy_proxy,
+                hy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Hysteria Daemon Proxy",
+            format!("{}", hy_path.display()),
+            hy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (hysteria fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Hysteria Daemon Proxy",
+            "~/.config/hysteria/config.yaml & /etc/hysteria/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -33223,5 +33792,97 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy=http://127.0.0.1:7890\n; v2ray_proxy=http://127.0.0.1:7890\n";
         assert_eq!(parse_v2ray_proxy(input_comment), None);
         assert_eq!(parse_v2ray_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_sing_box_proxy() {
+        let sb_json = r#"{
+            "outbounds": [
+                {
+                    "type": "socks",
+                    "tag": "proxy",
+                    "server": "127.0.0.1",
+                    "server_port": 1080
+                }
+            ]
+        }"#;
+        assert_eq!(
+            parse_sing_box_proxy(sb_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let sb_top_json = r#"{
+            "outbound_proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_sing_box_proxy(sb_top_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sb_env = r#"
+# Sing-box environment config
+SING_BOX_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_sing_box_proxy(sb_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_sing_box_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy=http://127.0.0.1:7890\n; sing_box_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_sing_box_proxy(input_comment), None);
+        assert_eq!(parse_sing_box_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_hysteria_proxy() {
+        let hy_yaml = r#"
+server: 1.2.3.4:36712
+auth: secret_pass
+proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_hysteria_proxy(hy_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let hy_json = r#"{
+            "server": "1.2.3.4:36712",
+            "outbound_proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_hysteria_proxy(hy_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let hy_env = r#"
+# Hysteria environment config
+HYSTERIA_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_hysteria_proxy(hy_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_hysteria_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; hysteria_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_hysteria_proxy(input_comment), None);
+        assert_eq!(parse_hysteria_proxy(""), None);
     }
 }
