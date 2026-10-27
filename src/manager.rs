@@ -16880,6 +16880,440 @@ pub fn unset_vault_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_traefik_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_traefik = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "traefik_http_proxy" {
+                        lines.push(format!("Environment=\"TRAEFIK_HTTP_PROXY={}\"", proxy_url));
+                        replaced_traefik = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("traefik_http_proxy=") {
+                lines.push(format!("TRAEFIK_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_traefik = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_traefik {
+            lines.push(format!("Environment=\"TRAEFIK_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // YAML / TOML format: traefik.yml / traefik.toml
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy" || key == "http_proxy" || key == "proxy_url" || key == "httpproxy" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy = \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        } else if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy" || key == "httpproxy" || key == "http_proxy" || key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy: \"{}\"", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    // Check if serversTransport exists
+    let has_servers_transport = content.lines().any(|l| l.trim().starts_with("serversTransport:"));
+    if has_servers_transport {
+        let mut out = Vec::new();
+        let mut inserted = false;
+        for line in content.lines() {
+            out.push(line.to_string());
+            if !inserted && line.trim().starts_with("serversTransport:") {
+                out.push(format!("  proxy: \"{}\"", proxy_url));
+                inserted = true;
+            }
+        }
+        return out.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push("serversTransport:".to_string());
+    out.push(format!("  proxy: \"{}\"", proxy_url));
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_traefik_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "traefik_http_proxy"
+                    || k_low == "traefik_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("traefik_http_proxy=")
+            || lower.starts_with("traefik_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once('=') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy" || key == "http_proxy" || key == "proxy_url" || key == "httpproxy" {
+                removed = true;
+                continue;
+            }
+        } else if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy" || key == "httpproxy" || key == "http_proxy" || key == "proxy_url" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_traefik_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_traefik_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_traefik_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_traefik_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_traefik_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_traefik_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_caddy_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_caddy = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "caddy_http_proxy" {
+                        lines.push(format!("Environment=\"CADDY_HTTP_PROXY={}\"", proxy_url));
+                        replaced_caddy = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("caddy_http_proxy=") {
+                lines.push(format!("CADDY_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_caddy = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_caddy {
+            lines.push(format!("Environment=\"CADDY_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // Caddyfile or JSON
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let directive = parts[0].to_lowercase();
+            if directive == "proxy" || directive == "proxy_url" || directive == "caddy_http_proxy" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}proxy {}", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        } else if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy" || key == "http_proxy" || key == "proxy_url" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}\"proxy\": \"{}\",", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(format!("proxy {}", proxy_url));
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_caddy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "caddy_http_proxy"
+                    || k_low == "caddy_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("caddy_http_proxy=")
+            || lower.starts_with("caddy_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if !parts.is_empty() {
+            let directive = parts[0].to_lowercase();
+            if directive == "proxy" || directive == "proxy_url" || directive == "caddy_http_proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "proxy" || key == "http_proxy" || key == "proxy_url" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_caddy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_caddy_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_caddy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_caddy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_caddy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_caddy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -16992,6 +17426,8 @@ pub async fn turn_on(
     winlogbeat: bool,
     consul: bool,
     vault: bool,
+    traefik: bool,
+    caddy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -17103,6 +17539,8 @@ pub async fn turn_on(
     let set_winlogbeat = winlogbeat || all;
     let set_consul = consul || all;
     let set_vault = vault || all;
+    let set_traefik = traefik || all;
+    let set_caddy = caddy || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -18654,6 +19092,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_traefik {
+        match set_traefik_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Traefik edge router daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Traefik daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_caddy {
+        match set_caddy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Caddy web server daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Caddy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -18779,6 +19247,8 @@ pub fn turn_off(
     winlogbeat: bool,
     consul: bool,
     vault: bool,
+    traefik: bool,
+    caddy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -18890,6 +19360,8 @@ pub fn turn_off(
     let unset_winlogbeat = winlogbeat || all;
     let unset_consul = consul || all;
     let unset_vault = vault || all;
+    let unset_traefik = traefik || all;
+    let unset_caddy = caddy || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -19839,6 +20311,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Vault secret management daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Vault secret management proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Vault secret management daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_traefik {
+        match unset_traefik_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Traefik edge router daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Traefik edge router proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Traefik edge router daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_caddy {
+        match unset_caddy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Caddy web server daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Caddy web server proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Caddy web server daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -22488,5 +22976,52 @@ http_proxy = "http://127.0.0.1:7890"
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("VAULT_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_traefik_proxy() {
+        let yml_initial = r#"
+serversTransport:
+  proxy: "http://127.0.0.1:7890"
+"#;
+        let yml_updated = apply_traefik_proxy(yml_initial, "http://10.0.0.36:8080");
+        assert!(yml_updated.contains("proxy: \"http://10.0.0.36:8080\""));
+        let (yml_cleaned, yml_removed) = remove_traefik_proxy(&yml_updated);
+        assert!(yml_removed);
+        assert!(!yml_cleaned.contains("proxy:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_traefik_proxy(dropin_initial, "http://10.0.0.36:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.36:8080\""));
+        assert!(dropin_updated.contains("Environment=\"TRAEFIK_HTTP_PROXY=http://10.0.0.36:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_traefik_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TRAEFIK_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_caddy_proxy() {
+        let caddyfile_initial = r#"
+:80 {
+    proxy http://127.0.0.1:7890
+}
+"#;
+        let caddyfile_updated = apply_caddy_proxy(caddyfile_initial, "http://10.0.0.37:8080");
+        assert!(caddyfile_updated.contains("proxy http://10.0.0.37:8080"));
+        let (caddyfile_cleaned, caddyfile_removed) = remove_caddy_proxy(&caddyfile_updated);
+        assert!(caddyfile_removed);
+        assert!(!caddyfile_cleaned.contains("proxy http://"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_caddy_proxy(dropin_initial, "http://10.0.0.37:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.37:8080\""));
+        assert!(dropin_updated.contains("Environment=\"CADDY_HTTP_PROXY=http://10.0.0.37:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_caddy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("CADDY_HTTP_PROXY="));
     }
 }

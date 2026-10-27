@@ -16431,6 +16431,451 @@ pub fn get_vault_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_traefik_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TRAEFIK_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TRAEFIK_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("traefik.yml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("traefik").join("traefik.yml"),
+            home.join(".config").join("traefik").join("traefik.yaml"),
+            home.join(".config").join("traefik").join("traefik.toml"),
+            home.join(".traefik").join("traefik.yml"),
+            home.join(".traefik").join("traefik.toml"),
+            home.join(".config").join("systemd").join("user").join("traefik.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/traefik/traefik.yml"),
+        PathBuf::from("/etc/traefik/traefik.yaml"),
+        PathBuf::from("/etc/traefik/traefik.toml"),
+        PathBuf::from("/etc/traefik/proxy.yml"),
+        PathBuf::from("/etc/default/traefik"),
+        PathBuf::from("/etc/sysconfig/traefik"),
+        PathBuf::from("/etc/systemd/system/traefik.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/traefik-proxy.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/traefik/traefik.yml"),
+        PathBuf::from("C:\\ProgramData\\traefik\\traefik.yml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_traefik_config_path() -> Option<PathBuf> {
+    let paths = get_traefik_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_traefik_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_traefik_write_path() -> PathBuf {
+    if let Some(p) = get_traefik_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TRAEFIK_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_traefik = PathBuf::from("/etc/traefik");
+    if etc_traefik.is_dir() {
+        return etc_traefik.join("traefik.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/traefik.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("traefik").join("traefik.yml");
+    }
+    PathBuf::from("/etc/traefik/traefik.yml")
+}
+
+pub fn parse_traefik_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "traefik_http_proxy"
+                        || k_low == "traefik_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment or TOML e.g. /etc/default/traefik or traefik.toml
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "traefik_http_proxy"
+                || k_low == "traefik_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "proxy_url"
+                || k_low == "proxy"
+                || k_low == "httpproxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML traefik.yml / traefik.yaml: proxy: "..." or httpProxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy" || k_low == "httpproxy" || k_low == "httpsproxy" || k_low == "proxy_url" || k_low == "traefik_http_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim_matches(',').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_traefik_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_traefik_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_traefik_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TRAEFIK_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TRAEFIK_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_caddy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CADDYFILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("CADDY_CONFIG_PATH") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("caddy").join("Caddyfile"),
+            home.join(".caddy").join("Caddyfile"),
+            home.join(".config").join("caddy").join("caddy.json"),
+            home.join(".config").join("systemd").join("user").join("caddy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/caddy/Caddyfile"),
+        PathBuf::from("/etc/caddy/caddy.json"),
+        PathBuf::from("/etc/caddy/proxy.caddy"),
+        PathBuf::from("/etc/default/caddy"),
+        PathBuf::from("/etc/sysconfig/caddy"),
+        PathBuf::from("/etc/systemd/system/caddy.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/caddy-api.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/caddy/Caddyfile"),
+        PathBuf::from("C:\\ProgramData\\caddy\\Caddyfile"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_caddy_config_path() -> Option<PathBuf> {
+    let paths = get_caddy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_caddy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_caddy_write_path() -> PathBuf {
+    if let Some(p) = get_caddy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CADDYFILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_caddy = PathBuf::from("/etc/caddy");
+    if etc_caddy.is_dir() {
+        return etc_caddy.join("Caddyfile");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/caddy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("caddy").join("Caddyfile");
+    }
+    PathBuf::from("/etc/caddy/Caddyfile")
+}
+
+pub fn parse_caddy_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "caddy_http_proxy"
+                        || k_low == "caddy_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/caddy
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "caddy_http_proxy"
+                || k_low == "caddy_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Caddyfile directive format: proxy <url> or proxy_url <url>
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let directive = parts[0].to_lowercase();
+            if directive == "proxy" || directive == "proxy_url" || directive == "caddy_http_proxy" {
+                let val = parts[1].trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // JSON format: "proxy": "..." or "http_proxy": "..."
+        for key in &["\"proxy\"", "\"http_proxy\"", "\"https_proxy\"", "\"proxy_url\""] {
+            if let Some(idx) = trimmed.find(key) {
+                let rest = &trimmed[idx + key.len()..];
+                if let Some(colon_idx) = rest.find(':') {
+                    let val_part = &rest[colon_idx + 1..];
+                    let val = val_part.trim().trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c == '}').trim();
+                    if !val.is_empty()
+                        && (val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                            || val.contains(':'))
+                    {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "proxy" || k_low == "http_proxy" || k_low == "https_proxy" || k_low == "proxy_url" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim_matches(',').trim_matches('}').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_caddy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_caddy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_caddy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CADDY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CADDY_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -20916,6 +21361,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Vault Secret Manager",
             "/etc/vault.d/vault.hcl & ~/.vault.d/vault.hcl",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Traefik Ingress & Edge Router Daemon Proxy (/etc/traefik/traefik.yml / ~/.config/traefik/traefik.yml / /etc/systemd/system/traefik.service.d/http-proxy.conf)
+    if let Some((tf_proxy, tf_path)) = get_traefik_proxy() {
+        let ok = verify_proxy_url(&tf_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Traefik edge router daemon proxy `{}` in {} is dead! (Traefik ACME certificate renewal, plugin downloads, and external upstream routing will fail)",
+                tf_proxy,
+                tf_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Traefik Edge Router",
+            format!("{}", tf_path.display()),
+            tf_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (traefik fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Traefik Edge Router",
+            "/etc/traefik/traefik.yml & ~/.config/traefik/traefik.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Caddy Enterprise Web Server Daemon Proxy (/etc/caddy/Caddyfile / ~/.config/caddy/Caddyfile / /etc/systemd/system/caddy.service.d/http-proxy.conf)
+    if let Some((cd_proxy, cd_path)) = get_caddy_proxy() {
+        let ok = verify_proxy_url(&cd_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Caddy web server daemon proxy `{}` in {} is dead! (Caddy automatic HTTPS ACME issuance, ZeroSSL certs, and reverse proxy upstreams will fail)",
+                cd_proxy,
+                cd_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Caddy Web Server",
+            format!("{}", cd_path.display()),
+            cd_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (caddy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Caddy Web Server",
+            "/etc/caddy/Caddyfile & ~/.config/caddy/Caddyfile",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -25655,5 +26164,80 @@ Environment="VAULT_HTTP_PROXY=http://10.0.0.85:8080"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// http_proxy = \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_vault_proxy(input_comment), None);
         assert_eq!(parse_vault_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_traefik_proxy() {
+        let yml_conf = r#"
+serversTransport:
+  proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_traefik_proxy(yml_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="TRAEFIK_HTTP_PROXY=http://10.0.0.87:8080"
+"#;
+        assert_eq!(
+            parse_traefik_proxy(dropin),
+            Some("http://10.0.0.87:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.88:8080\"\n";
+        assert_eq!(
+            parse_traefik_proxy(default_env),
+            Some("http://10.0.0.88:8080".to_string())
+        );
+
+        let toml_conf = "proxy = \"http://10.0.0.89:8080\"\n";
+        assert_eq!(
+            parse_traefik_proxy(toml_conf),
+            Some("http://10.0.0.89:8080".to_string())
+        );
+
+        let input_comment = "# proxy: \"http://127.0.0.1:7890\"\n// proxy = \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_traefik_proxy(input_comment), None);
+        assert_eq!(parse_traefik_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_caddy_proxy() {
+        let caddyfile = r#"
+:80 {
+    proxy http://127.0.0.1:7890
+}
+"#;
+        assert_eq!(
+            parse_caddy_proxy(caddyfile),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="CADDY_HTTP_PROXY=http://10.0.0.90:8080"
+"#;
+        assert_eq!(
+            parse_caddy_proxy(dropin),
+            Some("http://10.0.0.90:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.91:8080\"\n";
+        assert_eq!(
+            parse_caddy_proxy(default_env),
+            Some("http://10.0.0.91:8080".to_string())
+        );
+
+        let json_conf = r#"{"apps": {"http": {"servers": {"srv0": {"proxy": "http://10.0.0.92:8080"}}}}}"#;
+        assert_eq!(
+            parse_caddy_proxy(json_conf),
+            Some("http://10.0.0.92:8080".to_string())
+        );
+
+        let input_comment = "# proxy http://127.0.0.1:7890\n// proxy http://127.0.0.1:7890\n; proxy http://127.0.0.1:7890\n";
+        assert_eq!(parse_caddy_proxy(input_comment), None);
+        assert_eq!(parse_caddy_proxy(""), None);
     }
 }

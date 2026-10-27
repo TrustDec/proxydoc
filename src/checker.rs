@@ -774,6 +774,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "RabbitMQ CDN",
         "https://www.rabbitmq.com",
     ),
+    (
+        "Apache Kafka CDN",
+        "https://kafka.apache.org",
+    ),
+    (
+        "HashiCorp Boundary CDN",
+        "https://www.boundaryproject.io",
+    ),
+    (
+        "HashiCorp Packer CDN",
+        "https://www.packer.io",
+    ),
+    (
+        "Nginx CDN",
+        "https://nginx.org",
+    ),
+    (
+        "HAProxy CDN",
+        "https://www.haproxy.org",
+    ),
+    (
+        "Varnish Cache CDN",
+        "https://varnish-cache.org",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1664,6 +1688,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "RabbitMQ CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Kafka CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HashiCorp Boundary CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HashiCorp Packer CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Nginx CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HAProxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Varnish Cache CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
