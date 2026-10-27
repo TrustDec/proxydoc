@@ -25146,6 +25146,480 @@ pub fn get_tun2socks_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_wstunnel_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("WSTUNNEL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("wstunnel").join("config.yaml"),
+            home.join(".config").join("wstunnel").join("config.json"),
+            home.join(".wstunnel").join("config.yaml"),
+            home.join(".wstunnel").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("wstunnel.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/wstunnel/config.yaml"),
+        PathBuf::from("/etc/wstunnel/config.json"),
+        PathBuf::from("/usr/local/etc/wstunnel/config.yaml"),
+        PathBuf::from("/etc/default/wstunnel"),
+        PathBuf::from("/etc/sysconfig/wstunnel"),
+        PathBuf::from("/etc/systemd/system/wstunnel.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_wstunnel_config_path() -> Option<PathBuf> {
+    let paths = get_wstunnel_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_wstunnel_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_wstunnel_write_path() -> PathBuf {
+    if let Some(p) = get_wstunnel_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("WSTUNNEL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("wstunnel");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/wstunnel");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/wstunnel.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("wstunnel").join("config.yaml");
+    }
+    PathBuf::from("/etc/wstunnel/config.yaml")
+}
+
+pub fn parse_wstunnel_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "wstunnel_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "wstunnel_proxy"
+                        || k_low == "wstunnel_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "wstunnel_proxy"
+                || k_low == "wstunnel_http_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_wstunnel_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_wstunnel_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_wstunnel_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("WSTUNNEL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WSTUNNEL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("WSTUNNEL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WSTUNNEL_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_cloak_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CLOAK_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("cloak").join("ckclient.json"),
+            home.join(".config").join("cloak").join("config.json"),
+            home.join(".cloak").join("ckclient.json"),
+            home.join(".cloak").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("cloak.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("ck-client.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/cloak/ckclient.json"),
+        PathBuf::from("/etc/cloak/config.json"),
+        PathBuf::from("/usr/local/etc/cloak/ckclient.json"),
+        PathBuf::from("/etc/default/cloak"),
+        PathBuf::from("/etc/sysconfig/cloak"),
+        PathBuf::from("/etc/systemd/system/cloak.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/ck-client.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_cloak_config_path() -> Option<PathBuf> {
+    let paths = get_cloak_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_cloak_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_cloak_write_path() -> PathBuf {
+    if let Some(p) = get_cloak_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CLOAK_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("cloak");
+        if dir.is_dir() {
+            return dir.join("ckclient.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/cloak");
+    if etc_dir.is_dir() {
+        return etc_dir.join("ckclient.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/cloak.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("cloak").join("ckclient.json");
+    }
+    PathBuf::from("/etc/cloak/ckclient.json")
+}
+
+pub fn parse_cloak_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "cloak_proxy",
+                "ck_proxy",
+                "ProxyMethod",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "cloak_proxy"
+                        || k_low == "cloak_http_proxy"
+                        || k_low == "ck_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "cloak_proxy"
+                || k_low == "cloak_http_proxy"
+                || k_low == "ck_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_cloak_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_cloak_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_cloak_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CLOAK_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CLOAK_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CLOAK_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CLOAK_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CK_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CK_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -30847,6 +31321,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Tun2socks Daemon Proxy",
             "~/.config/tun2socks/config.yaml & /etc/tun2socks/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // WSTunnel Daemon Proxy (/etc/wstunnel/config.yaml / ~/.config/wstunnel/config.yaml / /etc/systemd/system/wstunnel.service.d/http-proxy.conf)
+    if let Some((ws_proxy, ws_path)) = get_wstunnel_proxy() {
+        let ok = verify_proxy_url(&ws_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "WSTunnel daemon proxy `{}` in {} is dead! (wstunnel tunnel will fail)",
+                ws_proxy,
+                ws_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "WSTunnel Daemon Proxy",
+            format!("{}", ws_path.display()),
+            ws_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (wstunnel fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "WSTunnel Daemon Proxy",
+            "~/.config/wstunnel/config.yaml & /etc/wstunnel/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Cloak Daemon Proxy (/etc/cloak/ckclient.json / ~/.config/cloak/ckclient.json / /etc/systemd/system/cloak.service.d/http-proxy.conf)
+    if let Some((ck_proxy, ck_path)) = get_cloak_proxy() {
+        let ok = verify_proxy_url(&ck_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Cloak daemon proxy `{}` in {} is dead! (cloak obfuscation will fail)",
+                ck_proxy,
+                ck_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Cloak Daemon Proxy",
+            format!("{}", ck_path.display()),
+            ck_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (cloak fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Cloak Daemon Proxy",
+            "~/.config/cloak/ckclient.json & /etc/cloak/ckclient.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -37072,5 +37610,91 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: socks5://127.0.0.1:1080\n; tun2socks_proxy = 127.0.0.1:1080\n";
         assert_eq!(parse_tun2socks_proxy(input_comment), None);
         assert_eq!(parse_tun2socks_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_wstunnel_proxy() {
+        let ws_json = r#"{
+            "server": "wss://example.com",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_wstunnel_proxy(ws_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ws_yaml = r#"
+server: wss://example.com
+wstunnel_proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_wstunnel_proxy(ws_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ws_env = r#"
+# WSTunnel environment config
+WSTUNNEL_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_wstunnel_proxy(ws_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_wstunnel_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; wstunnel_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_wstunnel_proxy(input_comment), None);
+        assert_eq!(parse_wstunnel_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_cloak_proxy() {
+        let ck_json = r#"{
+            "ProxyMethod": "shadowsocks",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_cloak_proxy(ck_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ck_yaml = r#"
+ProxyMethod: shadowsocks
+cloak_proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_cloak_proxy(ck_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ck_env = r#"
+# Cloak environment config
+CLOAK_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_cloak_proxy(ck_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_cloak_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; cloak_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_cloak_proxy(input_comment), None);
+        assert_eq!(parse_cloak_proxy(""), None);
     }
 }
