@@ -79,6 +79,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (10817, false, "Glider Proxy Daemon (Forward/Multi-protocol)"),
     (10818, false, "Redsocks Transparent Proxy Daemon (Redirector/SOCKS)"),
     (10819, false, "Dante SOCKS Proxy Daemon (SOCKS5/Server)"),
+    (8123, false, "Polipo Caching Web Proxy (HTTP)"),
+    (10820, false, "3proxy Multi-Protocol Proxy Daemon (HTTP/SOCKS)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

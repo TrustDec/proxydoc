@@ -26960,6 +26960,545 @@ pub fn unset_dante_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_threeproxy_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("HTTPS_PROXY=")
+                || t.starts_with("THREEPROXY_PROXY=")
+                || t.starts_with("3PROXY_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_3proxy = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "threeproxy_proxy" || k_low == "3proxy_proxy" || k_low == "threeproxy_http_proxy" {
+                        lines.push(format!("Environment=\"THREEPROXY_PROXY={}\"", proxy_url));
+                        replaced_3proxy = true;
+                        continue;
+                    }
+                }
+            }
+
+            if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("threeproxy_proxy=") || lower.starts_with("3proxy_proxy=") {
+                lines.push(format!("THREEPROXY_PROXY=\"{}\"", proxy_url));
+                replaced_3proxy = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if content.contains("[Service]") {
+            if !replaced_http {
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+            }
+            if !replaced_3proxy {
+                lines.push(format!("Environment=\"THREEPROXY_PROXY={}\"", proxy_url));
+            }
+        } else {
+            if !replaced_http {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_3proxy {
+                lines.push(format!("THREEPROXY_PROXY=\"{}\"", proxy_url));
+            }
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let is_socks = proxy_url.starts_with("socks");
+    let (host, port) = extract_host_port(proxy_url);
+    let proto = if is_socks { "socks5" } else { "http" };
+    let parent_line = format!("parent 1000 {} {} {}", proto, host, port);
+
+    let has_parent = content.lines().any(|l| l.trim().starts_with("parent "));
+    if has_parent {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("parent ") {
+                if !replaced {
+                    lines.push(parent_line.clone());
+                    replaced = true;
+                }
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    let is_conf = content.contains(':') || content.contains('=');
+    if is_conf {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            let clean = lower.replace(' ', "");
+
+            if (clean.starts_with("proxy:") || clean.starts_with("proxy=")
+                || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+                || clean.starts_with("threeproxy_proxy:") || clean.starts_with("threeproxy_proxy=")
+                || clean.starts_with("3proxy_proxy:") || clean.starts_with("3proxy_proxy=")
+                || clean.starts_with("parent_proxy:") || clean.starts_with("parent_proxy="))
+                && !clean.starts_with("proxy_url")
+            {
+                if line.contains('=') {
+                    lines.push(format!("proxy = \"{}\"", proxy_url));
+                } else {
+                    lines.push(format!("proxy: {}", proxy_url));
+                }
+                replaced = true;
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            lines.push(parent_line);
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    format!("{}\n", parent_line)
+}
+
+pub fn remove_threeproxy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "upstream_proxy", "parent_proxy", "parent", "threeproxy_proxy", "3proxy_proxy", "target_proxy", "http_proxy", "https_proxy", "http-proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                let out = serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+                return (out, true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "threeproxy_proxy"
+                    || k_low == "3proxy_proxy"
+                    || k_low == "threeproxy_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if trimmed.starts_with("parent ") {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("threeproxy_proxy=")
+            || clean.starts_with("threeproxy_proxy:")
+            || clean.starts_with("3proxy_proxy=")
+            || clean.starts_with("3proxy_proxy:")
+            || clean.starts_with("parent_proxy=")
+            || clean.starts_with("parent_proxy:")
+            || clean.starts_with("upstream_proxy=")
+            || clean.starts_with("upstream_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("target_proxy=")
+            || clean.starts_with("target_proxy:")
+            || clean.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_threeproxy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_threeproxy_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_threeproxy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_threeproxy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_threeproxy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_threeproxy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_polipo_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("HTTPS_PROXY=")
+                || t.starts_with("POLIPO_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_polipo = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "polipo_proxy" || k_low == "polipo_http_proxy" {
+                        lines.push(format!("Environment=\"POLIPO_PROXY={}\"", proxy_url));
+                        replaced_polipo = true;
+                        continue;
+                    }
+                }
+            }
+
+            if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("polipo_proxy=") {
+                lines.push(format!("POLIPO_PROXY=\"{}\"", proxy_url));
+                replaced_polipo = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if content.contains("[Service]") {
+            if !replaced_http {
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+            }
+            if !replaced_polipo {
+                lines.push(format!("Environment=\"POLIPO_PROXY={}\"", proxy_url));
+            }
+        } else {
+            if !replaced_http {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_polipo {
+                lines.push(format!("POLIPO_PROXY=\"{}\"", proxy_url));
+            }
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let is_socks = proxy_url.starts_with("socks");
+    let (host, port) = extract_host_port(proxy_url);
+    let target_pair = format!("{}:{}", host, port);
+    let polipo_key = if is_socks { "socksParentProxy" } else { "parentProxy" };
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.remove("socksParentProxy");
+            obj.remove("parentProxy");
+            obj.insert(polipo_key.to_string(), serde_json::Value::String(target_pair.clone()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let is_conf = content.contains(':') || content.contains('=');
+    if is_conf {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            let clean = lower.replace(' ', "");
+
+            if clean.starts_with("parentproxy=") || clean.starts_with("parentproxy:")
+                || clean.starts_with("socksparentproxy=") || clean.starts_with("socksparentproxy:")
+                || clean.starts_with("polipo_proxy=") || clean.starts_with("polipo_proxy:")
+                || clean.starts_with("proxy=") || clean.starts_with("proxy:")
+            {
+                if !replaced {
+                    if line.contains('=') {
+                        lines.push(format!("{} = \"{}\"", polipo_key, target_pair));
+                    } else {
+                        lines.push(format!("{}: {}", polipo_key, target_pair));
+                    }
+                    replaced = true;
+                }
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            if content.contains('=') {
+                lines.push(format!("{} = \"{}\"", polipo_key, target_pair));
+            } else {
+                lines.push(format!("{}: {}", polipo_key, target_pair));
+            }
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    format!("{} = \"{}\"\n", polipo_key, target_pair)
+}
+
+pub fn remove_polipo_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["parentProxy", "socksParentProxy", "proxy", "upstream_proxy", "target_proxy", "polipo_proxy", "http_proxy", "https_proxy", "http-proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                let out = serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+                return (out, true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "polipo_proxy"
+                    || k_low == "polipo_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("parentproxy=")
+            || clean.starts_with("parentproxy:")
+            || clean.starts_with("socksparentproxy=")
+            || clean.starts_with("socksparentproxy:")
+            || clean.starts_with("polipo_proxy=")
+            || clean.starts_with("polipo_proxy:")
+            || clean.starts_with("upstream_proxy=")
+            || clean.starts_with("upstream_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("target_proxy=")
+            || clean.starts_with("target_proxy:")
+            || clean.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_polipo_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_polipo_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_polipo_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_polipo_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_polipo_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_polipo_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -27118,6 +27657,8 @@ pub async fn turn_on(
     glider: bool,
     redsocks: bool,
     dante: bool,
+    threeproxy: bool,
+    polipo: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -27275,6 +27816,8 @@ pub async fn turn_on(
     let set_glider = glider || all;
     let set_redsocks = redsocks || all;
     let set_dante = dante || all;
+    let set_threeproxy = threeproxy || all;
+    let set_polipo = polipo || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -29516,6 +30059,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_threeproxy {
+        match set_threeproxy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ 3proxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update 3proxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_polipo {
+        match set_polipo_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Polipo daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Polipo daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -29687,6 +30260,8 @@ pub fn turn_off(
     glider: bool,
     redsocks: bool,
     dante: bool,
+    threeproxy: bool,
+    polipo: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -29844,6 +30419,8 @@ pub fn turn_off(
     let unset_glider = glider || all;
     let unset_redsocks = redsocks || all;
     let unset_dante = dante || all;
+    let unset_threeproxy = threeproxy || all;
+    let unset_polipo = polipo || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -31161,6 +31738,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Dante daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Dante proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Dante daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_threeproxy {
+        match unset_threeproxy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ 3proxy daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ 3proxy proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset 3proxy daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_polipo {
+        match unset_polipo_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Polipo daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Polipo proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Polipo daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -34992,5 +35585,61 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("DANTE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_threeproxy_proxy() {
+        let threeproxy_initial = r#"{
+  "nserver": "8.8.8.8"
+}"#;
+        let threeproxy_updated = apply_threeproxy_proxy(threeproxy_initial, "http://10.0.0.121:8080");
+        assert!(threeproxy_updated.contains("\"proxy\": \"http://10.0.0.121:8080\""));
+        let (threeproxy_cleaned, threeproxy_removed) = remove_threeproxy_proxy(&threeproxy_updated);
+        assert!(threeproxy_removed);
+        assert!(!threeproxy_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "nserver 8.8.8.8\nparent 1000 http 127.0.0.1 7890\n";
+        let conf_updated = apply_threeproxy_proxy(conf_initial, "socks5://10.0.0.121:1080");
+        assert!(conf_updated.contains("parent 1000 socks5 10.0.0.121 1080"));
+        let (conf_cleaned, conf_removed) = remove_threeproxy_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("parent 1000"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_threeproxy_proxy(dropin_initial, "http://10.0.0.121:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.121:8080\""));
+        assert!(dropin_updated.contains("Environment=\"THREEPROXY_PROXY=http://10.0.0.121:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_threeproxy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("THREEPROXY_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_polipo_proxy() {
+        let polipo_initial = r#"{
+  "proxyPort": 8123
+}"#;
+        let polipo_updated = apply_polipo_proxy(polipo_initial, "http://10.0.0.122:8080");
+        assert!(polipo_updated.contains("\"parentProxy\": \"10.0.0.122:8080\""));
+        let (polipo_cleaned, polipo_removed) = remove_polipo_proxy(&polipo_updated);
+        assert!(polipo_removed);
+        assert!(!polipo_cleaned.contains("\"parentProxy\""));
+
+        let conf_initial = "proxyPort = 8123\nparentProxy = \"127.0.0.1:7890\"\n";
+        let conf_updated = apply_polipo_proxy(conf_initial, "socks5://10.0.0.122:1080");
+        assert!(conf_updated.contains("socksParentProxy = \"10.0.0.122:1080\""));
+        let (conf_cleaned, conf_removed) = remove_polipo_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("socksParentProxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_polipo_proxy(dropin_initial, "http://10.0.0.122:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.122:8080\""));
+        assert!(dropin_updated.contains("Environment=\"POLIPO_PROXY=http://10.0.0.122:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_polipo_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("POLIPO_PROXY="));
     }
 }

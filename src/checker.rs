@@ -1326,6 +1326,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Llama-3.3 AI CDN",
         "https://github.com/meta-llama/llama-models",
     ),
+    (
+        "3proxy Proxy CDN",
+        "https://github.com/3proxy/3proxy/releases",
+    ),
+    (
+        "Polipo Proxy CDN",
+        "https://github.com/jech/polipo",
+    ),
+    (
+        "GLM-4 AI CDN",
+        "https://github.com/THUDM/GLM-4",
+    ),
+    (
+        "CosyVoice AI CDN",
+        "https://github.com/FunAudioLLM/CosyVoice",
+    ),
+    (
+        "LLaMA-Factory AI CDN",
+        "https://github.com/hiyouga/LLaMA-Factory",
+    ),
+    (
+        "FLUX AI CDN",
+        "https://github.com/black-forest-labs/flux",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2630,6 +2654,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Llama-3.3 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "3proxy Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Polipo Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GLM-4 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CosyVoice AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LLaMA-Factory AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FLUX AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
