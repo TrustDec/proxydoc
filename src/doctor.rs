@@ -21291,6 +21291,403 @@ pub fn get_bore_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_brook_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("BROOK_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("BROOK_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("brook").join("config.json"),
+            home.join(".config").join("brook").join("brook.conf"),
+            home.join(".brook").join("config.json"),
+            home.join(".brook").join("brook.conf"),
+            home.join(".config").join("systemd").join("user").join("brook.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/brook/config.json"),
+        PathBuf::from("/etc/brook/brook.conf"),
+        PathBuf::from("/usr/local/etc/brook/config.json"),
+        PathBuf::from("/etc/default/brook"),
+        PathBuf::from("/etc/sysconfig/brook"),
+        PathBuf::from("/etc/systemd/system/brook.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_brook_config_path() -> Option<PathBuf> {
+    let paths = get_brook_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_brook_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_brook_write_path() -> PathBuf {
+    if let Some(p) = get_brook_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("BROOK_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let config_dir = home.join(".config").join("brook");
+        if config_dir.is_dir() {
+            return config_dir.join("config.json");
+        }
+    }
+    let etc_brook = PathBuf::from("/etc/brook");
+    if etc_brook.is_dir() {
+        return etc_brook.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/brook.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("brook").join("config.json");
+    }
+    PathBuf::from("/etc/brook/config.json")
+}
+
+pub fn parse_brook_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in ["proxy", "brook_proxy", "brook_http_proxy", "http_proxy", "https_proxy", "all_proxy"] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "brook_proxy"
+                        || k_low == "brook_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "brook_proxy"
+                || k_low == "brook_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_brook_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_brook_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_brook_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("BROOK_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BROOK_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_npc_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("NPC_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NPC_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("npc").join("npc.conf"),
+            home.join(".npc").join("npc.conf"),
+            home.join(".config").join("systemd").join("user").join("npc.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/npc/conf/npc.conf"),
+        PathBuf::from("/etc/npc/npc.conf"),
+        PathBuf::from("/usr/local/etc/npc/npc.conf"),
+        PathBuf::from("/etc/default/npc"),
+        PathBuf::from("/etc/sysconfig/npc"),
+        PathBuf::from("/etc/systemd/system/npc.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_npc_config_path() -> Option<PathBuf> {
+    let paths = get_npc_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_npc_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_npc_write_path() -> PathBuf {
+    if let Some(p) = get_npc_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("NPC_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_npc_conf = PathBuf::from("/etc/npc/conf");
+    if etc_npc_conf.is_dir() {
+        return etc_npc_conf.join("npc.conf");
+    }
+    let etc_npc = PathBuf::from("/etc/npc");
+    if etc_npc.is_dir() {
+        return etc_npc.join("npc.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let npc_dir = home.join(".npc");
+        if npc_dir.is_dir() {
+            return npc_dir.join("npc.conf");
+        }
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/npc.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".npc").join("npc.conf");
+    }
+    PathBuf::from("/etc/npc/conf/npc.conf")
+}
+
+pub fn parse_npc_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "npc_proxy"
+                        || k_low == "npc_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy_url"
+                || k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "npc_proxy"
+                || k_low == "npc_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_npc_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_npc_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_npc_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NPC_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NPC_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -26480,6 +26877,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Bore Daemon Proxy",
             "~/.config/bore/bore.toml & /etc/bore/bore.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Brook Proxy Daemon Proxy (/etc/brook/config.json / ~/.config/brook/config.json / /etc/systemd/system/brook.service.d/http-proxy.conf)
+    if let Some((brook_proxy, brook_path)) = get_brook_proxy() {
+        let ok = verify_proxy_url(&brook_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Brook daemon proxy `{}` in {} is dead! (brook client upstream forwarding tunnels will fail)",
+                brook_proxy,
+                brook_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Brook Daemon Proxy",
+            format!("{}", brook_path.display()),
+            brook_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (brook fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Brook Daemon Proxy",
+            "~/.config/brook/config.json & /etc/brook/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // NPC (NPS Client) Intranet Penetration Daemon Proxy (/etc/npc/conf/npc.conf / ~/.npc/npc.conf / /etc/systemd/system/npc.service.d/http-proxy.conf)
+    if let Some((npc_proxy, npc_path)) = get_npc_proxy() {
+        let ok = verify_proxy_url(&npc_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "NPC daemon proxy `{}` in {} is dead! (nps client bridge connection will fail)",
+                npc_proxy,
+                npc_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "NPC Daemon Proxy",
+            format!("{}", npc_path.display()),
+            npc_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (npc fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "NPC Daemon Proxy",
+            "~/.npc/npc.conf & /etc/npc/conf/npc.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -32012,5 +32473,75 @@ Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
         let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; proxy = \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_bore_proxy(input_comment), None);
         assert_eq!(parse_bore_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_brook_proxy() {
+        let brook_json = r#"{
+  "server": "1.2.3.4:9999",
+  "proxy": "http://127.0.0.1:7890"
+}"#;
+        assert_eq!(
+            parse_brook_proxy(brook_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let brook_env = r#"
+# Brook startup config
+BROOK_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_brook_proxy(brook_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_brook_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_brook_proxy(input_comment), None);
+        assert_eq!(parse_brook_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_npc_proxy() {
+        let npc_ini = r#"
+[common]
+server_addr=1.2.3.4:8024
+conn_type=tcp
+proxy_url=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_npc_proxy(npc_ini),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let npc_env = r#"
+# NPC startup config
+NPC_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_npc_proxy(npc_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_npc_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# proxy_url=http://127.0.0.1:7890\n; proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_npc_proxy(input_comment), None);
+        assert_eq!(parse_npc_proxy(""), None);
     }
 }

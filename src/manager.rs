@@ -21567,6 +21567,430 @@ pub fn unset_bore_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_brook_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("BROOK_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_brook = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "brook_proxy" || k_low == "brook_http_proxy" {
+                        lines.push(format!("Environment=\"BROOK_PROXY={}\"", proxy_url));
+                        replaced_brook = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("brook_proxy=") || lower.starts_with("brook_http_proxy=") {
+                lines.push(format!("BROOK_PROXY=\"{}\"", proxy_url));
+                replaced_brook = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_brook {
+            lines.push(format!("Environment=\"BROOK_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_brook_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "http_proxy", "https_proxy", "httpProxy", "brook_proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "brook_proxy"
+                    || k_low == "brook_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("brook_proxy=")
+            || lower.starts_with("brook_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_brook_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_brook_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_brook_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_brook_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_brook_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_brook_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_npc_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("NPC_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_npc = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "npc_proxy" || k_low == "npc_http_proxy" {
+                        lines.push(format!("Environment=\"NPC_PROXY={}\"", proxy_url));
+                        replaced_npc = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("npc_proxy=") || lower.starts_with("npc_http_proxy=") {
+                lines.push(format!("NPC_PROXY=\"{}\"", proxy_url));
+                replaced_npc = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_npc {
+            lines.push(format!("Environment=\"NPC_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+    let mut in_common = false;
+    let mut has_common = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[common]" {
+            in_common = true;
+            has_common = true;
+            lines.push(line.to_string());
+            continue;
+        } else if trimmed.starts_with('[') {
+            if in_common && !replaced {
+                lines.push(format!("proxy_url = {}", proxy_url));
+                replaced = true;
+            }
+            in_common = false;
+        }
+
+        if in_common
+            && (trimmed.starts_with("proxy_url =")
+                || trimmed.starts_with("proxy_url=")
+                || trimmed.starts_with("proxy =")
+                || trimmed.starts_with("proxy="))
+        {
+            lines.push(format!("proxy_url = {}", proxy_url));
+            replaced = true;
+            continue;
+        }
+
+        if !in_common
+            && (trimmed.starts_with("proxy_url =")
+                || trimmed.starts_with("proxy_url="))
+        {
+            lines.push(format!("proxy_url = {}", proxy_url));
+            replaced = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_common && !replaced {
+        lines.push(format!("proxy_url = {}", proxy_url));
+        replaced = true;
+    }
+
+    if !replaced {
+        if has_common {
+            // Handled
+        } else if content.trim().is_empty() {
+            return format!("[common]\nproxy_url = {}\n", proxy_url);
+        } else {
+            lines.push("".to_string());
+            lines.push("[common]".to_string());
+            lines.push(format!("proxy_url = {}", proxy_url));
+        }
+    }
+
+    let joined = lines.join("\n");
+    if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    }
+}
+
+pub fn remove_npc_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "npc_proxy"
+                    || k_low == "npc_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("npc_proxy=")
+            || lower.starts_with("npc_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("proxy_url =")
+            || lower.starts_with("proxy_url=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_npc_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_npc_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_npc_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_npc_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_npc_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_npc_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -21701,6 +22125,8 @@ pub async fn turn_on(
     chisel: bool,
     nebula: bool,
     bore: bool,
+    brook: bool,
+    npc: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -21834,6 +22260,8 @@ pub async fn turn_on(
     let set_chisel = chisel || all;
     let set_nebula = nebula || all;
     let set_bore = bore || all;
+    let set_brook = brook || all;
+    let set_npc = npc || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -23715,6 +24143,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_brook {
+        match set_brook_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Brook daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Brook daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_npc {
+        match set_npc_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ NPC daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update NPC daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -23862,6 +24320,8 @@ pub fn turn_off(
     chisel: bool,
     nebula: bool,
     bore: bool,
+    brook: bool,
+    npc: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -23995,6 +24455,8 @@ pub fn turn_off(
     let unset_chisel = chisel || all;
     let unset_nebula = nebula || all;
     let unset_bore = bore || all;
+    let unset_brook = brook || all;
+    let unset_npc = npc || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -25120,6 +25582,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Bore daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Bore proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Bore daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_brook {
+        match unset_brook_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Brook daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Brook proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Brook daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_npc {
+        match unset_npc_proxy() {
+            Ok(true) => eprintln!("{}", "✔ NPC daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ NPC proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset NPC daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -28344,5 +28822,49 @@ server = "bore.pub"
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("BORE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_brook_proxy() {
+        let brook_initial = r#"{
+  "server": "1.2.3.4:9999",
+  "proxy": "http://127.0.0.1:7890"
+}"#;
+        let brook_updated = apply_brook_proxy(brook_initial, "http://10.0.0.90:8080");
+        assert!(brook_updated.contains("\"proxy\": \"http://10.0.0.90:8080\""));
+        let (brook_cleaned, brook_removed) = remove_brook_proxy(&brook_updated);
+        assert!(brook_removed);
+        assert!(!brook_cleaned.contains("\"proxy\""));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_brook_proxy(dropin_initial, "http://10.0.0.90:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.90:8080\""));
+        assert!(dropin_updated.contains("Environment=\"BROOK_PROXY=http://10.0.0.90:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_brook_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("BROOK_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_npc_proxy() {
+        let npc_initial = r#"
+[common]
+server_addr = 1.2.3.4:8024
+"#;
+        let npc_updated = apply_npc_proxy(npc_initial, "http://10.0.0.95:8080");
+        assert!(npc_updated.contains("proxy_url = http://10.0.0.95:8080"));
+        let (npc_cleaned, npc_removed) = remove_npc_proxy(&npc_updated);
+        assert!(npc_removed);
+        assert!(!npc_cleaned.contains("proxy_url"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_npc_proxy(dropin_initial, "http://10.0.0.95:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.95:8080\""));
+        assert!(dropin_updated.contains("Environment=\"NPC_PROXY=http://10.0.0.95:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_npc_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("NPC_PROXY="));
     }
 }
