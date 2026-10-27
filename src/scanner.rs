@@ -101,6 +101,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (5300, false, "PowerDNS Recursor Resolving DNS Cache Proxy Daemon (DNS)"),
     (5199, false, "dnsdist DNS Load Balancer & DoH/DoT Proxy Daemon (Console/DNS)"),
     (953, false, "BIND 9 (named) Domain Name System & RNDC Control Daemon (RNDC/DNS)"),
+    (5342, false, "NextDNS Encrypted DNS Client & Proxy Daemon (Control/DNS)"),
+    (7053, false, "pdnsd Proxy DNS Daemon with Permanent Caching (DNS)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

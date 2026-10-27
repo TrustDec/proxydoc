@@ -1590,6 +1590,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "InvokeAI AI CDN",
         "https://github.com/invoke-ai/InvokeAI",
     ),
+    (
+        "NextDNS Proxy CDN",
+        "https://nextdns.io",
+    ),
+    (
+        "pdnsd Proxy CDN",
+        "http://members.home.nl/p.a.rombouts/pdnsd",
+    ),
+    (
+        "AnythingLLM AI CDN",
+        "https://github.com/Mintplex-Labs/anything-llm",
+    ),
+    (
+        "Continue AI CDN",
+        "https://github.com/continuedev/continue",
+    ),
+    (
+        "PrivateGPT AI CDN",
+        "https://github.com/zylon-ai/private-gpt",
+    ),
+    (
+        "SearXNG AI CDN",
+        "https://github.com/searxng/searxng",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3092,6 +3116,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "InvokeAI AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "NextDNS Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "pdnsd Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "AnythingLLM AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Continue AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "PrivateGPT AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SearXNG AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
