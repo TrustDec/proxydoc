@@ -1350,6 +1350,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "FLUX AI CDN",
         "https://github.com/black-forest-labs/flux",
     ),
+    (
+        "Pproxy Proxy CDN",
+        "https://github.com/qwj/python-proxy",
+    ),
+    (
+        "MicroSOCKS Proxy CDN",
+        "https://github.com/rofl0r/microsocks",
+    ),
+    (
+        "InternVL AI CDN",
+        "https://github.com/OpenGVLab/InternVL",
+    ),
+    (
+        "CogVideoX AI CDN",
+        "https://github.com/THUDM/CogVideo",
+    ),
+    (
+        "F5-TTS AI CDN",
+        "https://github.com/SWivid/F5-TTS",
+    ),
+    (
+        "SenseVoice AI CDN",
+        "https://github.com/FunAudioLLM/SenseVoice",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2672,6 +2696,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "FLUX AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pproxy Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MicroSOCKS Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InternVL AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CogVideoX AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "F5-TTS AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SenseVoice AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

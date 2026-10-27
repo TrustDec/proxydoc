@@ -27499,6 +27499,527 @@ pub fn unset_polipo_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_pproxy_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("HTTPS_PROXY=")
+                || t.starts_with("PPROXY_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_pproxy = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "pproxy_proxy" || k_low == "pproxy_http_proxy" {
+                        lines.push(format!("Environment=\"PPROXY_PROXY={}\"", proxy_url));
+                        replaced_pproxy = true;
+                        continue;
+                    }
+                }
+            }
+
+            if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("pproxy_proxy=") {
+                lines.push(format!("PPROXY_PROXY=\"{}\"", proxy_url));
+                replaced_pproxy = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if content.contains("[Service]") {
+            if !replaced_http {
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+            }
+            if !replaced_pproxy {
+                lines.push(format!("Environment=\"PPROXY_PROXY={}\"", proxy_url));
+            }
+        } else {
+            if !replaced_http {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_pproxy {
+                lines.push(format!("PPROXY_PROXY=\"{}\"", proxy_url));
+            }
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("remote".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let has_remote_flag = content.lines().any(|l| {
+        let t = l.trim();
+        t.starts_with("-r ") || t.starts_with("--remote ")
+    });
+    if has_remote_flag {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("-r ") || trimmed.starts_with("--remote ") {
+                if !replaced {
+                    lines.push(format!("-r {}", proxy_url));
+                    replaced = true;
+                }
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    let is_conf = content.contains(':') || content.contains('=');
+    if is_conf {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            let clean = lower.replace(' ', "");
+
+            if (clean.starts_with("remote:") || clean.starts_with("remote=")
+                || clean.starts_with("upstream:") || clean.starts_with("upstream=")
+                || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+                || clean.starts_with("pproxy_proxy:") || clean.starts_with("pproxy_proxy=")
+                || clean.starts_with("upstream_proxy:") || clean.starts_with("upstream_proxy="))
+                && !clean.starts_with("proxy_url")
+            {
+                if !replaced {
+                    if line.contains('=') {
+                        lines.push(format!("remote = \"{}\"", proxy_url));
+                    } else {
+                        lines.push(format!("remote: {}", proxy_url));
+                    }
+                    replaced = true;
+                }
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            if content.contains('=') {
+                lines.push(format!("remote = \"{}\"", proxy_url));
+            } else {
+                lines.push(format!("remote: {}", proxy_url));
+            }
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    format!("remote = \"{}\"\n", proxy_url)
+}
+
+pub fn remove_pproxy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["remote", "upstream", "proxy", "upstream_proxy", "target_proxy", "pproxy_proxy", "http_proxy", "https_proxy", "http-proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                let out = serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+                return (out, true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "pproxy_proxy"
+                    || k_low == "pproxy_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if trimmed.starts_with("-r ") || trimmed.starts_with("--remote ") {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("remote=")
+            || clean.starts_with("remote:")
+            || clean.starts_with("upstream=")
+            || clean.starts_with("upstream:")
+            || clean.starts_with("pproxy_proxy=")
+            || clean.starts_with("pproxy_proxy:")
+            || clean.starts_with("upstream_proxy=")
+            || clean.starts_with("upstream_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("target_proxy=")
+            || clean.starts_with("target_proxy:")
+            || clean.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_pproxy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pproxy_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_pproxy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_pproxy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pproxy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pproxy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_microsocks_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("ALL_PROXY=")
+                || t.starts_with("SOCKS_PROXY=")
+                || t.starts_with("MICROSOCKS_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_all = false;
+        let mut replaced_microsocks = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "all_proxy" || k_low == "socks_proxy" {
+                        lines.push(format!("Environment=\"ALL_PROXY={}\"", proxy_url));
+                        replaced_all = true;
+                        continue;
+                    } else if k_low == "microsocks_proxy" || k_low == "microsocks_http_proxy" {
+                        lines.push(format!("Environment=\"MICROSOCKS_PROXY={}\"", proxy_url));
+                        replaced_microsocks = true;
+                        continue;
+                    }
+                }
+            }
+
+            if lower.starts_with("all_proxy=") || lower.starts_with("socks_proxy=") {
+                lines.push(format!("ALL_PROXY=\"{}\"", proxy_url));
+                replaced_all = true;
+                continue;
+            } else if lower.starts_with("microsocks_proxy=") {
+                lines.push(format!("MICROSOCKS_PROXY=\"{}\"", proxy_url));
+                replaced_microsocks = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if content.contains("[Service]") {
+            if !replaced_all {
+                lines.push(format!("Environment=\"ALL_PROXY={}\"", proxy_url));
+            }
+            if !replaced_microsocks {
+                lines.push(format!("Environment=\"MICROSOCKS_PROXY={}\"", proxy_url));
+            }
+        } else {
+            if !replaced_all {
+                lines.push(format!("ALL_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_microsocks {
+                lines.push(format!("MICROSOCKS_PROXY=\"{}\"", proxy_url));
+            }
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let is_conf = content.contains(':') || content.contains('=');
+    if is_conf {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            let clean = lower.replace(' ', "");
+
+            if (clean.starts_with("proxy:") || clean.starts_with("proxy=")
+                || clean.starts_with("microsocks_proxy:") || clean.starts_with("microsocks_proxy=")
+                || clean.starts_with("socks_proxy:") || clean.starts_with("socks_proxy=")
+                || clean.starts_with("upstream_proxy:") || clean.starts_with("upstream_proxy=")
+                || clean.starts_with("parent_proxy:") || clean.starts_with("parent_proxy="))
+                && !clean.starts_with("proxy_url")
+            {
+                if !replaced {
+                    if line.contains('=') {
+                        lines.push(format!("proxy = \"{}\"", proxy_url));
+                    } else {
+                        lines.push(format!("proxy: {}", proxy_url));
+                    }
+                    replaced = true;
+                }
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            if content.contains('=') {
+                lines.push(format!("proxy = \"{}\"", proxy_url));
+            } else {
+                lines.push(format!("proxy: {}", proxy_url));
+            }
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    format!("proxy = \"{}\"\n", proxy_url)
+}
+
+pub fn remove_microsocks_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "upstream_proxy", "parent_proxy", "socks_proxy", "target_proxy", "microsocks_proxy", "http_proxy", "https_proxy", "all_proxy", "http-proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                let out = serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+                return (out, true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "all_proxy"
+                    || k_low == "socks_proxy"
+                    || k_low == "microsocks_proxy"
+                    || k_low == "microsocks_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("all_proxy=")
+            || clean.starts_with("socks_proxy=")
+            || clean.starts_with("microsocks_proxy=")
+            || clean.starts_with("microsocks_proxy:")
+            || clean.starts_with("parent_proxy=")
+            || clean.starts_with("parent_proxy:")
+            || clean.starts_with("upstream_proxy=")
+            || clean.starts_with("upstream_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("target_proxy=")
+            || clean.starts_with("target_proxy:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_microsocks_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_microsocks_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_microsocks_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_microsocks_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_microsocks_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_microsocks_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -27659,6 +28180,8 @@ pub async fn turn_on(
     dante: bool,
     threeproxy: bool,
     polipo: bool,
+    pproxy: bool,
+    microsocks: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -27818,6 +28341,8 @@ pub async fn turn_on(
     let set_dante = dante || all;
     let set_threeproxy = threeproxy || all;
     let set_polipo = polipo || all;
+    let set_pproxy = pproxy || all;
+    let set_microsocks = microsocks || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -30089,6 +30614,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_pproxy {
+        match set_pproxy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Pproxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Pproxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_microsocks {
+        match set_microsocks_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ MicroSOCKS daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update MicroSOCKS daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -30262,6 +30817,8 @@ pub fn turn_off(
     dante: bool,
     threeproxy: bool,
     polipo: bool,
+    pproxy: bool,
+    microsocks: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -30421,6 +30978,8 @@ pub fn turn_off(
     let unset_dante = dante || all;
     let unset_threeproxy = threeproxy || all;
     let unset_polipo = polipo || all;
+    let unset_pproxy = pproxy || all;
+    let unset_microsocks = microsocks || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -31754,6 +32313,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Polipo daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Polipo proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Polipo daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pproxy {
+        match unset_pproxy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Pproxy daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Pproxy proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Pproxy daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_microsocks {
+        match unset_microsocks_proxy() {
+            Ok(true) => eprintln!("{}", "✔ MicroSOCKS daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ MicroSOCKS proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset MicroSOCKS daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -35641,5 +36216,68 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("POLIPO_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pproxy_proxy() {
+        let pproxy_initial = r#"{
+  "port": 8080
+}"#;
+        let pproxy_updated = apply_pproxy_proxy(pproxy_initial, "http://10.0.0.123:8080");
+        assert!(pproxy_updated.contains("\"remote\": \"http://10.0.0.123:8080\""));
+        let (pproxy_cleaned, pproxy_removed) = remove_pproxy_proxy(&pproxy_updated);
+        assert!(pproxy_removed);
+        assert!(!pproxy_cleaned.contains("\"remote\""));
+
+        let conf_initial = "remote = \"http://127.0.0.1:7890\"\n";
+        let conf_updated = apply_pproxy_proxy(conf_initial, "socks5://10.0.0.123:1080");
+        assert!(conf_updated.contains("remote = \"socks5://10.0.0.123:1080\""));
+        let (conf_cleaned, conf_removed) = remove_pproxy_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("remote ="));
+
+        let arg_initial = "-r http://127.0.0.1:7890\n";
+        let arg_updated = apply_pproxy_proxy(arg_initial, "socks5://10.0.0.123:1080");
+        assert!(arg_updated.contains("-r socks5://10.0.0.123:1080"));
+        let (arg_cleaned, arg_removed) = remove_pproxy_proxy(&arg_updated);
+        assert!(arg_removed);
+        assert!(!arg_cleaned.contains("-r "));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_pproxy_proxy(dropin_initial, "http://10.0.0.123:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.123:8080\""));
+        assert!(dropin_updated.contains("Environment=\"PPROXY_PROXY=http://10.0.0.123:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_pproxy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("PPROXY_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_microsocks_proxy() {
+        let microsocks_initial = r#"{
+  "port": 1080
+}"#;
+        let microsocks_updated = apply_microsocks_proxy(microsocks_initial, "socks5://10.0.0.124:1080");
+        assert!(microsocks_updated.contains("\"proxy\": \"socks5://10.0.0.124:1080\""));
+        let (microsocks_cleaned, microsocks_removed) = remove_microsocks_proxy(&microsocks_updated);
+        assert!(microsocks_removed);
+        assert!(!microsocks_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "proxy = \"socks5://127.0.0.1:1080\"\n";
+        let conf_updated = apply_microsocks_proxy(conf_initial, "socks5://10.0.0.124:1080");
+        assert!(conf_updated.contains("proxy = \"socks5://10.0.0.124:1080\""));
+        let (conf_cleaned, conf_removed) = remove_microsocks_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("proxy ="));
+
+        let dropin_initial = "[Service]\nEnvironment=\"ALL_PROXY=socks5://127.0.0.1:1080\"\n";
+        let dropin_updated = apply_microsocks_proxy(dropin_initial, "socks5://10.0.0.124:1080");
+        assert!(dropin_updated.contains("Environment=\"ALL_PROXY=socks5://10.0.0.124:1080\""));
+        assert!(dropin_updated.contains("Environment=\"MICROSOCKS_PROXY=socks5://10.0.0.124:1080\""));
+        let (dropin_cleaned, dropin_removed) = remove_microsocks_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("ALL_PROXY="));
+        assert!(!dropin_cleaned.contains("MICROSOCKS_PROXY="));
     }
 }

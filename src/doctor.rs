@@ -27504,6 +27504,478 @@ pub fn get_polipo_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_pproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PPROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("pproxy").join("pproxy.conf"),
+            home.join(".config").join("pproxy").join("config"),
+            home.join(".pproxy.conf"),
+            home.join(".config").join("systemd").join("user").join("pproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/pproxy/pproxy.conf"),
+        PathBuf::from("/etc/pproxy.conf"),
+        PathBuf::from("/usr/local/etc/pproxy/pproxy.conf"),
+        PathBuf::from("/usr/local/etc/pproxy.conf"),
+        PathBuf::from("/etc/default/pproxy"),
+        PathBuf::from("/etc/sysconfig/pproxy"),
+        PathBuf::from("/etc/systemd/system/pproxy.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_pproxy_config_path() -> Option<PathBuf> {
+    let paths = get_pproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_pproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_pproxy_write_path() -> PathBuf {
+    if let Some(p) = get_pproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PPROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("pproxy");
+        if dir.is_dir() {
+            return dir.join("pproxy.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/pproxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("pproxy.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/pproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("pproxy").join("pproxy.conf");
+    }
+    PathBuf::from("/etc/pproxy.conf")
+}
+
+pub fn parse_pproxy_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "remote",
+                "upstream",
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "pproxy_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "pproxy_proxy"
+                        || k_low == "pproxy_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if trimmed.starts_with("-r ") || trimmed.starts_with("--remote ") {
+            let val = trimmed.split_whitespace().nth(1).unwrap_or("").trim();
+            if !val.is_empty() && (val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks")) {
+                return Some(val.to_string());
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "remote"
+                || k_low == "upstream"
+                || k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "pproxy_proxy"
+                || k_low == "up_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PPROXY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PPROXY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PPROXY_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_microsocks_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MICROSOCKS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("microsocks").join("microsocks.conf"),
+            home.join(".config").join("microsocks").join("config"),
+            home.join(".microsocks.conf"),
+            home.join(".config").join("systemd").join("user").join("microsocks.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/microsocks/microsocks.conf"),
+        PathBuf::from("/etc/microsocks.conf"),
+        PathBuf::from("/usr/local/etc/microsocks/microsocks.conf"),
+        PathBuf::from("/usr/local/etc/microsocks.conf"),
+        PathBuf::from("/etc/default/microsocks"),
+        PathBuf::from("/etc/sysconfig/microsocks"),
+        PathBuf::from("/etc/systemd/system/microsocks.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_microsocks_config_path() -> Option<PathBuf> {
+    let paths = get_microsocks_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_microsocks_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_microsocks_write_path() -> PathBuf {
+    if let Some(p) = get_microsocks_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MICROSOCKS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("microsocks");
+        if dir.is_dir() {
+            return dir.join("microsocks.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/microsocks");
+    if etc_dir.is_dir() {
+        return etc_dir.join("microsocks.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/microsocks.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("microsocks").join("microsocks.conf");
+    }
+    PathBuf::from("/etc/microsocks.conf")
+}
+
+pub fn parse_microsocks_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "parent_proxy",
+                "socks_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "microsocks_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("socks5://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "microsocks_proxy"
+                        || k_low == "microsocks_http_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "socks_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("socks5://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "parent_proxy"
+                || k_low == "socks_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "microsocks_proxy"
+                || k_low == "up_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("socks5://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_microsocks_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_microsocks_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_microsocks_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MICROSOCKS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("socks5://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MICROSOCKS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MICROSOCKS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("socks5://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MICROSOCKS_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -33525,6 +33997,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Polipo Daemon Proxy",
             "~/.config/polipo/config & /etc/polipo/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Pproxy Python Proxy Daemon (/etc/pproxy.conf / ~/.config/pproxy/pproxy.conf / /etc/systemd/system/pproxy.service.d/http-proxy.conf)
+    if let Some((pproxy_proxy, pproxy_path)) = get_pproxy_proxy() {
+        let ok = verify_proxy_url(&pproxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Pproxy Python proxy `{}` in {} is dead! (pproxy forwarding will fail)",
+                pproxy_proxy,
+                pproxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Pproxy Daemon Proxy",
+            format!("{}", pproxy_path.display()),
+            pproxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (pproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Pproxy Daemon Proxy",
+            "~/.config/pproxy/pproxy.conf & /etc/pproxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // MicroSOCKS SOCKS5 Proxy Daemon (/etc/microsocks.conf / ~/.config/microsocks/microsocks.conf / /etc/systemd/system/microsocks.service.d/http-proxy.conf)
+    if let Some((microsocks_proxy, microsocks_path)) = get_microsocks_proxy() {
+        let ok = verify_proxy_url(&microsocks_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "MicroSOCKS proxy `{}` in {} is dead! (microsocks forwarding will fail)",
+                microsocks_proxy,
+                microsocks_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "MicroSOCKS Daemon Proxy",
+            format!("{}", microsocks_path.display()),
+            microsocks_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (microsocks fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "MicroSOCKS Daemon Proxy",
+            "~/.config/microsocks/microsocks.conf & /etc/microsocks.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -40197,5 +40733,95 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# parentProxy = 127.0.0.1:7890\n; polipo_proxy = http://127.0.0.1:7890\n";
         assert_eq!(parse_polipo_proxy(input_comment), None);
         assert_eq!(parse_polipo_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pproxy_proxy() {
+        let pproxy_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_pproxy_proxy(pproxy_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let pproxy_cfg = r#"
+remote = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pproxy_proxy(pproxy_cfg),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let pproxy_arg = r#"
+-r socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_pproxy_proxy(pproxy_arg),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let pproxy_env = r#"
+# Pproxy environment config
+PPROXY_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pproxy_proxy(pproxy_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pproxy_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# remote = http://127.0.0.1:7890\n; pproxy_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_pproxy_proxy(input_comment), None);
+        assert_eq!(parse_pproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_microsocks_proxy() {
+        let microsocks_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_microsocks_proxy(microsocks_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let microsocks_cfg = r#"
+microsocks_proxy = "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_microsocks_proxy(microsocks_cfg),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let microsocks_env = r#"
+# MicroSOCKS environment config
+MICROSOCKS_PROXY="socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_microsocks_proxy(microsocks_env),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="ALL_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_microsocks_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# proxy = socks5://127.0.0.1:1080\n; microsocks_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_microsocks_proxy(input_comment), None);
+        assert_eq!(parse_microsocks_proxy(""), None);
     }
 }
