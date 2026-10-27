@@ -22802,6 +22802,404 @@ pub fn unset_hysteria_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_trojan_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("TROJAN_PROXY=")
+                || t.starts_with("TROJAN_GO_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_tj = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "trojan_proxy" || k_low == "trojan_go_proxy" || k_low == "trojan_http_proxy" {
+                        lines.push(format!("Environment=\"TROJAN_PROXY={}\"", proxy_url));
+                        replaced_tj = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("trojan_proxy=") || lower.starts_with("trojan_go_proxy=") {
+                lines.push(format!("TROJAN_PROXY=\"{}\"", proxy_url));
+                replaced_tj = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_tj {
+            lines.push(format!("Environment=\"TROJAN_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("target_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("target_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_trojan_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["target_proxy", "outbound_proxy", "proxy", "trojan_proxy", "trojan_go_proxy", "trojan_http_proxy", "http_proxy", "https_proxy", "all_proxy", "forward"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "trojan_proxy"
+                    || k_low == "trojan_go_proxy"
+                    || k_low == "trojan_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("trojan_proxy=")
+            || lower.starts_with("trojan_go_proxy=")
+            || lower.starts_with("target_proxy=")
+            || lower.starts_with("target_proxy:")
+            || lower.starts_with("outbound_proxy=")
+            || lower.starts_with("outbound_proxy:")
+            || lower.starts_with("trojan_http_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_trojan_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_trojan_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_trojan_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_trojan_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_trojan_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_trojan_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_naive_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("NAIVE_PROXY=")
+                || t.starts_with("NAIVEPROXY_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_nv = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "naive_proxy" || k_low == "naiveproxy_proxy" || k_low == "naive_http_proxy" {
+                        lines.push(format!("Environment=\"NAIVE_PROXY={}\"", proxy_url));
+                        replaced_nv = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("naive_proxy=") || lower.starts_with("naiveproxy_proxy=") {
+                lines.push(format!("NAIVE_PROXY=\"{}\"", proxy_url));
+                replaced_nv = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_nv {
+            lines.push(format!("Environment=\"NAIVE_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_naive_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "outbound_proxy", "upstream_proxy", "naive_proxy", "naiveproxy_proxy", "naive_http_proxy", "http_proxy", "https_proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "naive_proxy"
+                    || k_low == "naiveproxy_proxy"
+                    || k_low == "naive_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("naive_proxy=")
+            || lower.starts_with("naiveproxy_proxy=")
+            || lower.starts_with("outbound_proxy=")
+            || lower.starts_with("outbound_proxy:")
+            || lower.starts_with("proxy=")
+            || lower.starts_with("proxy:")
+            || lower.starts_with("upstream_proxy=")
+            || lower.starts_with("upstream_proxy:")
+            || lower.starts_with("naive_http_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_naive_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_naive_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_naive_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_naive_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_naive_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_naive_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -22942,6 +23340,8 @@ pub async fn turn_on(
     v2ray: bool,
     sing_box: bool,
     hysteria: bool,
+    trojan: bool,
+    naive: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -23081,6 +23481,8 @@ pub async fn turn_on(
     let set_v2ray = v2ray || all;
     let set_sing_box = sing_box || all;
     let set_hysteria = hysteria || all;
+    let set_trojan = trojan || all;
+    let set_naive = naive || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -25052,6 +25454,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_trojan {
+        match set_trojan_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Trojan daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Trojan daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_naive {
+        match set_naive_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ NaïveProxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update NaïveProxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -25205,6 +25637,8 @@ pub fn turn_off(
     v2ray: bool,
     sing_box: bool,
     hysteria: bool,
+    trojan: bool,
+    naive: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -25344,6 +25778,8 @@ pub fn turn_off(
     let unset_v2ray = v2ray || all;
     let unset_sing_box = sing_box || all;
     let unset_hysteria = hysteria || all;
+    let unset_trojan = trojan || all;
+    let unset_naive = naive || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -26517,6 +26953,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Hysteria daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Hysteria proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Hysteria daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_trojan {
+        match unset_trojan_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Trojan daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Trojan proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Trojan daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_naive {
+        match unset_naive_proxy() {
+            Ok(true) => eprintln!("{}", "✔ NaïveProxy daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ NaïveProxy proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset NaïveProxy daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -29871,5 +30323,48 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("HYSTERIA_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_trojan_proxy() {
+        let tj_initial = r#"{
+  "run_type": "client",
+  "local_port": 1080
+}"#;
+        let tj_updated = apply_trojan_proxy(tj_initial, "http://10.0.0.103:8080");
+        assert!(tj_updated.contains("\"target_proxy\": \"http://10.0.0.103:8080\""));
+        let (tj_cleaned, tj_removed) = remove_trojan_proxy(&tj_updated);
+        assert!(tj_removed);
+        assert!(!tj_cleaned.contains("target_proxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_trojan_proxy(dropin_initial, "http://10.0.0.103:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.103:8080\""));
+        assert!(dropin_updated.contains("Environment=\"TROJAN_PROXY=http://10.0.0.103:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_trojan_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TROJAN_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_naive_proxy() {
+        let nv_initial = r#"{
+  "listen": "socks://127.0.0.1:1080"
+}"#;
+        let nv_updated = apply_naive_proxy(nv_initial, "http://10.0.0.104:8080");
+        assert!(nv_updated.contains("\"proxy\": \"http://10.0.0.104:8080\""));
+        let (nv_cleaned, nv_removed) = remove_naive_proxy(&nv_updated);
+        assert!(nv_removed);
+        assert!(!nv_cleaned.contains("\"proxy\""));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_naive_proxy(dropin_initial, "http://10.0.0.104:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.104:8080\""));
+        assert!(dropin_updated.contains("Environment=\"NAIVE_PROXY=http://10.0.0.104:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_naive_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("NAIVE_PROXY="));
     }
 }

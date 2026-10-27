@@ -479,7 +479,13 @@ enum Commands {
         /// Also configure Hysteria & Hysteria 2 daemon proxy (/etc/hysteria/config.yaml / ~/.config/hysteria/config.yaml / /etc/systemd/system/hysteria.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "hysteria2", visible_alias = "hy2")]
         hysteria: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, and hysteria proxy
+        /// Also configure Trojan & Trojan-Go daemon proxy (/etc/trojan/config.json / ~/.config/trojan/config.json / /etc/systemd/system/trojan.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "trojan-go", visible_alias = "tg")]
+        trojan: bool,
+        /// Also configure NaïveProxy daemon proxy (/etc/naiveproxy/config.json / ~/.config/naiveproxy/config.json / /etc/systemd/system/naiveproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "naiveproxy", visible_alias = "naive-proxy")]
+        naive: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, and naive proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -902,7 +908,13 @@ enum Commands {
         /// Also unset Hysteria & Hysteria 2 daemon proxy (/etc/hysteria/config.yaml / ~/.config/hysteria/config.yaml / /etc/systemd/system/hysteria.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "hysteria2", visible_alias = "hy2")]
         hysteria: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, and hysteria proxy
+        /// Also unset Trojan & Trojan-Go daemon proxy (/etc/trojan/config.json / ~/.config/trojan/config.json / /etc/systemd/system/trojan.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "trojan-go", visible_alias = "tg")]
+        trojan: bool,
+        /// Also unset NaïveProxy daemon proxy (/etc/naiveproxy/config.json / ~/.config/naiveproxy/config.json / /etc/systemd/system/naiveproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "naiveproxy", visible_alias = "naive-proxy")]
+        naive: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, and naive proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1084,6 +1096,8 @@ async fn main() -> Result<()> {
             v2ray,
             sing_box,
             hysteria,
+            trojan,
+            naive,
             all,
             shell,
         }) => {
@@ -1227,6 +1241,8 @@ async fn main() -> Result<()> {
                 v2ray,
                 sing_box,
                 hysteria,
+                trojan,
+                naive,
                 all,
                 shell.as_deref(),
             )
@@ -1371,6 +1387,8 @@ async fn main() -> Result<()> {
             v2ray,
             sing_box,
             hysteria,
+            trojan,
+            naive,
             all,
             shell,
         }) => {
@@ -1513,6 +1531,8 @@ async fn main() -> Result<()> {
                 v2ray,
                 sing_box,
                 hysteria,
+                trojan,
+                naive,
                 all,
                 shell.as_deref(),
             )?;
@@ -5427,6 +5447,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { hysteria, .. }) => {
                 assert!(hysteria);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_trojan() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--trojan"]).unwrap();
+        match cli.command {
+            Some(Commands::On { trojan, .. }) => {
+                assert!(trojan);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--trojan-go"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { trojan, .. }) => {
+                assert!(trojan);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--tg"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { trojan, .. }) => {
+                assert!(trojan);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_trojan() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--trojan"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { trojan, .. }) => {
+                assert!(trojan);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_naive() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--naive"]).unwrap();
+        match cli.command {
+            Some(Commands::On { naive, .. }) => {
+                assert!(naive);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--naiveproxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { naive, .. }) => {
+                assert!(naive);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--naive-proxy"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { naive, .. }) => {
+                assert!(naive);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_naive() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--naive"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { naive, .. }) => {
+                assert!(naive);
             }
             _ => panic!("Expected Off command"),
         }

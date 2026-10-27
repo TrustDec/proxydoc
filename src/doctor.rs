@@ -22720,6 +22720,538 @@ pub fn get_hysteria_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_trojan_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TROJAN_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TROJAN_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TROJAN_GO_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("trojan").join("config.json"),
+            home.join(".config").join("trojan-go").join("config.json"),
+            home.join(".trojan").join("config.json"),
+            home.join(".trojan-go").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("trojan.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("trojan-go.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/trojan/config.json"),
+        PathBuf::from("/etc/trojan.json"),
+        PathBuf::from("/etc/trojan-go/config.json"),
+        PathBuf::from("/etc/trojan-go.json"),
+        PathBuf::from("/usr/local/etc/trojan/config.json"),
+        PathBuf::from("/usr/local/etc/trojan-go/config.json"),
+        PathBuf::from("/etc/default/trojan"),
+        PathBuf::from("/etc/default/trojan-go"),
+        PathBuf::from("/etc/sysconfig/trojan"),
+        PathBuf::from("/etc/systemd/system/trojan.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/trojan@.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/trojan-go.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_trojan_config_path() -> Option<PathBuf> {
+    let paths = get_trojan_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_trojan_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_trojan_write_path() -> PathBuf {
+    if let Some(p) = get_trojan_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TROJAN_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TROJAN_GO_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("trojan");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/trojan");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/trojan.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("trojan").join("config.json");
+    }
+    PathBuf::from("/etc/trojan/config.json")
+}
+
+pub fn parse_trojan_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "target_proxy",
+                "outbound_proxy",
+                "proxy",
+                "trojan_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+
+            if let Some(forward) = obj.get("forward") {
+                if let Some(s) = forward.as_str() {
+                    let trim = s.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                } else if let Some(f_obj) = forward.as_object() {
+                    for key in ["target", "proxy", "server"] {
+                        if let Some(s) = f_obj.get(key).and_then(|v| v.as_str()) {
+                            let trim = s.trim();
+                            if !trim.is_empty() {
+                                return Some(if trim.starts_with("http://")
+                                    || trim.starts_with("https://")
+                                    || trim.starts_with("socks")
+                                {
+                                    trim.to_string()
+                                } else {
+                                    format!("http://{}", trim)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "trojan_proxy"
+                        || k_low == "trojan_go_proxy"
+                        || k_low == "trojan_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "target_proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "trojan_proxy"
+                || k_low == "trojan_go_proxy"
+                || k_low == "trojan_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_trojan_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_trojan_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_trojan_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TROJAN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TROJAN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TROJAN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TROJAN_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_naive_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("NAIVEPROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NAIVE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NAIVEPROXY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("naiveproxy").join("config.json"),
+            home.join(".config").join("naive").join("config.json"),
+            home.join(".naiveproxy").join("config.json"),
+            home.join(".naive").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("naiveproxy.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("naive.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/naiveproxy/config.json"),
+        PathBuf::from("/etc/naiveproxy.json"),
+        PathBuf::from("/etc/naive/config.json"),
+        PathBuf::from("/etc/naive.json"),
+        PathBuf::from("/usr/local/etc/naiveproxy/config.json"),
+        PathBuf::from("/usr/local/etc/naive/config.json"),
+        PathBuf::from("/etc/default/naiveproxy"),
+        PathBuf::from("/etc/default/naive"),
+        PathBuf::from("/etc/sysconfig/naiveproxy"),
+        PathBuf::from("/etc/systemd/system/naiveproxy.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/naive.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_naive_config_path() -> Option<PathBuf> {
+    let paths = get_naive_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_naive_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_naive_write_path() -> PathBuf {
+    if let Some(p) = get_naive_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("NAIVEPROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("NAIVE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("naiveproxy");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/naiveproxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/naiveproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("naiveproxy").join("config.json");
+    }
+    PathBuf::from("/etc/naiveproxy/config.json")
+}
+
+pub fn parse_naive_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "outbound_proxy",
+                "proxy",
+                "upstream_proxy",
+                "naive_proxy",
+                "naiveproxy_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "naive_proxy"
+                        || k_low == "naiveproxy_proxy"
+                        || k_low == "naive_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "naive_proxy"
+                || k_low == "naiveproxy_proxy"
+                || k_low == "naive_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_naive_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_naive_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_naive_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NAIVEPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NAIVEPROXY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("NAIVE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NAIVE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -28101,6 +28633,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Hysteria Daemon Proxy",
             "~/.config/hysteria/config.yaml & /etc/hysteria/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Trojan Daemon Proxy (/etc/trojan/config.json / ~/.config/trojan/config.json / /etc/systemd/system/trojan.service.d/http-proxy.conf)
+    if let Some((tj_proxy, tj_path)) = get_trojan_proxy() {
+        let ok = verify_proxy_url(&tj_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Trojan daemon proxy `{}` in {} is dead! (trojan client upstream forwarding will fail)",
+                tj_proxy,
+                tj_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Trojan Daemon Proxy",
+            format!("{}", tj_path.display()),
+            tj_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (trojan fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Trojan Daemon Proxy",
+            "~/.config/trojan/config.json & /etc/trojan/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // NaïveProxy Daemon Proxy (/etc/naiveproxy/config.json / ~/.config/naiveproxy/config.json / /etc/systemd/system/naiveproxy.service.d/http-proxy.conf)
+    if let Some((nv_proxy, nv_path)) = get_naive_proxy() {
+        let ok = verify_proxy_url(&nv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "NaïveProxy daemon proxy `{}` in {} is dead! (naiveproxy upstream routing will fail)",
+                nv_proxy,
+                nv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "NaïveProxy Daemon Proxy",
+            format!("{}", nv_path.display()),
+            nv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (naive fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "NaïveProxy Daemon Proxy",
+            "~/.config/naiveproxy/config.json & /etc/naiveproxy/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -33884,5 +34480,93 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; hysteria_proxy=http://127.0.0.1:7890\n";
         assert_eq!(parse_hysteria_proxy(input_comment), None);
         assert_eq!(parse_hysteria_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_trojan_proxy() {
+        let tj_json = r#"{
+            "run_type": "client",
+            "local_addr": "127.0.0.1",
+            "local_port": 1080,
+            "target_proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_trojan_proxy(tj_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let tj_forward_json = r#"{
+            "run_type": "forward",
+            "forward": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_trojan_proxy(tj_forward_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let tj_env = r#"
+# Trojan environment config
+TROJAN_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_trojan_proxy(tj_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_trojan_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# target_proxy=http://127.0.0.1:7890\n; trojan_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_trojan_proxy(input_comment), None);
+        assert_eq!(parse_trojan_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_naive_proxy() {
+        let nv_json = r#"{
+            "listen": "socks://127.0.0.1:1080",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_naive_proxy(nv_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let nv_outbound_json = r#"{
+            "listen": "socks://127.0.0.1:1080",
+            "outbound_proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_naive_proxy(nv_outbound_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let nv_env = r#"
+# NaïveProxy environment config
+NAIVE_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_naive_proxy(nv_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_naive_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy=http://127.0.0.1:7890\n; naive_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_naive_proxy(input_comment), None);
+        assert_eq!(parse_naive_proxy(""), None);
     }
 }

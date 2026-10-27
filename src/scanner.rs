@@ -29,7 +29,7 @@ pub struct DetectedProxy {
 pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (7890, false, "Clash / Clash Verge / Mihomo (Mixed/HTTP)"),
     (7897, false, "Clash Verge Rev default (Mixed/HTTP)"),
-    (1080, true, "Shadowsocks / V2Ray / Sing-box (SOCKS5)"),
+    (1080, true, "Shadowsocks / V2Ray / Sing-box / Trojan (SOCKS5)"),
     (1082, true, "Shadowrocket Mac / Sing-box (SOCKS5)"),
     (10808, true, "V2RayN / Xray (SOCKS5)"),
     (10809, false, "V2RayN / Xray (HTTP)"),
@@ -61,6 +61,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (10085, false, "V2Ray / Xray gRPC API Daemon (gRPC)"),
     (6450, false, "Sing-box Universal Proxy Daemon (Control/Mixed)"),
     (5678, false, "Hysteria Proxy Client Daemon (HTTP/SOCKS5)"),
+    (10801, false, "Trojan-Go Local Forwarder (HTTP)"),
+    (8443, false, "NaïveProxy / Trojan HTTPS Ingress (HTTPS/Mixed)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

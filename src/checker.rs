@@ -1110,6 +1110,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Fish Audio CDN",
         "https://fish.audio",
     ),
+    (
+        "Trojan Proxy CDN",
+        "https://github.com/trojan-gfw/trojan/releases",
+    ),
+    (
+        "NaïveProxy CDN",
+        "https://github.com/klzgrad/naiveproxy/releases",
+    ),
+    (
+        "Kokoro AI CDN",
+        "https://github.com/hexgrad/kokoro",
+    ),
+    (
+        "OmniParser AI CDN",
+        "https://github.com/microsoft/OmniParser",
+    ),
+    (
+        "Bolt.new AI CDN",
+        "https://bolt.new",
+    ),
+    (
+        "Open-NotebookLM CDN",
+        "https://github.com/gabrielchua/open-notebooklm",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2252,6 +2276,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Fish Audio CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Trojan Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "NaïveProxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Kokoro AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OmniParser AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Bolt.new AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-NotebookLM CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
