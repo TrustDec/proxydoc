@@ -1062,6 +1062,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Pipecat AI CDN",
         "https://www.pipecat.ai",
     ),
+    (
+        "Shadowsocks Proxy CDN",
+        "https://github.com/shadowsocks/shadowsocks-rust/releases",
+    ),
+    (
+        "V2Ray Proxy CDN",
+        "https://github.com/v2fly/v2ray-core/releases",
+    ),
+    (
+        "FastRTC AI CDN",
+        "https://fastrtc.org",
+    ),
+    (
+        "Stagehand AI CDN",
+        "https://stagehand.dev",
+    ),
+    (
+        "SGLang AI CDN",
+        "https://sgl-project.ai",
+    ),
+    (
+        "LlamaParse AI CDN",
+        "https://llamaparse.ai",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2168,6 +2192,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Pipecat AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Shadowsocks Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "V2Ray Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FastRTC AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Stagehand AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SGLang AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LlamaParse AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

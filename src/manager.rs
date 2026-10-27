@@ -21991,6 +21991,394 @@ pub fn unset_npc_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_shadowsocks_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("SHADOWSOCKS_PROXY=")
+                || t.starts_with("SS_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_ss = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "shadowsocks_proxy" || k_low == "ss_proxy" || k_low == "shadowsocks_http_proxy" {
+                        lines.push(format!("Environment=\"SHADOWSOCKS_PROXY={}\"", proxy_url));
+                        replaced_ss = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("shadowsocks_proxy=") || lower.starts_with("ss_proxy=") {
+                lines.push(format!("SHADOWSOCKS_PROXY=\"{}\"", proxy_url));
+                replaced_ss = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_ss {
+            lines.push(format!("Environment=\"SHADOWSOCKS_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("outbound_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("outbound_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_shadowsocks_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["outbound_proxy", "proxy", "shadowsocks_proxy", "shadowsocks_http_proxy", "http_proxy", "https_proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "shadowsocks_proxy"
+                    || k_low == "ss_proxy"
+                    || k_low == "shadowsocks_http_proxy"
+                    || k_low == "outbound_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("shadowsocks_proxy=")
+            || lower.starts_with("ss_proxy=")
+            || lower.starts_with("outbound_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_shadowsocks_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_shadowsocks_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_shadowsocks_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_shadowsocks_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_shadowsocks_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_shadowsocks_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_v2ray_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("V2RAY_PROXY=")
+                || t.starts_with("XRAY_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_v2ray = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "v2ray_proxy" || k_low == "xray_proxy" || k_low == "v2ray_http_proxy" {
+                        lines.push(format!("Environment=\"V2RAY_PROXY={}\"", proxy_url));
+                        replaced_v2ray = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("v2ray_proxy=") || lower.starts_with("xray_proxy=") {
+                lines.push(format!("V2RAY_PROXY=\"{}\"", proxy_url));
+                replaced_v2ray = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_v2ray {
+            lines.push(format!("Environment=\"V2RAY_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_v2ray_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "v2ray_proxy", "xray_proxy", "v2ray_http_proxy", "http_proxy", "https_proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "v2ray_proxy"
+                    || k_low == "xray_proxy"
+                    || k_low == "v2ray_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("v2ray_proxy=")
+            || lower.starts_with("xray_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_v2ray_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_v2ray_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_v2ray_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_v2ray_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_v2ray_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_v2ray_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -22127,6 +22515,8 @@ pub async fn turn_on(
     bore: bool,
     brook: bool,
     npc: bool,
+    shadowsocks: bool,
+    v2ray: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -22262,6 +22652,8 @@ pub async fn turn_on(
     let set_bore = bore || all;
     let set_brook = brook || all;
     let set_npc = npc || all;
+    let set_shadowsocks = shadowsocks || all;
+    let set_v2ray = v2ray || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -24173,6 +24565,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_shadowsocks {
+        match set_shadowsocks_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Shadowsocks daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Shadowsocks daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_v2ray {
+        match set_v2ray_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ V2Ray daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update V2Ray daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -24322,6 +24744,8 @@ pub fn turn_off(
     bore: bool,
     brook: bool,
     npc: bool,
+    shadowsocks: bool,
+    v2ray: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -24457,6 +24881,8 @@ pub fn turn_off(
     let unset_bore = bore || all;
     let unset_brook = brook || all;
     let unset_npc = npc || all;
+    let unset_shadowsocks = shadowsocks || all;
+    let unset_v2ray = v2ray || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -25598,6 +26024,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ NPC daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ NPC proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset NPC daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_shadowsocks {
+        match unset_shadowsocks_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Shadowsocks daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Shadowsocks proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Shadowsocks daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_v2ray {
+        match unset_v2ray_proxy() {
+            Ok(true) => eprintln!("{}", "✔ V2Ray daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ V2Ray proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset V2Ray daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -28866,5 +29308,48 @@ server_addr = 1.2.3.4:8024
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("NPC_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_shadowsocks_proxy() {
+        let ss_initial = r#"{
+  "server": "1.2.3.4",
+  "server_port": 8388
+}"#;
+        let ss_updated = apply_shadowsocks_proxy(ss_initial, "http://10.0.0.98:8080");
+        assert!(ss_updated.contains("\"outbound_proxy\": \"http://10.0.0.98:8080\""));
+        let (ss_cleaned, ss_removed) = remove_shadowsocks_proxy(&ss_updated);
+        assert!(ss_removed);
+        assert!(!ss_cleaned.contains("outbound_proxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_shadowsocks_proxy(dropin_initial, "http://10.0.0.98:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.98:8080\""));
+        assert!(dropin_updated.contains("Environment=\"SHADOWSOCKS_PROXY=http://10.0.0.98:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_shadowsocks_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("SHADOWSOCKS_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_v2ray_proxy() {
+        let v2ray_initial = r#"{
+  "log": { "loglevel": "warning" }
+}"#;
+        let v2ray_updated = apply_v2ray_proxy(v2ray_initial, "http://10.0.0.99:8080");
+        assert!(v2ray_updated.contains("\"proxy\": \"http://10.0.0.99:8080\""));
+        let (v2ray_cleaned, v2ray_removed) = remove_v2ray_proxy(&v2ray_updated);
+        assert!(v2ray_removed);
+        assert!(!v2ray_cleaned.contains("\"proxy\""));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_v2ray_proxy(dropin_initial, "http://10.0.0.99:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.99:8080\""));
+        assert!(dropin_updated.contains("Environment=\"V2RAY_PROXY=http://10.0.0.99:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_v2ray_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("V2RAY_PROXY="));
     }
 }

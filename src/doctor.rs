@@ -21688,6 +21688,533 @@ pub fn get_npc_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_shadowsocks_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SHADOWSOCKS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SHADOWSOCKS_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("shadowsocks-rust").join("config.json"),
+            home.join(".config").join("shadowsocks").join("config.json"),
+            home.join(".shadowsocks").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("shadowsocks-rust.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("shadowsocks.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/shadowsocks-rust/config.json"),
+        PathBuf::from("/etc/shadowsocks/config.json"),
+        PathBuf::from("/etc/shadowsocks-libev/config.json"),
+        PathBuf::from("/usr/local/etc/shadowsocks-rust/config.json"),
+        PathBuf::from("/usr/local/etc/shadowsocks/config.json"),
+        PathBuf::from("/etc/default/shadowsocks-rust"),
+        PathBuf::from("/etc/default/shadowsocks-libev"),
+        PathBuf::from("/etc/sysconfig/shadowsocks-rust"),
+        PathBuf::from("/etc/systemd/system/shadowsocks-rust.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/shadowsocks.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_shadowsocks_config_path() -> Option<PathBuf> {
+    let paths = get_shadowsocks_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_shadowsocks_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_shadowsocks_write_path() -> PathBuf {
+    if let Some(p) = get_shadowsocks_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SHADOWSOCKS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("SS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let rust_dir = home.join(".config").join("shadowsocks-rust");
+        if rust_dir.is_dir() {
+            return rust_dir.join("config.json");
+        }
+        let ss_dir = home.join(".config").join("shadowsocks");
+        if ss_dir.is_dir() {
+            return ss_dir.join("config.json");
+        }
+    }
+    let etc_rust = PathBuf::from("/etc/shadowsocks-rust");
+    if etc_rust.is_dir() {
+        return etc_rust.join("config.json");
+    }
+    let etc_ss = PathBuf::from("/etc/shadowsocks");
+    if etc_ss.is_dir() {
+        return etc_ss.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/shadowsocks-rust.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("shadowsocks-rust").join("config.json");
+    }
+    PathBuf::from("/etc/shadowsocks-rust/config.json")
+}
+
+pub fn parse_shadowsocks_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "outbound_proxy",
+                "proxy",
+                "shadowsocks_proxy",
+                "shadowsocks_http_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "shadowsocks_proxy"
+                        || k_low == "ss_proxy"
+                        || k_low == "shadowsocks_http_proxy"
+                        || k_low == "outbound_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "outbound_proxy"
+                || k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "shadowsocks_proxy"
+                || k_low == "ss_proxy"
+                || k_low == "shadowsocks_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_shadowsocks_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_shadowsocks_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_shadowsocks_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SHADOWSOCKS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SHADOWSOCKS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SS_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_v2ray_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("V2RAY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("XRAY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("V2RAY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("v2ray").join("config.json"),
+            home.join(".config").join("xray").join("config.json"),
+            home.join(".v2ray").join("config.json"),
+            home.join(".xray").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("v2ray.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("xray.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/v2ray/config.json"),
+        PathBuf::from("/etc/xray/config.json"),
+        PathBuf::from("/usr/local/etc/v2ray/config.json"),
+        PathBuf::from("/usr/local/etc/xray/config.json"),
+        PathBuf::from("/etc/default/v2ray"),
+        PathBuf::from("/etc/default/xray"),
+        PathBuf::from("/etc/sysconfig/v2ray"),
+        PathBuf::from("/etc/systemd/system/v2ray.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/xray.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_v2ray_config_path() -> Option<PathBuf> {
+    let paths = get_v2ray_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_v2ray_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_v2ray_write_path() -> PathBuf {
+    if let Some(p) = get_v2ray_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("V2RAY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("XRAY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let v2ray_dir = home.join(".config").join("v2ray");
+        if v2ray_dir.is_dir() {
+            return v2ray_dir.join("config.json");
+        }
+        let xray_dir = home.join(".config").join("xray");
+        if xray_dir.is_dir() {
+            return xray_dir.join("config.json");
+        }
+    }
+    let etc_v2ray = PathBuf::from("/etc/v2ray");
+    if etc_v2ray.is_dir() {
+        return etc_v2ray.join("config.json");
+    }
+    let etc_xray = PathBuf::from("/etc/xray");
+    if etc_xray.is_dir() {
+        return etc_xray.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/v2ray.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("v2ray").join("config.json");
+    }
+    PathBuf::from("/etc/v2ray/config.json")
+}
+
+pub fn parse_v2ray_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "v2ray_proxy",
+                "xray_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+            if let Some(outbounds) = obj.get("outbounds").and_then(|v| v.as_array()) {
+                for outbound in outbounds {
+                    let tag = outbound.get("tag").and_then(|t| t.as_str()).unwrap_or("");
+                    let protocol = outbound.get("protocol").and_then(|p| p.as_str()).unwrap_or("");
+                    if tag == "proxy" || protocol == "http" || protocol == "socks" {
+                        if let Some(settings) = outbound.get("settings").and_then(|s| s.as_object()) {
+                            if let Some(servers) = settings.get("servers").and_then(|s| s.as_array()) {
+                                if let Some(server) = servers.first() {
+                                    let addr = server.get("address").and_then(|a| a.as_str()).unwrap_or("");
+                                    let port = server.get("port").and_then(|p| p.as_u64()).unwrap_or(0);
+                                    if !addr.is_empty() && port > 0 {
+                                        let scheme = if protocol == "socks" { "socks5" } else { "http" };
+                                        return Some(format!("{}://{}:{}", scheme, addr, port));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "v2ray_proxy"
+                        || k_low == "xray_proxy"
+                        || k_low == "v2ray_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "v2ray_proxy"
+                || k_low == "xray_proxy"
+                || k_low == "v2ray_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_v2ray_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_v2ray_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_v2ray_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("V2RAY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:V2RAY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("XRAY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:XRAY_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -26941,6 +27468,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "NPC Daemon Proxy",
             "~/.npc/npc.conf & /etc/npc/conf/npc.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Shadowsocks Daemon Proxy (/etc/shadowsocks-rust/config.json / ~/.config/shadowsocks-rust/config.json / /etc/systemd/system/shadowsocks-rust.service.d/http-proxy.conf)
+    if let Some((ss_proxy, ss_path)) = get_shadowsocks_proxy() {
+        let ok = verify_proxy_url(&ss_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Shadowsocks daemon proxy `{}` in {} is dead! (shadowsocks client upstream forwarding will fail)",
+                ss_proxy,
+                ss_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Shadowsocks Daemon Proxy",
+            format!("{}", ss_path.display()),
+            ss_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (shadowsocks fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Shadowsocks Daemon Proxy",
+            "~/.config/shadowsocks-rust/config.json & /etc/shadowsocks-rust/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // V2Ray / Xray Daemon Proxy (/etc/v2ray/config.json / ~/.config/v2ray/config.json / /etc/systemd/system/v2ray.service.d/http-proxy.conf)
+    if let Some((v2ray_proxy, v2ray_path)) = get_v2ray_proxy() {
+        let ok = verify_proxy_url(&v2ray_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "V2Ray daemon proxy `{}` in {} is dead! (v2ray client bridge/upstream routing will fail)",
+                v2ray_proxy,
+                v2ray_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "V2Ray Daemon Proxy",
+            format!("{}", v2ray_path.display()),
+            v2ray_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (v2ray fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "V2Ray Daemon Proxy",
+            "~/.config/v2ray/config.json & /etc/v2ray/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -32543,5 +33134,94 @@ Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
         let input_comment = "# proxy_url=http://127.0.0.1:7890\n; proxy=http://127.0.0.1:7890\n";
         assert_eq!(parse_npc_proxy(input_comment), None);
         assert_eq!(parse_npc_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_shadowsocks_proxy() {
+        let ss_json = r#"{
+            "server": "1.2.3.4",
+            "server_port": 8388,
+            "outbound_proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_shadowsocks_proxy(ss_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ss_env = r#"
+# Shadowsocks dropin
+SHADOWSOCKS_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_shadowsocks_proxy(ss_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_shadowsocks_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# outbound_proxy=http://127.0.0.1:7890\n; proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_shadowsocks_proxy(input_comment), None);
+        assert_eq!(parse_shadowsocks_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_v2ray_proxy() {
+        let v2ray_json = r#"{
+            "outbounds": [
+                {
+                    "tag": "proxy",
+                    "protocol": "http",
+                    "settings": {
+                        "servers": [
+                            {
+                                "address": "127.0.0.1",
+                                "port": 7890
+                            }
+                        ]
+                    }
+                }
+            ]
+        }"#;
+        assert_eq!(
+            parse_v2ray_proxy(v2ray_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let v2ray_top_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_v2ray_proxy(v2ray_top_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let v2ray_env = r#"
+# V2Ray environment config
+V2RAY_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_v2ray_proxy(v2ray_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_v2ray_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy=http://127.0.0.1:7890\n; v2ray_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_v2ray_proxy(input_comment), None);
+        assert_eq!(parse_v2ray_proxy(""), None);
     }
 }

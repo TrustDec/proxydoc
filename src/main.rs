@@ -467,7 +467,13 @@ enum Commands {
         /// Also configure NPC (NPS Client) daemon proxy (/etc/npc/conf/npc.conf / ~/.npc/npc.conf / /etc/systemd/system/npc.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "nps-npc", visible_alias = "nps")]
         npc: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, and npc proxy
+        /// Also configure Shadowsocks daemon proxy (/etc/shadowsocks-rust/config.json / ~/.config/shadowsocks-rust/config.json / /etc/systemd/system/shadowsocks-rust.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "shadowsocks-proxy", visible_alias = "ss")]
+        shadowsocks: bool,
+        /// Also configure V2Ray & Xray daemon proxy (/etc/v2ray/config.json / ~/.config/v2ray/config.json / /etc/systemd/system/v2ray.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "v2ray-proxy", visible_alias = "xray")]
+        v2ray: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, and v2ray proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -878,7 +884,13 @@ enum Commands {
         /// Also unset NPC (NPS Client) daemon proxy (/etc/npc/conf/npc.conf / ~/.npc/npc.conf / /etc/systemd/system/npc.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "nps-npc", visible_alias = "nps")]
         npc: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, and bore proxy
+        /// Also unset Shadowsocks daemon proxy (/etc/shadowsocks-rust/config.json / ~/.config/shadowsocks-rust/config.json / /etc/systemd/system/shadowsocks-rust.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "shadowsocks-proxy", visible_alias = "ss")]
+        shadowsocks: bool,
+        /// Also unset V2Ray & Xray daemon proxy (/etc/v2ray/config.json / ~/.config/v2ray/config.json / /etc/systemd/system/v2ray.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "v2ray-proxy", visible_alias = "xray")]
+        v2ray: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, and v2ray proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1056,6 +1068,8 @@ async fn main() -> Result<()> {
             bore,
             brook,
             npc,
+            shadowsocks,
+            v2ray,
             all,
             shell,
         }) => {
@@ -1195,6 +1209,8 @@ async fn main() -> Result<()> {
                 bore,
                 brook,
                 npc,
+                shadowsocks,
+                v2ray,
                 all,
                 shell.as_deref(),
             )
@@ -1335,6 +1351,8 @@ async fn main() -> Result<()> {
             bore,
             brook,
             npc,
+            shadowsocks,
+            v2ray,
             all,
             shell,
         }) => {
@@ -1473,6 +1491,8 @@ async fn main() -> Result<()> {
                 bore,
                 brook,
                 npc,
+                shadowsocks,
+                v2ray,
                 all,
                 shell.as_deref(),
             )?;
@@ -5235,6 +5255,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { npc, .. }) => {
                 assert!(npc);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_shadowsocks() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--shadowsocks"]).unwrap();
+        match cli.command {
+            Some(Commands::On { shadowsocks, .. }) => {
+                assert!(shadowsocks);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--shadowsocks-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { shadowsocks, .. }) => {
+                assert!(shadowsocks);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--ss"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { shadowsocks, .. }) => {
+                assert!(shadowsocks);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_shadowsocks() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--shadowsocks"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { shadowsocks, .. }) => {
+                assert!(shadowsocks);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_v2ray() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--v2ray"]).unwrap();
+        match cli.command {
+            Some(Commands::On { v2ray, .. }) => {
+                assert!(v2ray);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--v2ray-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { v2ray, .. }) => {
+                assert!(v2ray);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--xray"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { v2ray, .. }) => {
+                assert!(v2ray);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_v2ray() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--v2ray"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { v2ray, .. }) => {
+                assert!(v2ray);
             }
             _ => panic!("Expected Off command"),
         }
