@@ -29391,6 +29391,507 @@ pub fn get_smartdns_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_coredns_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("COREDNS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("COREDNS_COREFILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("coredns").join("Corefile"),
+            home.join(".coredns").join("Corefile"),
+            home.join(".config").join("coredns").join("config"),
+            home.join(".Corefile"),
+            home.join(".config").join("systemd").join("user").join("coredns.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/coredns/Corefile"),
+        PathBuf::from("/etc/Corefile"),
+        PathBuf::from("/usr/local/etc/coredns/Corefile"),
+        PathBuf::from("/etc/default/coredns"),
+        PathBuf::from("/etc/sysconfig/coredns"),
+        PathBuf::from("/etc/systemd/system/coredns.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_coredns_config_path() -> Option<PathBuf> {
+    let paths = get_coredns_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_coredns_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_coredns_write_path() -> PathBuf {
+    if let Some(p) = get_coredns_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("COREDNS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("COREDNS_COREFILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("coredns");
+        if dir.is_dir() {
+            return dir.join("Corefile");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/coredns");
+    if etc_dir.is_dir() {
+        return etc_dir.join("Corefile");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/coredns.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("coredns").join("Corefile");
+    }
+    PathBuf::from("/etc/coredns/Corefile")
+}
+
+pub fn parse_coredns_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "forward",
+                "proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "coredns_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "coredns_proxy"
+                        || k_low == "coredns_http_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("forward .") || lower.starts_with("proxy .") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let target = parts[2].trim().trim_matches('"').trim_matches('\'');
+                if !target.is_empty()
+                    && (target.starts_with("http://")
+                        || target.starts_with("https://")
+                        || target.starts_with("socks")
+                        || target.contains(':'))
+                {
+                    return Some(if target.starts_with("http://")
+                        || target.starts_with("https://")
+                        || target.starts_with("socks")
+                    {
+                        target.to_string()
+                    } else {
+                        format!("http://{}", target)
+                    });
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "http-proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "proxy"
+                || k_low == "forward"
+                || k_low == "all_proxy"
+                || k_low == "coredns_proxy"
+                || k_low == "socks5"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_coredns_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_coredns_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_coredns_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("COREDNS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:COREDNS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("COREDNS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:COREDNS_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_adguardhome_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ADGUARDHOME_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("ADGUARD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("AdGuardHome").join("AdGuardHome.yaml"),
+            home.join(".config").join("adguardhome").join("adguardhome.yaml"),
+            home.join(".AdGuardHome").join("AdGuardHome.yaml"),
+            home.join(".adguardhome.yaml"),
+            home.join(".config").join("systemd").join("user").join("AdGuardHome.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/AdGuardHome/AdGuardHome.yaml"),
+        PathBuf::from("/opt/AdGuardHome/AdGuardHome.yaml"),
+        PathBuf::from("/etc/adguardhome/adguardhome.yaml"),
+        PathBuf::from("/usr/local/etc/AdGuardHome/AdGuardHome.yaml"),
+        PathBuf::from("/etc/default/adguardhome"),
+        PathBuf::from("/etc/sysconfig/adguardhome"),
+        PathBuf::from("/etc/systemd/system/AdGuardHome.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/adguardhome.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_adguardhome_config_path() -> Option<PathBuf> {
+    let paths = get_adguardhome_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_adguardhome_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_adguardhome_write_path() -> PathBuf {
+    if let Some(p) = get_adguardhome_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ADGUARDHOME_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("ADGUARD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("AdGuardHome");
+        if dir.is_dir() {
+            return dir.join("AdGuardHome.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/AdGuardHome");
+    if etc_dir.is_dir() {
+        return etc_dir.join("AdGuardHome.yaml");
+    }
+    let opt_dir = PathBuf::from("/opt/AdGuardHome");
+    if opt_dir.is_dir() {
+        return opt_dir.join("AdGuardHome.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/AdGuardHome.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("AdGuardHome").join("AdGuardHome.yaml");
+    }
+    PathBuf::from("/etc/AdGuardHome/AdGuardHome.yaml")
+}
+
+pub fn parse_adguardhome_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "http_proxy",
+                "http-proxy",
+                "proxy",
+                "upstream_proxy",
+                "all_proxy",
+                "adguard_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "adguard_proxy"
+                        || k_low == "adguardhome_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+                || k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "upstream-proxy"
+                || k_low == "all_proxy"
+                || k_low == "adguard_proxy"
+                || k_low == "adguardhome_proxy"
+                || k_low == "socks5"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_adguardhome_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_adguardhome_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_adguardhome_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ADGUARDHOME_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ADGUARDHOME_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ADGUARD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ADGUARD_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -35668,6 +36169,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "SmartDNS Daemon Proxy",
             "~/.config/smartdns/smartdns.conf & /etc/smartdns/smartdns.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // CoreDNS DNS Server & Forwarder Daemon (~/.config/coredns/Corefile / /etc/coredns/Corefile / /etc/systemd/system/coredns.service.d/http-proxy.conf)
+    if let Some((coredns_proxy, coredns_path)) = get_coredns_proxy() {
+        let ok = verify_proxy_url(&coredns_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "CoreDNS proxy `{}` in {} is dead! (coredns forwarding will fail)",
+                coredns_proxy,
+                coredns_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "CoreDNS Daemon Proxy",
+            format!("{}", coredns_path.display()),
+            coredns_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (coredns fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "CoreDNS Daemon Proxy",
+            "~/.config/coredns/Corefile & /etc/coredns/Corefile",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // AdGuard Home DNS & Web Proxy Daemon (~/.config/AdGuardHome/AdGuardHome.yaml / /etc/AdGuardHome/AdGuardHome.yaml / /etc/systemd/system/AdGuardHome.service.d/http-proxy.conf)
+    if let Some((adguard_proxy, adguard_path)) = get_adguardhome_proxy() {
+        let ok = verify_proxy_url(&adguard_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "AdGuard Home proxy `{}` in {} is dead! (adguard resolution will fail)",
+                adguard_proxy,
+                adguard_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "AdGuard Home Daemon Proxy",
+            format!("{}", adguard_path.display()),
+            adguard_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (adguard fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "AdGuard Home Daemon Proxy",
+            "~/.config/AdGuardHome/AdGuardHome.yaml & /etc/AdGuardHome/AdGuardHome.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -42710,5 +43275,101 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy-server socks5://127.0.0.1:1080\n; proxy = http://127.0.0.1:7890\n";
         assert_eq!(parse_smartdns_proxy(input_comment), None);
         assert_eq!(parse_smartdns_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_coredns_proxy() {
+        let corefile_forward = r#"
+.:53 {
+    forward . 127.0.0.1:7890
+    log
+    errors
+}
+"#;
+        assert_eq!(
+            parse_coredns_proxy(corefile_forward),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let corefile_proxy = r#"
+.:53 {
+    proxy . socks5://127.0.0.1:1080
+}
+"#;
+        assert_eq!(
+            parse_coredns_proxy(corefile_proxy),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let coredns_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_coredns_proxy(coredns_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let coredns_env = r#"
+COREDNS_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_coredns_proxy(coredns_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_coredns_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# forward . 127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_coredns_proxy(input_comment), None);
+        assert_eq!(parse_coredns_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_adguardhome_proxy() {
+        let adguard_yaml = r#"
+bind_host: 0.0.0.0
+bind_port: 3000
+http_proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_adguardhome_proxy(adguard_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let adguard_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_adguardhome_proxy(adguard_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let adguard_env = r#"
+ADGUARD_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_adguardhome_proxy(adguard_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_adguardhome_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy: http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_adguardhome_proxy(input_comment), None);
+        assert_eq!(parse_adguardhome_proxy(""), None);
     }
 }
