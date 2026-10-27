@@ -20297,6 +20297,457 @@ pub fn unset_tailscale_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_zerotier_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("ZEROTIER_HTTP_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_zt = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "zerotier_http_proxy" {
+                        lines.push(format!("Environment=\"ZEROTIER_HTTP_PROXY={}\"", proxy_url));
+                        replaced_zt = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("zerotier_http_proxy=") {
+                lines.push(format!("ZEROTIER_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_zt = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_zt {
+            lines.push(format!("Environment=\"ZEROTIER_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let settings = obj
+                .entry("settings")
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let Some(s_obj) = settings.as_object_mut() {
+                s_obj.insert(
+                    "httpProxy".to_string(),
+                    serde_json::Value::String(proxy_url.to_string()),
+                );
+                return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+            }
+        }
+    }
+
+    let mut root = serde_json::Map::new();
+    let mut settings = serde_json::Map::new();
+    settings.insert(
+        "httpProxy".to_string(),
+        serde_json::Value::String(proxy_url.to_string()),
+    );
+    root.insert("settings".to_string(), serde_json::Value::Object(settings));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_zerotier_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            if let Some(settings) = obj.get_mut("settings").and_then(|s| s.as_object_mut()) {
+                for key in ["httpProxy", "http_proxy", "proxy", "httpsProxy"] {
+                    if settings.remove(key).is_some() {
+                        removed = true;
+                    }
+                }
+            }
+            for key in ["httpProxy", "http_proxy", "proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "zerotier_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("zerotier_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_zerotier_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_zerotier_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_zerotier_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_zerotier_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_zerotier_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_zerotier_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_gost_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("GOST_HTTP_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_gost = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "gost_http_proxy" {
+                        lines.push(format!("Environment=\"GOST_HTTP_PROXY={}\"", proxy_url));
+                        replaced_gost = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("gost_http_proxy=") {
+                lines.push(format!("GOST_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_gost = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_gost {
+            lines.push(format!("Environment=\"GOST_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            if let Some(chains) = obj.get_mut("chains").and_then(|c| c.as_array_mut()) {
+                if !chains.is_empty() {
+                    if let Some(first_chain) = chains[0].as_object_mut() {
+                        let mut node = serde_json::Map::new();
+                        node.insert("name".to_string(), serde_json::Value::String("node-0".to_string()));
+                        node.insert("addr".to_string(), serde_json::Value::String(proxy_url.to_string()));
+                        let mut conn = serde_json::Map::new();
+                        conn.insert("type".to_string(), serde_json::Value::String("http".to_string()));
+                        node.insert("connector".to_string(), serde_json::Value::Object(conn));
+                        first_chain.insert("nodes".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(node)]));
+                        return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+                    }
+                }
+            }
+            if let Some(routes) = obj.get_mut("routes").and_then(|r| r.as_array_mut()) {
+                if !routes.is_empty() {
+                    if let Some(first_route) = routes[0].as_object_mut() {
+                        first_route.insert("nodes".to_string(), serde_json::Value::Array(vec![serde_json::Value::String(proxy_url.to_string())]));
+                        return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+                    }
+                }
+            }
+            obj.insert("http_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let is_yaml = content.contains("routes:") || content.contains("chains:") || content.contains("services:");
+    if is_yaml {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("http_proxy:") || trimmed.starts_with("proxy:") {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}http_proxy: \"{}\"", "", proxy_url, indent = indent));
+                replaced = true;
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+        if !replaced {
+            lines.push(format!("http_proxy: \"{}\"", proxy_url));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    let mut root = serde_json::Map::new();
+    let mut chain = serde_json::Map::new();
+    chain.insert("name".to_string(), serde_json::Value::String("chain-0".to_string()));
+    let mut node = serde_json::Map::new();
+    node.insert("name".to_string(), serde_json::Value::String("node-0".to_string()));
+    node.insert("addr".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    let mut conn = serde_json::Map::new();
+    conn.insert("type".to_string(), serde_json::Value::String("http".to_string()));
+    node.insert("connector".to_string(), serde_json::Value::Object(conn));
+    chain.insert("nodes".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(node)]));
+    root.insert("chains".to_string(), serde_json::Value::Array(vec![serde_json::Value::Object(chain)]));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_gost_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            if obj.remove("chains").is_some() {
+                removed = true;
+            }
+            if obj.remove("routes").is_some() {
+                removed = true;
+            }
+            if obj.remove("http_proxy").is_some() {
+                removed = true;
+            }
+            if obj.remove("https_proxy").is_some() {
+                removed = true;
+            }
+            if obj.remove("proxy").is_some() {
+                removed = true;
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "gost_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("gost_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("http_proxy:")
+            || lower.starts_with("proxy:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_gost_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_gost_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_gost_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_gost_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_gost_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_gost_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -20425,6 +20876,8 @@ pub async fn turn_on(
     ngrok: bool,
     frpc: bool,
     tailscale: bool,
+    zerotier: bool,
+    gost: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -20552,6 +21005,8 @@ pub async fn turn_on(
     let set_ngrok = ngrok || all;
     let set_frpc = frpc || all;
     let set_tailscale = tailscale || all;
+    let set_zerotier = zerotier || all;
+    let set_gost = gost || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -22343,6 +22798,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_zerotier {
+        match set_zerotier_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ ZeroTier daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update ZeroTier daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_gost {
+        match set_gost_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Gost daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Gost daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -22484,6 +22969,8 @@ pub fn turn_off(
     ngrok: bool,
     frpc: bool,
     tailscale: bool,
+    zerotier: bool,
+    gost: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -22611,6 +23098,8 @@ pub fn turn_off(
     let unset_ngrok = ngrok || all;
     let unset_frpc = frpc || all;
     let unset_tailscale = tailscale || all;
+    let unset_zerotier = zerotier || all;
+    let unset_gost = gost || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -23688,6 +24177,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Tailscale daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Tailscale proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Tailscale daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_zerotier {
+        match unset_zerotier_proxy() {
+            Ok(true) => eprintln!("{}", "✔ ZeroTier daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ ZeroTier proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset ZeroTier daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_gost {
+        match unset_gost_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Gost daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Gost proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Gost daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -26749,5 +27254,74 @@ HTTPS_PROXY="http://127.0.0.1:7890"
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("TAILSCALE_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_zerotier_proxy() {
+        let zt_initial = r#"{
+  "settings": {
+    "httpProxy": "http://127.0.0.1:7890"
+  }
+}"#;
+        let zt_updated = apply_zerotier_proxy(zt_initial, "http://10.0.0.60:8080");
+        assert!(zt_updated.contains("\"httpProxy\": \"http://10.0.0.60:8080\""));
+        let (zt_cleaned, zt_removed) = remove_zerotier_proxy(&zt_updated);
+        assert!(zt_removed);
+        assert!(!zt_cleaned.contains("httpProxy"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_zerotier_proxy(dropin_initial, "http://10.0.0.60:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.60:8080\""));
+        assert!(dropin_updated.contains("Environment=\"ZEROTIER_HTTP_PROXY=http://10.0.0.60:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_zerotier_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("ZEROTIER_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_gost_proxy_json() {
+        let gost_initial = r#"{
+  "chains": [
+    {
+      "name": "chain-0",
+      "nodes": [
+        {
+          "name": "node-0",
+          "addr": "127.0.0.1:7890",
+          "connector": {
+            "type": "http"
+          }
+        }
+      ]
+    }
+  ]
+}"#;
+        let gost_updated = apply_gost_proxy(gost_initial, "http://10.0.0.62:8080");
+        assert!(gost_updated.contains("\"addr\": \"http://10.0.0.62:8080\""));
+        let (gost_cleaned, gost_removed) = remove_gost_proxy(&gost_updated);
+        assert!(gost_removed);
+        assert!(!gost_cleaned.contains("chains"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_gost_proxy(dropin_initial, "http://10.0.0.62:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.62:8080\""));
+        assert!(dropin_updated.contains("Environment=\"GOST_HTTP_PROXY=http://10.0.0.62:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_gost_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("GOST_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_gost_proxy_yaml() {
+        let gost_yaml = "routes:\n  - nodes:\n      - http://127.0.0.1:7890\n";
+        let gost_updated = apply_gost_proxy(gost_yaml, "http://10.0.0.62:8080");
+        assert!(gost_updated.contains("http_proxy: \"http://10.0.0.62:8080\""));
+        let (gost_cleaned, gost_removed) = remove_gost_proxy(&gost_updated);
+        assert!(gost_removed);
+        assert!(!gost_cleaned.contains("http_proxy:"));
     }
 }

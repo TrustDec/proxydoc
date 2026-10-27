@@ -20016,6 +20016,535 @@ pub fn get_tailscale_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_zerotier_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ZEROTIER_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("ZEROTIER_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".zerotier-one").join("local.conf"),
+            home.join(".zerotier").join("local.conf"),
+            home.join("Library").join("Application Support").join("ZeroTier").join("One").join("local.conf"),
+            home.join(".config").join("systemd").join("user").join("zerotier-one.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/var/lib/zerotier-one/local.conf"),
+        PathBuf::from("/Library/Application Support/ZeroTier/One/local.conf"),
+        PathBuf::from("/etc/zerotier/local.conf"),
+        PathBuf::from("/etc/default/zerotier-one"),
+        PathBuf::from("/etc/sysconfig/zerotier-one"),
+        PathBuf::from("/etc/systemd/system/zerotier-one.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(progdata) = std::env::var("ProgramData") {
+            let p = PathBuf::from(progdata).join("ZeroTier").join("One").join("local.conf");
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_zerotier_config_path() -> Option<PathBuf> {
+    let paths = get_zerotier_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_zerotier_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_zerotier_write_path() -> PathBuf {
+    if let Some(p) = get_zerotier_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ZEROTIER_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    let var_lib = PathBuf::from("/var/lib/zerotier-one");
+    if var_lib.is_dir() {
+        return var_lib.join("local.conf");
+    }
+    let mac_path = PathBuf::from("/Library/Application Support/ZeroTier/One");
+    if mac_path.is_dir() {
+        return mac_path.join("local.conf");
+    }
+    let default_etc = PathBuf::from("/etc/default/zerotier-one");
+    if PathBuf::from("/etc/default").is_dir() {
+        return default_etc;
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/zerotier-one.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        #[cfg(target_os = "macos")]
+        {
+            let mac_user = home.join("Library").join("Application Support").join("ZeroTier").join("One");
+            if mac_user.is_dir() {
+                return mac_user.join("local.conf");
+            }
+        }
+        return home.join(".zerotier-one").join("local.conf");
+    }
+    PathBuf::from("/var/lib/zerotier-one/local.conf")
+}
+
+pub fn parse_zerotier_proxy(content: &str) -> Option<String> {
+    // 1. JSON local.conf format: { "settings": { "httpProxy": "http://127.0.0.1:7890" } }
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(settings) = val.get("settings") {
+            for key in ["httpProxy", "http_proxy", "proxy", "httpsProxy"] {
+                if let Some(proxy_val) = settings.get(key).and_then(|p| p.as_str()) {
+                    let trim = proxy_val.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+        for key in ["httpProxy", "http_proxy", "proxy"] {
+            if let Some(proxy_val) = val.get(key).and_then(|p| p.as_str()) {
+                let trim = proxy_val.trim();
+                if !trim.is_empty() {
+                    return Some(if trim.starts_with("http://")
+                        || trim.starts_with("https://")
+                        || trim.starts_with("socks")
+                    {
+                        trim.to_string()
+                    } else {
+                        format!("http://{}", trim)
+                    });
+                }
+            }
+        }
+    }
+
+    // 2. systemd Environment or shell env format
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "zerotier_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "zerotier_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_zerotier_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_zerotier_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_zerotier_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ZEROTIER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ZEROTIER_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_gost_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("GOST_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("GOST_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("GOST_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("gost").join("config.json"),
+            home.join(".config").join("gost").join("gost.json"),
+            home.join(".config").join("gost").join("gost.yaml"),
+            home.join(".config").join("gost").join("gost.yml"),
+            home.join(".gost").join("config.json"),
+            home.join(".gost").join("gost.json"),
+            home.join(".gost").join("gost.yaml"),
+            home.join(".config").join("systemd").join("user").join("gost.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/gost/gost.json"),
+        PathBuf::from("/etc/gost/config.json"),
+        PathBuf::from("/etc/gost/gost.yaml"),
+        PathBuf::from("/etc/gost/gost.yml"),
+        PathBuf::from("/usr/local/etc/gost/config.json"),
+        PathBuf::from("/usr/local/etc/gost/gost.json"),
+        PathBuf::from("/opt/homebrew/etc/gost/config.json"),
+        PathBuf::from("/etc/default/gost"),
+        PathBuf::from("/etc/sysconfig/gost"),
+        PathBuf::from("/etc/systemd/system/gost.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_gost_config_path() -> Option<PathBuf> {
+    let paths = get_gost_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_gost_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_gost_write_path() -> PathBuf {
+    if let Some(p) = get_gost_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("GOST_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let config_dir = home.join(".config").join("gost");
+        if config_dir.is_dir() {
+            return config_dir.join("config.json");
+        }
+    }
+    let etc_gost = PathBuf::from("/etc/gost");
+    if etc_gost.is_dir() {
+        return etc_gost.join("gost.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/gost.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("gost").join("config.json");
+    }
+    PathBuf::from("/etc/gost/gost.json")
+}
+
+pub fn parse_gost_proxy(content: &str) -> Option<String> {
+    // 1. JSON gost.json / config.json
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        // v3 chains -> nodes -> addr
+        if let Some(chains) = val.get("chains").and_then(|c| c.as_array()) {
+            for chain in chains {
+                if let Some(nodes) = chain.get("nodes").and_then(|n| n.as_array()) {
+                    for node in nodes {
+                        if let Some(addr) = node.get("addr").and_then(|a| a.as_str()) {
+                            let trim = addr.trim();
+                            if !trim.is_empty() {
+                                return Some(if trim.starts_with("http://")
+                                    || trim.starts_with("https://")
+                                    || trim.starts_with("socks")
+                                {
+                                    trim.to_string()
+                                } else {
+                                    format!("http://{}", trim)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // v2 routes -> nodes
+        if let Some(routes) = val.get("routes").and_then(|r| r.as_array()) {
+            for route in routes {
+                if let Some(nodes) = route.get("nodes").and_then(|n| n.as_array()) {
+                    for node in nodes {
+                        if let Some(s) = node.as_str() {
+                            let trim = s.trim();
+                            if !trim.is_empty() {
+                                return Some(if trim.starts_with("http://")
+                                    || trim.starts_with("https://")
+                                    || trim.starts_with("socks")
+                                {
+                                    trim.to_string()
+                                } else {
+                                    format!("http://{}", trim)
+                                });
+                            }
+                        } else if let Some(addr) = node.get("addr").and_then(|a| a.as_str()) {
+                            let trim = addr.trim();
+                            if !trim.is_empty() {
+                                return Some(if trim.starts_with("http://")
+                                    || trim.starts_with("https://")
+                                    || trim.starts_with("socks")
+                                {
+                                    trim.to_string()
+                                } else {
+                                    format!("http://{}", trim)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Direct top-level fields
+        for key in ["http_proxy", "https_proxy", "proxy", "all_proxy"] {
+            if let Some(proxy_val) = val.get(key).and_then(|p| p.as_str()) {
+                let trim = proxy_val.trim();
+                if !trim.is_empty() {
+                    return Some(if trim.starts_with("http://")
+                        || trim.starts_with("https://")
+                        || trim.starts_with("socks")
+                    {
+                        trim.to_string()
+                    } else {
+                        format!("http://{}", trim)
+                    });
+                }
+            }
+        }
+    }
+
+    // 2. YAML or line-based config
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "gost_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "gost_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // YAML node or proxy line: e.g. "addr: 127.0.0.1:7890" or "- http://127.0.0.1:7890"
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "http_proxy" || k_low == "proxy" || k_low == "addr" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+        if trimmed.starts_with("- ") {
+            let val = trimmed.strip_prefix("- ").unwrap_or("").trim().trim_matches('"').trim_matches('\'');
+            if val.starts_with("http://") || val.starts_with("https://") || val.starts_with("socks") {
+                return Some(val.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_gost_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_gost_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_gost_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GOST_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GOST_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -25013,6 +25542,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Tailscale Daemon Proxy",
             "/etc/default/tailscaled & /etc/systemd/system/tailscaled.service.d/http-proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // ZeroTier One Daemon Proxy (/var/lib/zerotier-one/local.conf / /Library/Application Support/ZeroTier/One/local.conf / /etc/systemd/system/zerotier-one.service.d/http-proxy.conf)
+    if let Some((zt_proxy, zt_path)) = get_zerotier_proxy() {
+        let ok = verify_proxy_url(&zt_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "ZeroTier daemon proxy `{}` in {} is dead! (zerotier-one network connections will fail)",
+                zt_proxy,
+                zt_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "ZeroTier Daemon Proxy",
+            format!("{}", zt_path.display()),
+            zt_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (zerotier fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "ZeroTier Daemon Proxy",
+            "/var/lib/zerotier-one/local.conf & /etc/systemd/system/zerotier-one.service.d/http-proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Gost (GO Simple Tunnel) Daemon Proxy (/etc/gost/gost.json / ~/.config/gost/config.json / /etc/systemd/system/gost.service.d/http-proxy.conf)
+    if let Some((gost_proxy, gost_path)) = get_gost_proxy() {
+        let ok = verify_proxy_url(&gost_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Gost daemon proxy `{}` in {} is dead! (gost tunnel forwardings will fail)",
+                gost_proxy,
+                gost_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Gost Daemon Proxy",
+            format!("{}", gost_path.display()),
+            gost_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (gost fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Gost Daemon Proxy",
+            "~/.config/gost/config.json & /etc/gost/gost.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -30309,5 +30902,99 @@ Environment="ALL_PROXY=socks5://10.0.0.120:1080"
         let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; ALL_PROXY=socks5://127.0.0.1:1080\n";
         assert_eq!(parse_tailscale_proxy(input_comment), None);
         assert_eq!(parse_tailscale_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_zerotier_proxy() {
+        let zt_json = r#"{
+    "settings": {
+        "httpProxy": "http://127.0.0.1:7890"
+    }
+}"#;
+        assert_eq!(
+            parse_zerotier_proxy(zt_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let default_file = r#"
+# ZeroTier startup config
+HTTP_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_zerotier_proxy(default_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://10.0.0.120:1080"
+"#;
+        assert_eq!(
+            parse_zerotier_proxy(dropin),
+            Some("socks5://10.0.0.120:1080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; httpProxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_zerotier_proxy(input_comment), None);
+        assert_eq!(parse_zerotier_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_gost_proxy() {
+        let gost_v3 = r#"{
+    "chains": [
+        {
+            "name": "chain-0",
+            "nodes": [
+                {
+                    "name": "node-0",
+                    "addr": "127.0.0.1:7890",
+                    "connector": { "type": "http" }
+                }
+            ]
+        }
+    ]
+}"#;
+        assert_eq!(
+            parse_gost_proxy(gost_v3),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let gost_v2 = r#"{
+    "routes": [
+        {
+            "nodes": [
+                "http://127.0.0.1:7890"
+            ]
+        }
+    ]
+}"#;
+        assert_eq!(
+            parse_gost_proxy(gost_v2),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let gost_yaml = r#"
+routes:
+  - nodes:
+      - http://127.0.0.1:10809
+"#;
+        assert_eq!(
+            parse_gost_proxy(gost_yaml),
+            Some("http://127.0.0.1:10809".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_gost_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; addr: 127.0.0.1:7890\n";
+        assert_eq!(parse_gost_proxy(input_comment), None);
+        assert_eq!(parse_gost_proxy(""), None);
     }
 }

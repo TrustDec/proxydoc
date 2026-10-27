@@ -49,6 +49,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (2024, false, "Cloudflare Tunnel Metrics (HTTP)"),
     (7400, false, "FRP Web Admin / Dashboard (HTTP)"),
     (1055, true, "Tailscale SOCKS5 Proxy (SOCKS5)"),
+    (9993, false, "ZeroTier One Service (UDP/HTTP API)"),
+    (10800, false, "GO Simple Tunnel / Gost (HTTP)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

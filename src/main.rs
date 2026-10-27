@@ -443,7 +443,13 @@ enum Commands {
         /// Also configure Tailscale daemon proxy (/etc/default/tailscaled / /etc/sysconfig/tailscaled / /etc/systemd/system/tailscaled.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "tailscaled", visible_alias = "ts")]
         tailscale: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, and tailscale proxy
+        /// Also configure ZeroTier One daemon proxy (/var/lib/zerotier-one/local.conf / /Library/Application Support/ZeroTier/One/local.conf / /etc/systemd/system/zerotier-one.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "zerotier-one", visible_alias = "zt")]
+        zerotier: bool,
+        /// Also configure Gost (GO Simple Tunnel) daemon proxy (/etc/gost/gost.json / ~/.config/gost/config.json / /etc/systemd/system/gost.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "go-gost")]
+        gost: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, and gost proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -830,7 +836,13 @@ enum Commands {
         /// Also unset Tailscale daemon proxy (/etc/default/tailscaled / /etc/sysconfig/tailscaled / /etc/systemd/system/tailscaled.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "tailscaled", visible_alias = "ts")]
         tailscale: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, and tailscale proxy
+        /// Also unset ZeroTier One daemon proxy (/var/lib/zerotier-one/local.conf / /Library/Application Support/ZeroTier/One/local.conf / /etc/systemd/system/zerotier-one.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "zerotier-one", visible_alias = "zt")]
+        zerotier: bool,
+        /// Also unset Gost (GO Simple Tunnel) daemon proxy (/etc/gost/gost.json / ~/.config/gost/config.json / /etc/systemd/system/gost.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "go-gost")]
+        gost: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, and gost proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1000,6 +1012,8 @@ async fn main() -> Result<()> {
             ngrok,
             frpc,
             tailscale,
+            zerotier,
+            gost,
             all,
             shell,
         }) => {
@@ -1131,6 +1145,8 @@ async fn main() -> Result<()> {
                 ngrok,
                 frpc,
                 tailscale,
+                zerotier,
+                gost,
                 all,
                 shell.as_deref(),
             )
@@ -1263,6 +1279,8 @@ async fn main() -> Result<()> {
             ngrok,
             frpc,
             tailscale,
+            zerotier,
+            gost,
             all,
             shell,
         }) => {
@@ -1393,6 +1411,8 @@ async fn main() -> Result<()> {
                 ngrok,
                 frpc,
                 tailscale,
+                zerotier,
+                gost,
                 all,
                 shell.as_deref(),
             )?;
@@ -4899,6 +4919,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { tailscale, .. }) => {
                 assert!(tailscale);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_zerotier() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--zerotier"]).unwrap();
+        match cli.command {
+            Some(Commands::On { zerotier, .. }) => {
+                assert!(zerotier);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--zt"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { zerotier, .. }) => {
+                assert!(zerotier);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_zerotier() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--zerotier"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { zerotier, .. }) => {
+                assert!(zerotier);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_gost() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--gost"]).unwrap();
+        match cli.command {
+            Some(Commands::On { gost, .. }) => {
+                assert!(gost);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--go-gost"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { gost, .. }) => {
+                assert!(gost);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_gost() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--gost"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { gost, .. }) => {
+                assert!(gost);
             }
             _ => panic!("Expected Off command"),
         }
