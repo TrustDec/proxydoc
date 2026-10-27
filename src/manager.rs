@@ -20748,6 +20748,410 @@ pub fn unset_gost_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_rathole_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("RATHOLE_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_rathole = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "rathole_proxy" || k_low == "rathole_http_proxy" {
+                        lines.push(format!("Environment=\"RATHOLE_PROXY={}\"", proxy_url));
+                        replaced_rathole = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("rathole_proxy=") || lower.starts_with("rathole_http_proxy=") {
+                lines.push(format!("RATHOLE_PROXY=\"{}\"", proxy_url));
+                replaced_rathole = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_rathole {
+            lines.push(format!("Environment=\"RATHOLE_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+    let mut in_client_transport = false;
+    let mut has_client_transport = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[client.transport]" {
+            in_client_transport = true;
+            has_client_transport = true;
+            lines.push(line.to_string());
+            continue;
+        } else if trimmed.starts_with('[') {
+            if in_client_transport && !replaced {
+                lines.push(format!("proxy = \"{}\"", proxy_url));
+                replaced = true;
+            }
+            in_client_transport = false;
+        }
+
+        if in_client_transport && (trimmed.starts_with("proxy =") || trimmed.starts_with("proxy=")) {
+            lines.push(format!("proxy = \"{}\"", proxy_url));
+            replaced = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_client_transport && !replaced {
+        lines.push(format!("proxy = \"{}\"", proxy_url));
+        replaced = true;
+    }
+
+    if !replaced {
+        if has_client_transport {
+            // Handled
+        } else if content.trim().is_empty() {
+            return format!("[client.transport]\nproxy = \"{}\"\n", proxy_url);
+        } else {
+            lines.push("".to_string());
+            lines.push("[client.transport]".to_string());
+            lines.push(format!("proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    let joined = lines.join("\n");
+    if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    }
+}
+
+pub fn remove_rathole_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rathole_proxy"
+                    || k_low == "rathole_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("rathole_proxy=")
+            || lower.starts_with("rathole_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy=")
+            || lower.starts_with("http_proxy =")
+            || lower.starts_with("http_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_rathole_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_rathole_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_rathole_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_rathole_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_rathole_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_rathole_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_chisel_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("CHISEL_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_chisel = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "chisel_proxy" || k_low == "chisel_http_proxy" {
+                        lines.push(format!("Environment=\"CHISEL_PROXY={}\"", proxy_url));
+                        replaced_chisel = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("chisel_proxy=") || lower.starts_with("chisel_http_proxy=") {
+                lines.push(format!("CHISEL_PROXY=\"{}\"", proxy_url));
+                replaced_chisel = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_chisel {
+            lines.push(format!("Environment=\"CHISEL_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_chisel_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "http_proxy", "https_proxy", "httpProxy", "chisel_proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "chisel_proxy"
+                    || k_low == "chisel_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("chisel_proxy=")
+            || lower.starts_with("chisel_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_chisel_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_chisel_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_chisel_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_chisel_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_chisel_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_chisel_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -20878,6 +21282,8 @@ pub async fn turn_on(
     tailscale: bool,
     zerotier: bool,
     gost: bool,
+    rathole: bool,
+    chisel: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -21007,6 +21413,8 @@ pub async fn turn_on(
     let set_tailscale = tailscale || all;
     let set_zerotier = zerotier || all;
     let set_gost = gost || all;
+    let set_rathole = rathole || all;
+    let set_chisel = chisel || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -22828,6 +23236,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_rathole {
+        match set_rathole_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Rathole daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Rathole daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_chisel {
+        match set_chisel_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Chisel daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Chisel daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -22971,6 +23409,8 @@ pub fn turn_off(
     tailscale: bool,
     zerotier: bool,
     gost: bool,
+    rathole: bool,
+    chisel: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -23100,6 +23540,8 @@ pub fn turn_off(
     let unset_tailscale = tailscale || all;
     let unset_zerotier = zerotier || all;
     let unset_gost = gost || all;
+    let unset_rathole = rathole || all;
+    let unset_chisel = chisel || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -24193,6 +24635,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Gost daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Gost proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Gost daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_rathole {
+        match unset_rathole_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Rathole daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Rathole proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Rathole daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_chisel {
+        match unset_chisel_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Chisel daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Chisel proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Chisel daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -27323,5 +27781,55 @@ HTTPS_PROXY="http://127.0.0.1:7890"
         let (gost_cleaned, gost_removed) = remove_gost_proxy(&gost_updated);
         assert!(gost_removed);
         assert!(!gost_cleaned.contains("http_proxy:"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_rathole_proxy() {
+        let rathole_initial = r#"
+[client]
+remote_addr = "example.com:2333"
+
+[client.transport]
+type = "tcp"
+proxy = "http://127.0.0.1:7890"
+"#;
+        let rathole_updated = apply_rathole_proxy(rathole_initial, "http://10.0.0.70:8080");
+        assert!(rathole_updated.contains("proxy = \"http://10.0.0.70:8080\""));
+        let (rathole_cleaned, rathole_removed) = remove_rathole_proxy(&rathole_updated);
+        assert!(rathole_removed);
+        assert!(!rathole_cleaned.contains("proxy ="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_rathole_proxy(dropin_initial, "http://10.0.0.70:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.70:8080\""));
+        assert!(dropin_updated.contains("Environment=\"RATHOLE_PROXY=http://10.0.0.70:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_rathole_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("RATHOLE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_chisel_proxy() {
+        let chisel_initial = r#"{
+  "server": "https://chisel.example.com",
+  "proxy": "http://127.0.0.1:7890"
+}"#;
+        let chisel_updated = apply_chisel_proxy(chisel_initial, "http://10.0.0.75:8080");
+        assert!(chisel_updated.contains("\"proxy\": \"http://10.0.0.75:8080\""));
+        let (chisel_cleaned, chisel_removed) = remove_chisel_proxy(&chisel_updated);
+        assert!(chisel_removed);
+        assert!(!chisel_cleaned.contains("\"proxy\""));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_chisel_proxy(dropin_initial, "http://10.0.0.75:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.75:8080\""));
+        assert!(dropin_updated.contains("Environment=\"CHISEL_PROXY=http://10.0.0.75:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_chisel_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("CHISEL_PROXY="));
     }
 }

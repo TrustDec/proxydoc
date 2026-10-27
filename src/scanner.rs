@@ -51,6 +51,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (1055, true, "Tailscale SOCKS5 Proxy (SOCKS5)"),
     (9993, false, "ZeroTier One Service (UDP/HTTP API)"),
     (10800, false, "GO Simple Tunnel / Gost (HTTP)"),
+    (2333, false, "Rathole NAT Traversal (Default)"),
+    (4959, false, "Chisel HTTP Tunnel Service (HTTP)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

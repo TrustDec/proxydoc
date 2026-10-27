@@ -449,7 +449,13 @@ enum Commands {
         /// Also configure Gost (GO Simple Tunnel) daemon proxy (/etc/gost/gost.json / ~/.config/gost/config.json / /etc/systemd/system/gost.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "go-gost")]
         gost: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, and gost proxy
+        /// Also configure Rathole NAT traversal daemon proxy (/etc/rathole/rathole.toml / ~/.config/rathole/rathole.toml / /etc/systemd/system/rathole.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "rat")]
+        rathole: bool,
+        /// Also configure Chisel HTTP tunnel daemon proxy (/etc/chisel/config.json / ~/.config/chisel/config.json / /etc/systemd/system/chisel.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "chisel-tunnel")]
+        chisel: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, and chisel proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -842,7 +848,13 @@ enum Commands {
         /// Also unset Gost (GO Simple Tunnel) daemon proxy (/etc/gost/gost.json / ~/.config/gost/config.json / /etc/systemd/system/gost.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "go-gost")]
         gost: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, and gost proxy
+        /// Also unset Rathole NAT traversal daemon proxy (/etc/rathole/rathole.toml / ~/.config/rathole/rathole.toml / /etc/systemd/system/rathole.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "rat")]
+        rathole: bool,
+        /// Also unset Chisel HTTP tunnel daemon proxy (/etc/chisel/config.json / ~/.config/chisel/config.json / /etc/systemd/system/chisel.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "chisel-tunnel")]
+        chisel: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, and chisel proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1014,6 +1026,8 @@ async fn main() -> Result<()> {
             tailscale,
             zerotier,
             gost,
+            rathole,
+            chisel,
             all,
             shell,
         }) => {
@@ -1147,6 +1161,8 @@ async fn main() -> Result<()> {
                 tailscale,
                 zerotier,
                 gost,
+                rathole,
+                chisel,
                 all,
                 shell.as_deref(),
             )
@@ -1281,6 +1297,8 @@ async fn main() -> Result<()> {
             tailscale,
             zerotier,
             gost,
+            rathole,
+            chisel,
             all,
             shell,
         }) => {
@@ -1413,6 +1431,8 @@ async fn main() -> Result<()> {
                 tailscale,
                 zerotier,
                 gost,
+                rathole,
+                chisel,
                 all,
                 shell.as_deref(),
             )?;
@@ -4979,6 +4999,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { gost, .. }) => {
                 assert!(gost);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_rathole() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--rathole"]).unwrap();
+        match cli.command {
+            Some(Commands::On { rathole, .. }) => {
+                assert!(rathole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--rat"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { rathole, .. }) => {
+                assert!(rathole);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_rathole() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--rathole"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { rathole, .. }) => {
+                assert!(rathole);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_chisel() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--chisel"]).unwrap();
+        match cli.command {
+            Some(Commands::On { chisel, .. }) => {
+                assert!(chisel);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--chisel-tunnel"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { chisel, .. }) => {
+                assert!(chisel);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_chisel() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--chisel"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { chisel, .. }) => {
+                assert!(chisel);
             }
             _ => panic!("Expected Off command"),
         }

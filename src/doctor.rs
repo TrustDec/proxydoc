@@ -20545,6 +20545,385 @@ pub fn get_gost_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_rathole_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("RATHOLE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("RATHOLE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("rathole").join("rathole.toml"),
+            home.join(".config").join("rathole").join("client.toml"),
+            home.join(".config").join("rathole").join("config.toml"),
+            home.join(".rathole").join("rathole.toml"),
+            home.join(".rathole").join("client.toml"),
+            home.join(".config").join("systemd").join("user").join("rathole.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/rathole/rathole.toml"),
+        PathBuf::from("/etc/rathole/client.toml"),
+        PathBuf::from("/etc/rathole/config.toml"),
+        PathBuf::from("/usr/local/etc/rathole/rathole.toml"),
+        PathBuf::from("/usr/local/etc/rathole/client.toml"),
+        PathBuf::from("/etc/default/rathole"),
+        PathBuf::from("/etc/sysconfig/rathole"),
+        PathBuf::from("/etc/systemd/system/rathole.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_rathole_config_path() -> Option<PathBuf> {
+    let paths = get_rathole_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_rathole_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_rathole_write_path() -> PathBuf {
+    if let Some(p) = get_rathole_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("RATHOLE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let config_dir = home.join(".config").join("rathole");
+        if config_dir.is_dir() {
+            return config_dir.join("rathole.toml");
+        }
+    }
+    let etc_rathole = PathBuf::from("/etc/rathole");
+    if etc_rathole.is_dir() {
+        return etc_rathole.join("rathole.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/rathole.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("rathole").join("rathole.toml");
+    }
+    PathBuf::from("/etc/rathole/rathole.toml")
+}
+
+pub fn parse_rathole_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "rathole_proxy"
+                        || k_low == "rathole_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "rathole_proxy"
+                || k_low == "rathole_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_rathole_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_rathole_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_rathole_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("RATHOLE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RATHOLE_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_chisel_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CHISEL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("CHISEL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("chisel").join("config.json"),
+            home.join(".config").join("chisel").join("chisel.json"),
+            home.join(".chisel").join("config.json"),
+            home.join(".chisel").join("chisel.json"),
+            home.join(".config").join("systemd").join("user").join("chisel.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/chisel/config.json"),
+        PathBuf::from("/etc/chisel/chisel.json"),
+        PathBuf::from("/usr/local/etc/chisel/config.json"),
+        PathBuf::from("/etc/default/chisel"),
+        PathBuf::from("/etc/sysconfig/chisel"),
+        PathBuf::from("/etc/systemd/system/chisel.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_chisel_config_path() -> Option<PathBuf> {
+    let paths = get_chisel_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_chisel_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_chisel_write_path() -> PathBuf {
+    if let Some(p) = get_chisel_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CHISEL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let config_dir = home.join(".config").join("chisel");
+        if config_dir.is_dir() {
+            return config_dir.join("config.json");
+        }
+    }
+    let etc_chisel = PathBuf::from("/etc/chisel");
+    if etc_chisel.is_dir() {
+        return etc_chisel.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/chisel.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("chisel").join("config.json");
+    }
+    PathBuf::from("/etc/chisel/config.json")
+}
+
+pub fn parse_chisel_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        for key in ["proxy", "http_proxy", "https_proxy", "httpProxy", "all_proxy", "chisel_proxy"] {
+            if let Some(proxy_val) = val.get(key).and_then(|p| p.as_str()) {
+                let trim = proxy_val.trim();
+                if !trim.is_empty() {
+                    return Some(if trim.starts_with("http://")
+                        || trim.starts_with("https://")
+                        || trim.starts_with("socks")
+                    {
+                        trim.to_string()
+                    } else {
+                        format!("http://{}", trim)
+                    });
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "chisel_proxy"
+                        || k_low == "chisel_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "chisel_proxy"
+                || k_low == "chisel_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_chisel_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_chisel_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_chisel_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CHISEL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CHISEL_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -25606,6 +25985,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Gost Daemon Proxy",
             "~/.config/gost/config.json & /etc/gost/gost.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Rathole NAT Traversal Daemon Proxy (/etc/rathole/rathole.toml / ~/.config/rathole/rathole.toml / /etc/systemd/system/rathole.service.d/http-proxy.conf)
+    if let Some((rathole_proxy, rathole_path)) = get_rathole_proxy() {
+        let ok = verify_proxy_url(&rathole_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Rathole daemon proxy `{}` in {} is dead! (rathole tunnel connections will fail)",
+                rathole_proxy,
+                rathole_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Rathole Daemon Proxy",
+            format!("{}", rathole_path.display()),
+            rathole_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (rathole fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Rathole Daemon Proxy",
+            "~/.config/rathole/rathole.toml & /etc/rathole/rathole.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Chisel HTTP Tunnel Daemon Proxy (/etc/chisel/config.json / ~/.config/chisel/config.json / /etc/systemd/system/chisel.service.d/http-proxy.conf)
+    if let Some((chisel_proxy, chisel_path)) = get_chisel_proxy() {
+        let ok = verify_proxy_url(&chisel_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Chisel daemon proxy `{}` in {} is dead! (chisel client tunnels will fail)",
+                chisel_proxy,
+                chisel_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Chisel Daemon Proxy",
+            format!("{}", chisel_path.display()),
+            chisel_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (chisel fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Chisel Daemon Proxy",
+            "~/.config/chisel/config.json & /etc/chisel/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -30996,5 +31439,77 @@ Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
         let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; addr: 127.0.0.1:7890\n";
         assert_eq!(parse_gost_proxy(input_comment), None);
         assert_eq!(parse_gost_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_rathole_proxy() {
+        let rathole_toml = r#"
+[client]
+remote_addr = "example.com:2333"
+
+[client.transport]
+type = "tcp"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_rathole_proxy(rathole_toml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let rathole_env = r#"
+# Rathole startup config
+RATHOLE_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_rathole_proxy(rathole_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_rathole_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_rathole_proxy(input_comment), None);
+        assert_eq!(parse_rathole_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_chisel_proxy() {
+        let chisel_json = r#"{
+    "server": "https://chisel.example.com",
+    "proxy": "http://127.0.0.1:7890"
+}"#;
+        assert_eq!(
+            parse_chisel_proxy(chisel_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let chisel_env = r#"
+# Chisel startup config
+CHISEL_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_chisel_proxy(chisel_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_chisel_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_chisel_proxy(input_comment), None);
+        assert_eq!(parse_chisel_proxy(""), None);
     }
 }

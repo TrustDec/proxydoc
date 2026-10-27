@@ -990,6 +990,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "DSPy AI CDN",
         "https://dspy.ai",
     ),
+    (
+        "Rathole Tunnel CDN",
+        "https://github.com/rapiz1/rathole/releases",
+    ),
+    (
+        "Chisel Tunnel CDN",
+        "https://github.com/jpillora/chisel/releases",
+    ),
+    (
+        "OpenHands AI CDN",
+        "https://docs.all-hands.dev",
+    ),
+    (
+        "Pydantic AI CDN",
+        "https://ai.pydantic.dev",
+    ),
+    (
+        "Smolagents CDN",
+        "https://huggingface.co/docs/smolagents",
+    ),
+    (
+        "Mem0 AI CDN",
+        "https://mem0.ai",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2042,6 +2066,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "DSPy AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Rathole Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Chisel Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenHands AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pydantic AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Smolagents CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Mem0 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
