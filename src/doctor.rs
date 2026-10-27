@@ -27976,6 +27976,487 @@ pub fn get_microsocks_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_cntlm_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CNTLM_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".cntlm.conf"),
+            home.join(".config").join("cntlm").join("cntlm.conf"),
+            home.join(".config").join("cntlm").join("config"),
+            home.join(".config").join("systemd").join("user").join("cntlm.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/cntlm.conf"),
+        PathBuf::from("/etc/cntlm/cntlm.conf"),
+        PathBuf::from("/usr/local/etc/cntlm.conf"),
+        PathBuf::from("/etc/default/cntlm"),
+        PathBuf::from("/etc/sysconfig/cntlm"),
+        PathBuf::from("/etc/systemd/system/cntlm.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_cntlm_config_path() -> Option<PathBuf> {
+    let paths = get_cntlm_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_cntlm_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_cntlm_write_path() -> PathBuf {
+    if let Some(p) = get_cntlm_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CNTLM_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("cntlm");
+        if dir.is_dir() {
+            return dir.join("cntlm.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/cntlm");
+    if etc_dir.is_dir() {
+        return etc_dir.join("cntlm.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/cntlm.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".cntlm.conf");
+    }
+    PathBuf::from("/etc/cntlm.conf")
+}
+
+pub fn parse_cntlm_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream",
+                "remote",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "cntlm_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "cntlm_proxy"
+                        || k_low == "cntlm_http_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let lower = trimmed.to_lowercase();
+        if (lower.starts_with("proxy ") || lower.starts_with("proxy\t"))
+            && !trimmed[5..].trim_start().starts_with('=')
+            && !trimmed[5..].trim_start().starts_with(':')
+        {
+            let rest = trimmed[5..].trim();
+            let first = rest.split(',').next().unwrap_or(rest).trim();
+            let clean = first.trim_matches('"').trim_matches('\'').trim();
+            if !clean.is_empty() {
+                return Some(if clean.starts_with("http://")
+                    || clean.starts_with("https://")
+                    || clean.starts_with("socks")
+                {
+                    clean.to_string()
+                } else {
+                    format!("http://{}", clean)
+                });
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "cntlm_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                let first = val.split(',').next().unwrap_or(val).trim();
+                if !first.is_empty()
+                    && (first.starts_with("http://")
+                        || first.starts_with("https://")
+                        || first.starts_with("socks")
+                        || first.contains(':'))
+                {
+                    return Some(if first.starts_with("http://")
+                        || first.starts_with("https://")
+                        || first.starts_with("socks")
+                    {
+                        first.to_string()
+                    } else {
+                        format!("http://{}", first)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_cntlm_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_cntlm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_cntlm_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CNTLM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CNTLM_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CNTLM_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CNTLM_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_cow_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("COW_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".cow").join("rc"),
+            home.join(".config").join("cow").join("rc"),
+            home.join(".config").join("cow").join("config"),
+            home.join(".cowrc"),
+            home.join(".config").join("systemd").join("user").join("cow.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/cow/rc"),
+        PathBuf::from("/etc/cow.conf"),
+        PathBuf::from("/usr/local/etc/cow/rc"),
+        PathBuf::from("/usr/local/etc/cow.conf"),
+        PathBuf::from("/etc/default/cow"),
+        PathBuf::from("/etc/sysconfig/cow"),
+        PathBuf::from("/etc/systemd/system/cow.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_cow_config_path() -> Option<PathBuf> {
+    let paths = get_cow_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_cow_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_cow_write_path() -> PathBuf {
+    if let Some(p) = get_cow_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("COW_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".cow");
+        if dir.is_dir() {
+            return dir.join("rc");
+        }
+        let conf_dir = home.join(".config").join("cow");
+        if conf_dir.is_dir() {
+            return conf_dir.join("rc");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/cow");
+    if etc_dir.is_dir() {
+        return etc_dir.join("rc");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/cow.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".cow").join("rc");
+    }
+    PathBuf::from("/etc/cow/rc")
+}
+
+pub fn parse_cow_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "cow_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "cow_proxy"
+                        || k_low == "cow_http_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "cow_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_cow_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_cow_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_cow_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("COW_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:COW_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("COW_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:COW_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -34061,6 +34542,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "MicroSOCKS Daemon Proxy",
             "~/.config/microsocks/microsocks.conf & /etc/microsocks.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Cntlm Authenticating Proxy Daemon (/etc/cntlm.conf / ~/.cntlm.conf / /etc/systemd/system/cntlm.service.d/http-proxy.conf)
+    if let Some((cntlm_proxy, cntlm_path)) = get_cntlm_proxy() {
+        let ok = verify_proxy_url(&cntlm_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Cntlm proxy `{}` in {} is dead! (cntlm forwarding will fail)",
+                cntlm_proxy,
+                cntlm_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Cntlm Daemon Proxy",
+            format!("{}", cntlm_path.display()),
+            cntlm_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (cntlm fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Cntlm Daemon Proxy",
+            "~/.cntlm.conf & /etc/cntlm.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // COW HTTP Proxy Daemon (~/.cow/rc / /etc/cow/rc / /etc/systemd/system/cow.service.d/http-proxy.conf)
+    if let Some((cow_proxy, cow_path)) = get_cow_proxy() {
+        let ok = verify_proxy_url(&cow_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "COW proxy `{}` in {} is dead! (cow forwarding will fail)",
+                cow_proxy,
+                cow_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "COW Daemon Proxy",
+            format!("{}", cow_path.display()),
+            cow_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (cow fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "COW Daemon Proxy",
+            "~/.cow/rc & /etc/cow/rc",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -40823,5 +41368,100 @@ Environment="ALL_PROXY=socks5://127.0.0.1:1080"
         let input_comment = "# proxy = socks5://127.0.0.1:1080\n; microsocks_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_microsocks_proxy(input_comment), None);
         assert_eq!(parse_microsocks_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_cntlm_proxy() {
+        let cntlm_json = r#"{
+            "proxy": "http://127.0.0.1:8080"
+        }"#;
+        assert_eq!(
+            parse_cntlm_proxy(cntlm_json),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let cntlm_conf = r#"
+Username        testuser
+Domain          corp
+Proxy           10.0.0.1:8080, 10.0.0.2:8080
+Listen          53128
+"#;
+        assert_eq!(
+            parse_cntlm_proxy(cntlm_conf),
+            Some("http://10.0.0.1:8080".to_string())
+        );
+
+        let cntlm_cfg = r#"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_cntlm_proxy(cntlm_cfg),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let cntlm_env = r#"
+# Cntlm environment config
+CNTLM_PROXY="http://127.0.0.1:8080"
+"#;
+        assert_eq!(
+            parse_cntlm_proxy(cntlm_env),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:8080"
+"#;
+        assert_eq!(
+            parse_cntlm_proxy(dropin),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let input_comment = "# Proxy 10.0.0.1:8080\n; proxy = http://10.0.0.1:8080\n";
+        assert_eq!(parse_cntlm_proxy(input_comment), None);
+        assert_eq!(parse_cntlm_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_cow_proxy() {
+        let cow_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_cow_proxy(cow_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let cow_rc = r#"
+# COW configuration
+listen = "http://127.0.0.1:7777"
+proxy = socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_cow_proxy(cow_rc),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let cow_env = r#"
+# COW environment config
+COW_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_cow_proxy(cow_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_cow_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = socks5://127.0.0.1:1080\n; cow_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_cow_proxy(input_comment), None);
+        assert_eq!(parse_cow_proxy(""), None);
     }
 }

@@ -545,7 +545,13 @@ enum Commands {
         /// Also configure MicroSOCKS SOCKS5 proxy daemon (/etc/microsocks.conf / ~/.config/microsocks/microsocks.conf / ~/.config/microsocks/config / /etc/systemd/system/microsocks.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "microsocks-daemon", visible_alias = "microsocks-proxy")]
         microsocks: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, and microsocks proxy
+        /// Also configure Cntlm authenticating HTTP proxy daemon (/etc/cntlm.conf / ~/.cntlm.conf / /etc/systemd/system/cntlm.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cntlm-daemon", visible_alias = "cntlm-proxy")]
+        cntlm: bool,
+        /// Also configure COW HTTP proxy daemon (~/.cow/rc / /etc/cow/rc / /etc/systemd/system/cow.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cow-daemon", visible_alias = "cow-proxy")]
+        cow: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, and cow proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1034,7 +1040,13 @@ enum Commands {
         /// Also unset MicroSOCKS SOCKS5 proxy daemon (/etc/microsocks.conf / ~/.config/microsocks/microsocks.conf / ~/.config/microsocks/config / /etc/systemd/system/microsocks.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "microsocks-daemon", visible_alias = "microsocks-proxy")]
         microsocks: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, and microsocks proxy
+        /// Also unset Cntlm authenticating HTTP proxy daemon (/etc/cntlm.conf / ~/.cntlm.conf / /etc/systemd/system/cntlm.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cntlm-daemon", visible_alias = "cntlm-proxy")]
+        cntlm: bool,
+        /// Also unset COW HTTP proxy daemon (~/.cow/rc / /etc/cow/rc / /etc/systemd/system/cow.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cow-daemon", visible_alias = "cow-proxy")]
+        cow: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, and cow proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1238,6 +1250,8 @@ async fn main() -> Result<()> {
             polipo,
             pproxy,
             microsocks,
+            cntlm,
+            cow,
             all,
             shell,
         }) => {
@@ -1403,6 +1417,8 @@ async fn main() -> Result<()> {
                 polipo,
                 pproxy,
                 microsocks,
+                cntlm,
+                cow,
                 all,
                 shell.as_deref(),
             )
@@ -1569,6 +1585,8 @@ async fn main() -> Result<()> {
             polipo,
             pproxy,
             microsocks,
+            cntlm,
+            cow,
             all,
             shell,
         }) => {
@@ -1733,6 +1751,8 @@ async fn main() -> Result<()> {
                 polipo,
                 pproxy,
                 microsocks,
+                cntlm,
+                cow,
                 all,
                 shell.as_deref(),
             )?;
@@ -6323,6 +6343,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { microsocks, .. }) => {
                 assert!(microsocks);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_cntlm() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--cntlm"]).unwrap();
+        match cli.command {
+            Some(Commands::On { cntlm, .. }) => {
+                assert!(cntlm);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--cntlm-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { cntlm, .. }) => {
+                assert!(cntlm);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_cntlm() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--cntlm"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { cntlm, .. }) => {
+                assert!(cntlm);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_cow() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--cow"]).unwrap();
+        match cli.command {
+            Some(Commands::On { cow, .. }) => {
+                assert!(cow);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--cow-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { cow, .. }) => {
+                assert!(cow);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_cow() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--cow"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { cow, .. }) => {
+                assert!(cow);
             }
             _ => panic!("Expected Off command"),
         }

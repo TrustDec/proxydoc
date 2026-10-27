@@ -28020,6 +28020,494 @@ pub fn unset_microsocks_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_cntlm_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("HTTPS_PROXY=")
+                || t.starts_with("CNTLM_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_cntlm = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "cntlm_proxy" || k_low == "cntlm_http_proxy" {
+                        lines.push(format!("Environment=\"CNTLM_PROXY={}\"", proxy_url));
+                        replaced_cntlm = true;
+                        continue;
+                    }
+                }
+            }
+
+            if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("cntlm_proxy=") {
+                lines.push(format!("CNTLM_PROXY=\"{}\"", proxy_url));
+                replaced_cntlm = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if content.contains("[Service]") {
+            if !replaced_http {
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+            }
+            if !replaced_cntlm {
+                lines.push(format!("Environment=\"CNTLM_PROXY={}\"", proxy_url));
+            }
+        } else {
+            if !replaced_http {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+            }
+            if !replaced_cntlm {
+                lines.push(format!("Environment=\"CNTLM_PROXY={}\"", proxy_url));
+            }
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let clean_target = proxy_url
+        .strip_prefix("http://")
+        .or_else(|| proxy_url.strip_prefix("https://"))
+        .unwrap_or(proxy_url);
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        let clean = lower.replace(' ', "");
+
+        if (lower.starts_with("proxy ") || lower.starts_with("proxy\t"))
+            && !trimmed[5..].trim_start().starts_with('=')
+            && !trimmed[5..].trim_start().starts_with(':')
+        {
+            if !replaced {
+                lines.push(format!("Proxy\t{}", clean_target));
+                replaced = true;
+            }
+            continue;
+        }
+
+        if (clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("cntlm_proxy:") || clean.starts_with("cntlm_proxy=")
+            || clean.starts_with("upstream:") || clean.starts_with("upstream="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                if line.contains('=') {
+                    lines.push(format!("proxy = \"{}\"", proxy_url));
+                } else {
+                    lines.push(format!("Proxy\t{}", clean_target));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.contains('=') {
+            lines.push(format!("proxy = \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("Proxy\t{}", clean_target));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_cntlm_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["proxy", "upstream", "target_proxy", "cntlm_proxy", "http_proxy", "https_proxy", "all_proxy", "http-proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cntlm_proxy"
+                    || k_low == "cntlm_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("cntlm_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if (lower.starts_with("proxy ") || lower.starts_with("proxy\t"))
+            && !trimmed[5..].trim_start().starts_with('=')
+            && !trimmed[5..].trim_start().starts_with(':')
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("cntlm_proxy:") || clean.starts_with("cntlm_proxy=")
+            || clean.starts_with("upstream:") || clean.starts_with("upstream="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_cntlm_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_cntlm_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_cntlm_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_cntlm_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_cntlm_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_cntlm_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_cow_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("HTTPS_PROXY=")
+                || t.starts_with("COW_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_cow = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "cow_proxy" || k_low == "cow_http_proxy" {
+                        lines.push(format!("Environment=\"COW_PROXY={}\"", proxy_url));
+                        replaced_cow = true;
+                        continue;
+                    }
+                }
+            }
+
+            if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("cow_proxy=") {
+                lines.push(format!("COW_PROXY=\"{}\"", proxy_url));
+                replaced_cow = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if content.contains("[Service]") {
+            if !replaced_http {
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+            }
+            if !replaced_cow {
+                lines.push(format!("Environment=\"COW_PROXY={}\"", proxy_url));
+            }
+        } else {
+            if !replaced_http {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_https {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+            }
+            if !replaced_cow {
+                lines.push(format!("COW_PROXY=\"{}\"", proxy_url));
+            }
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        let clean = lower.replace(' ', "");
+
+        if (clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("cow_proxy:") || clean.starts_with("cow_proxy=")
+            || clean.starts_with("upstream:") || clean.starts_with("upstream="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                if line.contains('=') {
+                    lines.push(format!("proxy = {}", proxy_url));
+                } else {
+                    lines.push(format!("proxy: {}", proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.contains(':') && !content.contains('=') {
+            lines.push(format!("proxy: {}", proxy_url));
+        } else {
+            lines.push(format!("proxy = {}", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_cow_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["proxy", "upstream", "target_proxy", "cow_proxy", "http_proxy", "https_proxy", "all_proxy", "http-proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cow_proxy"
+                    || k_low == "cow_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("cow_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("cow_proxy:") || clean.starts_with("cow_proxy=")
+            || clean.starts_with("upstream:") || clean.starts_with("upstream="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_cow_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_cow_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_cow_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_cow_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_cow_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_cow_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -28182,6 +28670,8 @@ pub async fn turn_on(
     polipo: bool,
     pproxy: bool,
     microsocks: bool,
+    cntlm: bool,
+    cow: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -28343,6 +28833,8 @@ pub async fn turn_on(
     let set_polipo = polipo || all;
     let set_pproxy = pproxy || all;
     let set_microsocks = microsocks || all;
+    let set_cntlm = cntlm || all;
+    let set_cow = cow || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -30644,6 +31136,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_cntlm {
+        match set_cntlm_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Cntlm daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Cntlm daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_cow {
+        match set_cow_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ COW daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update COW daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -30819,6 +31341,8 @@ pub fn turn_off(
     polipo: bool,
     pproxy: bool,
     microsocks: bool,
+    cntlm: bool,
+    cow: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -30980,6 +31504,8 @@ pub fn turn_off(
     let unset_polipo = polipo || all;
     let unset_pproxy = pproxy || all;
     let unset_microsocks = microsocks || all;
+    let unset_cntlm = cntlm || all;
+    let unset_cow = cow || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -32329,6 +32855,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ MicroSOCKS daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ MicroSOCKS proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset MicroSOCKS daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_cntlm {
+        match unset_cntlm_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Cntlm daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Cntlm proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Cntlm daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_cow {
+        match unset_cow_proxy() {
+            Ok(true) => eprintln!("{}", "✔ COW daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ COW proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset COW daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -36279,5 +36821,61 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("ALL_PROXY="));
         assert!(!dropin_cleaned.contains("MICROSOCKS_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cntlm_proxy() {
+        let cntlm_initial = r#"{
+  "proxy": "http://127.0.0.1:8080"
+}"#;
+        let cntlm_updated = apply_cntlm_proxy(cntlm_initial, "http://10.0.0.125:8080");
+        assert!(cntlm_updated.contains("\"proxy\": \"http://10.0.0.125:8080\""));
+        let (cntlm_cleaned, cntlm_removed) = remove_cntlm_proxy(&cntlm_updated);
+        assert!(cntlm_removed);
+        assert!(!cntlm_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "Username\tuser\nProxy\t127.0.0.1:8080\nListen\t53128\n";
+        let conf_updated = apply_cntlm_proxy(conf_initial, "http://10.0.0.125:8080");
+        assert!(conf_updated.contains("Proxy\t10.0.0.125:8080"));
+        let (conf_cleaned, conf_removed) = remove_cntlm_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("Proxy\t"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:8080\"\n";
+        let dropin_updated = apply_cntlm_proxy(dropin_initial, "http://10.0.0.125:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.125:8080\""));
+        assert!(dropin_updated.contains("Environment=\"CNTLM_PROXY=http://10.0.0.125:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_cntlm_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("CNTLM_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cow_proxy() {
+        let cow_initial = r#"{
+  "proxy": "http://127.0.0.1:7890"
+}"#;
+        let cow_updated = apply_cow_proxy(cow_initial, "socks5://10.0.0.126:1080");
+        assert!(cow_updated.contains("\"proxy\": \"socks5://10.0.0.126:1080\""));
+        let (cow_cleaned, cow_removed) = remove_cow_proxy(&cow_updated);
+        assert!(cow_removed);
+        assert!(!cow_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "proxy = socks5://127.0.0.1:1080\n";
+        let cow_conf_updated = apply_cow_proxy(conf_initial, "http://10.0.0.126:7890");
+        assert!(cow_conf_updated.contains("proxy = http://10.0.0.126:7890"));
+        let (conf_cleaned, conf_removed) = remove_cow_proxy(&cow_conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("proxy ="));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_cow_proxy(dropin_initial, "http://10.0.0.126:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.126:7890\""));
+        assert!(dropin_updated.contains("Environment=\"COW_PROXY=http://10.0.0.126:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_cow_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("COW_PROXY="));
     }
 }
