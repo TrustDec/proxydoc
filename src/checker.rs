@@ -1302,6 +1302,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "MiniCPM AI CDN",
         "https://github.com/OpenBMB/MiniCPM",
     ),
+    (
+        "Redsocks Proxy CDN",
+        "https://github.com/darkk/redsocks/releases",
+    ),
+    (
+        "Dante Proxy CDN",
+        "https://github.com/royhills/dante",
+    ),
+    (
+        "Wan2.1 AI CDN",
+        "https://github.com/Wan-Video/Wan2.1",
+    ),
+    (
+        "ChatTTS AI CDN",
+        "https://github.com/2noise/ChatTTS",
+    ),
+    (
+        "OmniGen AI CDN",
+        "https://github.com/VectorSpaceLab/OmniGen",
+    ),
+    (
+        "Llama-3.3 AI CDN",
+        "https://github.com/meta-llama/llama-models",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2588,6 +2612,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "MiniCPM AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Redsocks Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Dante Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Wan2.1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ChatTTS AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OmniGen AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Llama-3.3 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

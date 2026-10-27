@@ -26533,6 +26533,465 @@ pub fn get_glider_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_redsocks_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("REDSOCKS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("redsocks").join("redsocks.conf"),
+            home.join(".config").join("redsocks.conf"),
+            home.join(".redsocks.conf"),
+            home.join(".config").join("systemd").join("user").join("redsocks.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/redsocks.conf"),
+        PathBuf::from("/etc/redsocks/redsocks.conf"),
+        PathBuf::from("/usr/local/etc/redsocks.conf"),
+        PathBuf::from("/etc/default/redsocks"),
+        PathBuf::from("/etc/sysconfig/redsocks"),
+        PathBuf::from("/etc/systemd/system/redsocks.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_redsocks_config_path() -> Option<PathBuf> {
+    let paths = get_redsocks_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_redsocks_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_redsocks_write_path() -> PathBuf {
+    if let Some(p) = get_redsocks_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("REDSOCKS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("redsocks");
+        if dir.is_dir() {
+            return dir.join("redsocks.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/redsocks");
+    if etc_dir.is_dir() {
+        return etc_dir.join("redsocks.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/redsocks.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("redsocks").join("redsocks.conf");
+    }
+    PathBuf::from("/etc/redsocks.conf")
+}
+
+pub fn parse_redsocks_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "redsocks_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "redsocks_proxy"
+                        || k_low == "redsocks_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "redsocks_proxy"
+                || k_low == "redsocks_http_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_redsocks_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_redsocks_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_redsocks_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("REDSOCKS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:REDSOCKS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("REDSOCKS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:REDSOCKS_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_dante_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DANTE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("danted.conf"),
+            home.join(".config").join("dante").join("danted.conf"),
+            home.join(".config").join("dante.conf"),
+            home.join(".danted.conf"),
+            home.join(".config").join("systemd").join("user").join("danted.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/danted.conf"),
+        PathBuf::from("/etc/dante.conf"),
+        PathBuf::from("/usr/local/etc/danted.conf"),
+        PathBuf::from("/usr/local/etc/dante.conf"),
+        PathBuf::from("/etc/default/danted"),
+        PathBuf::from("/etc/sysconfig/danted"),
+        PathBuf::from("/etc/systemd/system/danted.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_dante_config_path() -> Option<PathBuf> {
+    let paths = get_dante_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_dante_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_dante_write_path() -> PathBuf {
+    if let Some(p) = get_dante_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DANTE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("dante");
+        if dir.is_dir() {
+            return dir.join("danted.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc");
+    if etc_dir.join("danted.conf").exists() {
+        return etc_dir.join("danted.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/danted.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("danted.conf");
+    }
+    PathBuf::from("/etc/danted.conf")
+}
+
+pub fn parse_dante_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "dante_proxy",
+                "danted_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "dante_proxy"
+                        || k_low == "danted_proxy"
+                        || k_low == "dante_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "dante_proxy"
+                || k_low == "danted_proxy"
+                || k_low == "up_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_dante_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_dante_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_dante_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DANTE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DANTE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DANTE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DANTE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -32426,6 +32885,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Glider Daemon Proxy",
             "~/.config/glider/glider.conf & /etc/glider/glider.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Redsocks Daemon Proxy (/etc/redsocks.conf / ~/.config/redsocks/redsocks.conf / /etc/systemd/system/redsocks.service.d/http-proxy.conf)
+    if let Some((redsocks_proxy, redsocks_path)) = get_redsocks_proxy() {
+        let ok = verify_proxy_url(&redsocks_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Redsocks daemon proxy `{}` in {} is dead! (redsocks redirection will fail)",
+                redsocks_proxy,
+                redsocks_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Redsocks Daemon Proxy",
+            format!("{}", redsocks_path.display()),
+            redsocks_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (redsocks fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Redsocks Daemon Proxy",
+            "~/.config/redsocks/redsocks.conf & /etc/redsocks.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Dante Daemon Proxy (/etc/danted.conf / ~/.config/danted.conf / /etc/systemd/system/danted.service.d/http-proxy.conf)
+    if let Some((dante_proxy, dante_path)) = get_dante_proxy() {
+        let ok = verify_proxy_url(&dante_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Dante daemon proxy `{}` in {} is dead! (dante socks forwarding will fail)",
+                dante_proxy,
+                dante_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Dante Daemon Proxy",
+            format!("{}", dante_path.display()),
+            dante_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (dante fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Dante Daemon Proxy",
+            "~/.config/danted.conf & /etc/danted.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -38909,5 +39432,93 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# forward = http://127.0.0.1:7890\n; glider_proxy = http://127.0.0.1:7890\n";
         assert_eq!(parse_glider_proxy(input_comment), None);
         assert_eq!(parse_glider_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_redsocks_proxy() {
+        let redsocks_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_redsocks_proxy(redsocks_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let redsocks_conf = r#"
+redsocks {
+    local_ip = 127.0.0.1;
+    local_port = 12345;
+    proxy = "http://127.0.0.1:7890";
+}
+"#;
+        assert_eq!(
+            parse_redsocks_proxy(redsocks_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let redsocks_env = r#"
+# Redsocks environment config
+REDSOCKS_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_redsocks_proxy(redsocks_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_redsocks_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; redsocks_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_redsocks_proxy(input_comment), None);
+        assert_eq!(parse_redsocks_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_dante_proxy() {
+        let dante_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_dante_proxy(dante_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dante_conf = r#"
+logoutput: stderr
+internal: 0.0.0.0 port = 1080
+proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_dante_proxy(dante_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dante_env = r#"
+# Dante environment config
+DANTE_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dante_proxy(dante_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dante_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; dante_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_dante_proxy(input_comment), None);
+        assert_eq!(parse_dante_proxy(""), None);
     }
 }

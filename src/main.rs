@@ -527,7 +527,13 @@ enum Commands {
         /// Also configure Glider daemon proxy (/etc/glider/glider.conf / ~/.config/glider/glider.conf / /etc/systemd/system/glider.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "glider-proxy", visible_alias = "glider-daemon")]
         glider: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, and glider proxy
+        /// Also configure Redsocks daemon proxy (/etc/redsocks.conf / ~/.config/redsocks/redsocks.conf / /etc/systemd/system/redsocks.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "redsocks-proxy", visible_alias = "redsocks-daemon")]
+        redsocks: bool,
+        /// Also configure Dante daemon proxy (/etc/danted.conf / ~/.config/danted.conf / /etc/systemd/system/danted.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dante-proxy", visible_alias = "danted")]
+        dante: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, and dante proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -998,7 +1004,13 @@ enum Commands {
         /// Also unset Glider daemon proxy (/etc/glider/glider.conf / ~/.config/glider/glider.conf / /etc/systemd/system/glider.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "glider-proxy", visible_alias = "glider-daemon")]
         glider: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, and glider proxy
+        /// Also unset Redsocks daemon proxy (/etc/redsocks.conf / ~/.config/redsocks/redsocks.conf / /etc/systemd/system/redsocks.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "redsocks-proxy", visible_alias = "redsocks-daemon")]
+        redsocks: bool,
+        /// Also unset Dante daemon proxy (/etc/danted.conf / ~/.config/danted.conf / /etc/systemd/system/danted.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dante-proxy", visible_alias = "danted")]
+        dante: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, and dante proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1196,6 +1208,8 @@ async fn main() -> Result<()> {
             mtg,
             kcptun,
             glider,
+            redsocks,
+            dante,
             all,
             shell,
         }) => {
@@ -1355,6 +1369,8 @@ async fn main() -> Result<()> {
                 mtg,
                 kcptun,
                 glider,
+                redsocks,
+                dante,
                 all,
                 shell.as_deref(),
             )
@@ -1515,6 +1531,8 @@ async fn main() -> Result<()> {
             mtg,
             kcptun,
             glider,
+            redsocks,
+            dante,
             all,
             shell,
         }) => {
@@ -1673,6 +1691,8 @@ async fn main() -> Result<()> {
                 mtg,
                 kcptun,
                 glider,
+                redsocks,
+                dante,
                 all,
                 shell.as_deref(),
             )?;
@@ -6083,6 +6103,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { glider, .. }) => {
                 assert!(glider);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_redsocks() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--redsocks"]).unwrap();
+        match cli.command {
+            Some(Commands::On { redsocks, .. }) => {
+                assert!(redsocks);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--redsocks-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { redsocks, .. }) => {
+                assert!(redsocks);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_redsocks() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--redsocks"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { redsocks, .. }) => {
+                assert!(redsocks);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_dante() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--dante"]).unwrap();
+        match cli.command {
+            Some(Commands::On { dante, .. }) => {
+                assert!(dante);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--danted"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { dante, .. }) => {
+                assert!(dante);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_dante() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--dante"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { dante, .. }) => {
+                assert!(dante);
             }
             _ => panic!("Expected Off command"),
         }
