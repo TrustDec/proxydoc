@@ -24665,6 +24665,487 @@ pub fn get_stunnel_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_shadow_tls_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SHADOW_TLS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SHADOWTLS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("shadow-tls").join("config.json"),
+            home.join(".config").join("shadow-tls").join("config.yaml"),
+            home.join(".shadow-tls").join("config.json"),
+            home.join(".shadow-tls").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("shadow-tls.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/shadow-tls/config.json"),
+        PathBuf::from("/etc/shadow-tls/config.yaml"),
+        PathBuf::from("/usr/local/etc/shadow-tls/config.json"),
+        PathBuf::from("/etc/default/shadow-tls"),
+        PathBuf::from("/etc/sysconfig/shadow-tls"),
+        PathBuf::from("/etc/systemd/system/shadow-tls.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_shadow_tls_config_path() -> Option<PathBuf> {
+    let paths = get_shadow_tls_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_shadow_tls_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_shadow_tls_write_path() -> PathBuf {
+    if let Some(p) = get_shadow_tls_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SHADOW_TLS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("shadow-tls");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/shadow-tls");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/shadow-tls.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("shadow-tls").join("config.json");
+    }
+    PathBuf::from("/etc/shadow-tls/config.json")
+}
+
+pub fn parse_shadow_tls_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "shadow_tls_proxy",
+                "shadowtls_proxy",
+                "tls_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "shadow_tls_proxy"
+                        || k_low == "shadowtls_proxy"
+                        || k_low == "tls_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "shadow_tls_proxy"
+                || k_low == "shadowtls_proxy"
+                || k_low == "tls_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_shadow_tls_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_shadow_tls_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_shadow_tls_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SHADOW_TLS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SHADOW_TLS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SHADOW_TLS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SHADOW_TLS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SHADOWTLS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SHADOWTLS_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_tun2socks_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TUN2SOCKS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("tun2socks").join("config.yaml"),
+            home.join(".config").join("tun2socks").join("config.json"),
+            home.join(".tun2socks").join("config.yaml"),
+            home.join(".tun2socks").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("tun2socks.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tun2socks/config.yaml"),
+        PathBuf::from("/etc/tun2socks/config.json"),
+        PathBuf::from("/usr/local/etc/tun2socks/config.yaml"),
+        PathBuf::from("/etc/default/tun2socks"),
+        PathBuf::from("/etc/sysconfig/tun2socks"),
+        PathBuf::from("/etc/systemd/system/tun2socks.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_tun2socks_config_path() -> Option<PathBuf> {
+    let paths = get_tun2socks_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tun2socks_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tun2socks_write_path() -> PathBuf {
+    if let Some(p) = get_tun2socks_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TUN2SOCKS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("tun2socks");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/tun2socks");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tun2socks.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("tun2socks").join("config.yaml");
+    }
+    PathBuf::from("/etc/tun2socks/config.yaml")
+}
+
+pub fn parse_tun2socks_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "tun2socks_proxy",
+                "socks5_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "tun2socks_proxy"
+                        || k_low == "tun2socks_http_proxy"
+                        || k_low == "socks5_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "tun2socks_proxy"
+                || k_low == "tun2socks_http_proxy"
+                || k_low == "socks5_proxy"
+                || k_low == "socks5"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tun2socks_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tun2socks_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tun2socks_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TUN2SOCKS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUN2SOCKS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TUN2SOCKS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUN2SOCKS_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -30302,6 +30783,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Stunnel Daemon Proxy",
             "~/.config/stunnel/stunnel.conf & /etc/stunnel/stunnel.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Shadow-TLS Daemon Proxy (/etc/shadow-tls/config.json / ~/.config/shadow-tls/config.json / /etc/systemd/system/shadow-tls.service.d/http-proxy.conf)
+    if let Some((sh_proxy, sh_path)) = get_shadow_tls_proxy() {
+        let ok = verify_proxy_url(&sh_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Shadow-TLS daemon proxy `{}` in {} is dead! (shadow-tls upstream routing will fail)",
+                sh_proxy,
+                sh_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Shadow-TLS Daemon Proxy",
+            format!("{}", sh_path.display()),
+            sh_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (shadow-tls fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Shadow-TLS Daemon Proxy",
+            "~/.config/shadow-tls/config.json & /etc/shadow-tls/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Tun2socks Daemon Proxy (/etc/tun2socks/config.yaml / ~/.config/tun2socks/config.yaml / /etc/systemd/system/tun2socks.service.d/http-proxy.conf)
+    if let Some((t2s_proxy, t2s_path)) = get_tun2socks_proxy() {
+        let ok = verify_proxy_url(&t2s_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Tun2socks daemon proxy `{}` in {} is dead! (tun2socks routing will fail)",
+                t2s_proxy,
+                t2s_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Tun2socks Daemon Proxy",
+            format!("{}", t2s_path.display()),
+            t2s_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tun2socks fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Tun2socks Daemon Proxy",
+            "~/.config/tun2socks/config.yaml & /etc/tun2socks/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -36441,5 +36986,91 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; stunnel_proxy = http://127.0.0.1:7890\n";
         assert_eq!(parse_stunnel_proxy(input_comment), None);
         assert_eq!(parse_stunnel_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_shadow_tls_proxy() {
+        let sh_json = r#"{
+            "server": "127.0.0.1:8443",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_shadow_tls_proxy(sh_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sh_yaml = r#"
+server: 127.0.0.1:8443
+tls_proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_shadow_tls_proxy(sh_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sh_env = r#"
+# Shadow-TLS environment config
+SHADOW_TLS_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_shadow_tls_proxy(sh_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_shadow_tls_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; shadow_tls_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_shadow_tls_proxy(input_comment), None);
+        assert_eq!(parse_shadow_tls_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tun2socks_proxy() {
+        let t2s_json = r#"{
+            "device": "tun0",
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_tun2socks_proxy(t2s_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let t2s_yaml = r#"
+device: tun0
+socks5: 127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_tun2socks_proxy(t2s_yaml),
+            Some("http://127.0.0.1:1080".to_string())
+        );
+
+        let t2s_env = r#"
+# Tun2socks environment config
+TUN2SOCKS_PROXY="socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_tun2socks_proxy(t2s_env),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tun2socks_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: socks5://127.0.0.1:1080\n; tun2socks_proxy = 127.0.0.1:1080\n";
+        assert_eq!(parse_tun2socks_proxy(input_comment), None);
+        assert_eq!(parse_tun2socks_proxy(""), None);
     }
 }

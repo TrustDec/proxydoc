@@ -503,7 +503,13 @@ enum Commands {
         /// Also configure Stunnel daemon proxy (/etc/stunnel/stunnel.conf / ~/.config/stunnel/stunnel.conf / /etc/systemd/system/stunnel.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "stunnel-proxy", visible_alias = "stunnel4")]
         stunnel: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, and stunnel proxy
+        /// Also configure Shadow-TLS daemon proxy (/etc/shadow-tls/config.json / ~/.config/shadow-tls/config.json / /etc/systemd/system/shadow-tls.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "shadowtls", visible_alias = "shadow-tls-proxy")]
+        shadow_tls: bool,
+        /// Also configure Tun2socks daemon proxy (/etc/tun2socks/config.yaml / ~/.config/tun2socks/config.yaml / /etc/systemd/system/tun2socks.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tun2socks-daemon", visible_alias = "tun2socks-proxy")]
+        tun2socks: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, and tun2socks proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -950,7 +956,13 @@ enum Commands {
         /// Also unset Stunnel daemon proxy (/etc/stunnel/stunnel.conf / ~/.config/stunnel/stunnel.conf / /etc/systemd/system/stunnel.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "stunnel-proxy", visible_alias = "stunnel4")]
         stunnel: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, and leaf proxy
+        /// Also unset Shadow-TLS daemon proxy (/etc/shadow-tls/config.json / ~/.config/shadow-tls/config.json / /etc/systemd/system/shadow-tls.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "shadowtls", visible_alias = "shadow-tls-proxy")]
+        shadow_tls: bool,
+        /// Also unset Tun2socks daemon proxy (/etc/tun2socks/config.yaml / ~/.config/tun2socks/config.yaml / /etc/systemd/system/tun2socks.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tun2socks-daemon", visible_alias = "tun2socks-proxy")]
+        tun2socks: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, and tun2socks proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1140,6 +1152,8 @@ async fn main() -> Result<()> {
             leaf,
             mihomo,
             stunnel,
+            shadow_tls,
+            tun2socks,
             all,
             shell,
         }) => {
@@ -1291,6 +1305,8 @@ async fn main() -> Result<()> {
                 leaf,
                 mihomo,
                 stunnel,
+                shadow_tls,
+                tun2socks,
                 all,
                 shell.as_deref(),
             )
@@ -1443,6 +1459,8 @@ async fn main() -> Result<()> {
             leaf,
             mihomo,
             stunnel,
+            shadow_tls,
+            tun2socks,
             all,
             shell,
         }) => {
@@ -1593,6 +1611,8 @@ async fn main() -> Result<()> {
                 leaf,
                 mihomo,
                 stunnel,
+                shadow_tls,
+                tun2socks,
                 all,
                 shell.as_deref(),
             )?;
@@ -5763,6 +5783,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { stunnel, .. }) => {
                 assert!(stunnel);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_shadow_tls() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--shadow-tls"]).unwrap();
+        match cli.command {
+            Some(Commands::On { shadow_tls, .. }) => {
+                assert!(shadow_tls);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--shadowtls"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { shadow_tls, .. }) => {
+                assert!(shadow_tls);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_shadow_tls() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--shadow-tls"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { shadow_tls, .. }) => {
+                assert!(shadow_tls);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_tun2socks() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--tun2socks"]).unwrap();
+        match cli.command {
+            Some(Commands::On { tun2socks, .. }) => {
+                assert!(tun2socks);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--tun2socks-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { tun2socks, .. }) => {
+                assert!(tun2socks);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_tun2socks() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--tun2socks"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { tun2socks, .. }) => {
+                assert!(tun2socks);
             }
             _ => panic!("Expected Off command"),
         }

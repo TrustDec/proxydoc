@@ -69,6 +69,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (10805, false, "Leaf Proxy Daemon (HTTP/SOCKS5)"),
     (10806, false, "Mihomo Proxy Daemon (Mixed/HTTP)"),
     (10807, false, "Stunnel Proxy Daemon (TLS/Tunnel)"),
+    (10810, false, "Shadow-TLS Proxy Daemon (TLS/Tunnel)"),
+    (10811, false, "Tun2socks Proxy Daemon (TUN/SOCKS5)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

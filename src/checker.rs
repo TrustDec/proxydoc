@@ -1206,6 +1206,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Moshi AI CDN",
         "https://github.com/kyutai-labs/moshi",
     ),
+    (
+        "Shadow-TLS Proxy CDN",
+        "https://github.com/ihciah/shadow-tls/releases",
+    ),
+    (
+        "Tun2socks Proxy CDN",
+        "https://github.com/xjasonlyu/tun2socks/releases",
+    ),
+    (
+        "Janus-Pro AI CDN",
+        "https://github.com/deepseek-ai/Janus",
+    ),
+    (
+        "SmolLM2 AI CDN",
+        "https://github.com/huggingface/smollm",
+    ),
+    (
+        "DeepEP AI CDN",
+        "https://github.com/deepseek-ai/DeepEP",
+    ),
+    (
+        "Vanna AI CDN",
+        "https://github.com/vanna-ai/vanna",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2420,6 +2444,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Moshi AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Shadow-TLS Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Tun2socks Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Janus-Pro AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SmolLM2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepEP AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Vanna AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
