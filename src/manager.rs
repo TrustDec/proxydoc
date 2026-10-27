@@ -19849,6 +19849,454 @@ pub fn unset_ngrok_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_frpc_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("FRPC_HTTP_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_frpc = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "frpc_http_proxy" {
+                        lines.push(format!("Environment=\"FRPC_HTTP_PROXY={}\"", proxy_url));
+                        replaced_frpc = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("frpc_http_proxy=") {
+                lines.push(format!("FRPC_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_frpc = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_frpc {
+            lines.push(format!("Environment=\"FRPC_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let is_ini = content.contains("[common]") || (!content.contains('[') && content.contains("server_addr"));
+
+    if is_ini {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+        let mut in_common = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                in_common = trimmed.eq_ignore_ascii_case("[common]");
+            }
+
+            if in_common && (trimmed.starts_with("http_proxy") || trimmed.starts_with("proxy_url")) {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}http_proxy = {}", "", proxy_url, indent = indent));
+                replaced = true;
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            if in_common || content.contains("[common]") {
+                let mut new_lines = Vec::new();
+                let mut added = false;
+                for line in &lines {
+                    new_lines.push(line.clone());
+                    if !added && line.trim().eq_ignore_ascii_case("[common]") {
+                        new_lines.push(format!("http_proxy = {}", proxy_url));
+                        added = true;
+                    }
+                }
+                return new_lines.join("\n") + "\n";
+            } else {
+                let mut out = Vec::new();
+                if !content.trim().is_empty() {
+                    out.push(content.trim_end().to_string());
+                }
+                out.push("[common]".to_string());
+                out.push(format!("http_proxy = {}", proxy_url));
+                return out.join("\n") + "\n";
+            }
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // Default TOML format
+    let target_line = format!("transport.proxyURL = \"{}\"", proxy_url);
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("transport.proxyurl")
+            || lower.starts_with("proxyurl")
+            || lower.starts_with("proxy_url")
+        {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}{}", "", target_line, indent = indent));
+            replaced_proxy = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(target_line);
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_frpc_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "frpc_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("frpc_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        } else if lower.starts_with("transport.proxyurl")
+            || lower.starts_with("proxyurl")
+            || lower.starts_with("http_proxy")
+            || lower.starts_with("proxy_url")
+        {
+            if let Some((k, _)) = trimmed.split_once('=') {
+                let k_clean = k.trim().to_ascii_lowercase();
+                if k_clean == "transport.proxyurl"
+                    || k_clean == "proxyurl"
+                    || k_clean == "http_proxy"
+                    || k_clean == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_frpc_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_frpc_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_frpc_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_frpc_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_frpc_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_frpc_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_tailscale_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd = content.contains("[Service]")
+        || content.lines().any(|l| l.trim().starts_with("Environment="));
+
+    if is_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_all = false;
+        let mut replaced_ts = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "all_proxy" {
+                        lines.push(format!("Environment=\"ALL_PROXY={}\"", proxy_url));
+                        replaced_all = true;
+                        continue;
+                    } else if k_low == "tailscale_http_proxy" {
+                        lines.push(format!("Environment=\"TAILSCALE_HTTP_PROXY={}\"", proxy_url));
+                        replaced_ts = true;
+                        continue;
+                    }
+                }
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_all {
+            lines.push(format!("Environment=\"ALL_PROXY={}\"", proxy_url));
+        }
+        if !replaced_ts {
+            lines.push(format!("Environment=\"TAILSCALE_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // Shell environment assignment format (e.g., /etc/default/tailscaled)
+    let mut lines = Vec::new();
+    let mut replaced_http = false;
+    let mut replaced_https = false;
+    let mut replaced_all = false;
+    let mut replaced_ts = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("http_proxy=") {
+            lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_http = true;
+            continue;
+        } else if lower.starts_with("https_proxy=") {
+            lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+            replaced_https = true;
+            continue;
+        } else if lower.starts_with("all_proxy=") {
+            lines.push(format!("ALL_PROXY=\"{}\"", proxy_url));
+            replaced_all = true;
+            continue;
+        } else if lower.starts_with("tailscale_http_proxy=") {
+            lines.push(format!("TAILSCALE_HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_ts = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_http {
+        lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+    }
+    if !replaced_https {
+        lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+    }
+    if !replaced_all {
+        lines.push(format!("ALL_PROXY=\"{}\"", proxy_url));
+    }
+    if !replaced_ts {
+        lines.push(format!("TAILSCALE_HTTP_PROXY=\"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_tailscale_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tailscale_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("tailscale_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_tailscale_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tailscale_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_tailscale_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_tailscale_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tailscale_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tailscale_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -19975,6 +20423,8 @@ pub async fn turn_on(
     tor: bool,
     cloudflared: bool,
     ngrok: bool,
+    frpc: bool,
+    tailscale: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -20100,6 +20550,8 @@ pub async fn turn_on(
     let set_tor = tor || all;
     let set_cloudflared = cloudflared || all;
     let set_ngrok = ngrok || all;
+    let set_frpc = frpc || all;
+    let set_tailscale = tailscale || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -21861,6 +22313,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_frpc {
+        match set_frpc_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ FRP client daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update FRP client config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_tailscale {
+        match set_tailscale_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Tailscale daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Tailscale daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -22000,6 +22482,8 @@ pub fn turn_off(
     tor: bool,
     cloudflared: bool,
     ngrok: bool,
+    frpc: bool,
+    tailscale: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -22125,6 +22609,8 @@ pub fn turn_off(
     let unset_tor = tor || all;
     let unset_cloudflared = cloudflared || all;
     let unset_ngrok = ngrok || all;
+    let unset_frpc = frpc || all;
+    let unset_tailscale = tailscale || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -23186,6 +23672,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Ngrok daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Ngrok proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Ngrok daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_frpc {
+        match unset_frpc_proxy() {
+            Ok(true) => eprintln!("{}", "✔ FRP client daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ FRP client proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset FRP client daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tailscale {
+        match unset_tailscale_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Tailscale daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Tailscale proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Tailscale daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -26182,5 +26684,70 @@ proxy_url: "http://127.0.0.1:7890"
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("NGROK_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_frpc_proxy_toml() {
+        let frpc_initial = r#"
+serverAddr = "127.0.0.1"
+serverPort = 7000
+transport.proxyURL = "http://127.0.0.1:7890"
+"#;
+        let frpc_updated = apply_frpc_proxy(frpc_initial, "http://10.0.0.56:8080");
+        assert!(frpc_updated.contains("transport.proxyURL = \"http://10.0.0.56:8080\""));
+        let (frpc_cleaned, frpc_removed) = remove_frpc_proxy(&frpc_updated);
+        assert!(frpc_removed);
+        assert!(!frpc_cleaned.contains("transport.proxyURL"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_frpc_proxy(dropin_initial, "http://10.0.0.56:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.56:8080\""));
+        assert!(dropin_updated.contains("Environment=\"FRPC_HTTP_PROXY=http://10.0.0.56:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_frpc_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("FRPC_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_frpc_proxy_ini() {
+        let frpc_initial = r#"
+[common]
+server_addr = 127.0.0.1
+server_port = 7000
+http_proxy = http://127.0.0.1:7890
+"#;
+        let frpc_updated = apply_frpc_proxy(frpc_initial, "http://10.0.0.56:8080");
+        assert!(frpc_updated.contains("http_proxy = http://10.0.0.56:8080"));
+        let (frpc_cleaned, frpc_removed) = remove_frpc_proxy(&frpc_updated);
+        assert!(frpc_removed);
+        assert!(!frpc_cleaned.contains("http_proxy = http://10.0.0.56:8080"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tailscale_proxy() {
+        let ts_initial = r#"
+HTTP_PROXY="http://127.0.0.1:7890"
+HTTPS_PROXY="http://127.0.0.1:7890"
+"#;
+        let ts_updated = apply_tailscale_proxy(ts_initial, "http://10.0.0.58:8080");
+        assert!(ts_updated.contains("HTTP_PROXY=\"http://10.0.0.58:8080\""));
+        assert!(ts_updated.contains("HTTPS_PROXY=\"http://10.0.0.58:8080\""));
+        assert!(ts_updated.contains("ALL_PROXY=\"http://10.0.0.58:8080\""));
+        let (ts_cleaned, ts_removed) = remove_tailscale_proxy(&ts_updated);
+        assert!(ts_removed);
+        assert!(!ts_cleaned.contains("HTTP_PROXY="));
+        assert!(!ts_cleaned.contains("HTTPS_PROXY="));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_tailscale_proxy(dropin_initial, "http://10.0.0.58:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.58:8080\""));
+        assert!(dropin_updated.contains("Environment=\"TAILSCALE_HTTP_PROXY=http://10.0.0.58:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_tailscale_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TAILSCALE_HTTP_PROXY="));
     }
 }

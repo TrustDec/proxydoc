@@ -942,6 +942,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Continue.dev CDN",
         "https://www.continue.dev",
     ),
+    (
+        "Frp Release CDN",
+        "https://github.com/fatedier/frp/releases",
+    ),
+    (
+        "Tailscale Package CDN",
+        "https://pkgs.tailscale.com",
+    ),
+    (
+        "Unsloth AI CDN",
+        "https://unsloth.ai",
+    ),
+    (
+        "ComfyUI CDN",
+        "https://comfy.org",
+    ),
+    (
+        "AnythingLLM CDN",
+        "https://useanything.com",
+    ),
+    (
+        "Windsurf AI CDN",
+        "https://windsurf.codeium.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1958,6 +1982,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Continue.dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Frp Release CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Tailscale Package CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Unsloth AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ComfyUI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "AnythingLLM CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Windsurf AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

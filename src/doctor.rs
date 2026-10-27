@@ -19616,6 +19616,406 @@ pub fn get_ngrok_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_frpc_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("FRPC_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("FRPC_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("FRPC_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".frp").join("frpc.toml"),
+            home.join(".frp").join("frpc.ini"),
+            home.join(".config").join("frp").join("frpc.toml"),
+            home.join(".config").join("frp").join("frpc.ini"),
+            home.join(".config").join("systemd").join("user").join("frpc.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/frp/frpc.toml"),
+        PathBuf::from("/etc/frp/frpc.ini"),
+        PathBuf::from("/usr/local/etc/frp/frpc.toml"),
+        PathBuf::from("/usr/local/etc/frp/frpc.ini"),
+        PathBuf::from("/opt/homebrew/etc/frp/frpc.toml"),
+        PathBuf::from("/opt/homebrew/etc/frp/frpc.ini"),
+        PathBuf::from("/etc/default/frpc"),
+        PathBuf::from("/etc/sysconfig/frpc"),
+        PathBuf::from("/etc/systemd/system/frpc.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_frpc_config_path() -> Option<PathBuf> {
+    let paths = get_frpc_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_frpc_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_frpc_write_path() -> PathBuf {
+    if let Some(p) = get_frpc_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("FRPC_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let frp_dir = home.join(".frp");
+        if frp_dir.is_dir() {
+            return frp_dir.join("frpc.toml");
+        }
+    }
+    let etc_frp = PathBuf::from("/etc/frp");
+    if etc_frp.is_dir() {
+        return etc_frp.join("frpc.toml");
+    }
+    let opt_brew = PathBuf::from("/opt/homebrew/etc/frp");
+    if opt_brew.is_dir() {
+        return opt_brew.join("frpc.toml");
+    }
+    let usr_local = PathBuf::from("/usr/local/etc/frp");
+    if usr_local.is_dir() {
+        return usr_local.join("frpc.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/frpc.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".frp").join("frpc.toml");
+    }
+    PathBuf::from("/etc/frp/frpc.toml")
+}
+
+pub fn parse_frpc_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "frpc_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/frpc
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "frpc_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // FRP TOML: transport.proxyURL = "http://127.0.0.1:7890" or proxyURL = "http://127.0.0.1:7890"
+        // FRP INI: http_proxy = http://127.0.0.1:7890 or proxy_url = http://127.0.0.1:7890
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_clean = k.trim().to_ascii_lowercase();
+            if k_clean == "transport.proxyurl"
+                || k_clean == "proxyurl"
+                || k_clean == "http_proxy"
+                || k_clean == "proxy_url"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_frpc_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_frpc_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_frpc_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("FRPC_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FRPC_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_tailscale_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TAILSCALE_ENV_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TAILSCALE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("tailscale").join("tailscaled.env"),
+            home.join("Library").join("Application Support").join("Tailscale").join("env"),
+            home.join(".config").join("systemd").join("user").join("tailscaled.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/default/tailscaled"),
+        PathBuf::from("/etc/sysconfig/tailscaled"),
+        PathBuf::from("/etc/tailscale/tailscaled.env"),
+        PathBuf::from("/etc/tailscale/tailscaled.conf"),
+        PathBuf::from("/etc/systemd/system/tailscaled.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_tailscale_config_path() -> Option<PathBuf> {
+    let paths = get_tailscale_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tailscale_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tailscale_write_path() -> PathBuf {
+    if let Some(p) = get_tailscale_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TAILSCALE_ENV_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let default_etc = PathBuf::from("/etc/default/tailscaled");
+    if PathBuf::from("/etc/default").is_dir() {
+        return default_etc;
+    }
+    let sysconfig_etc = PathBuf::from("/etc/sysconfig/tailscaled");
+    if PathBuf::from("/etc/sysconfig").is_dir() {
+        return sysconfig_etc;
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tailscaled.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        #[cfg(target_os = "macos")]
+        {
+            let mac_env = home.join("Library").join("Application Support").join("Tailscale");
+            if mac_env.is_dir() {
+                return mac_env.join("env");
+            }
+        }
+        return home.join(".config").join("tailscale").join("tailscaled.env");
+    }
+    PathBuf::from("/etc/default/tailscaled")
+}
+
+pub fn parse_tailscale_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "tailscale_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/tailscaled
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "tailscale_http_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_tailscale_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tailscale_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tailscale_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TAILSCALE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TAILSCALE_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -24549,6 +24949,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Ngrok Daemon Proxy",
             "~/.config/ngrok/ngrok.yml & /etc/ngrok/ngrok.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // FRP Client (frpc) Daemon Proxy (~/.frp/frpc.toml / /etc/frp/frpc.toml / /etc/systemd/system/frpc.service.d/http-proxy.conf)
+    if let Some((frp_proxy, frp_path)) = get_frpc_proxy() {
+        let ok = verify_proxy_url(&frp_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "FRP client daemon proxy `{}` in {} is dead! (frpc tunnel connections will fail)",
+                frp_proxy,
+                frp_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "FRP Client Daemon Proxy",
+            format!("{}", frp_path.display()),
+            frp_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (frpc fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "FRP Client Daemon Proxy",
+            "~/.frp/frpc.toml & /etc/frp/frpc.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Tailscale Daemon Proxy (/etc/default/tailscaled / /etc/sysconfig/tailscaled / /etc/systemd/system/tailscaled.service.d/http-proxy.conf)
+    if let Some((ts_proxy, ts_path)) = get_tailscale_proxy() {
+        let ok = verify_proxy_url(&ts_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Tailscale daemon proxy `{}` in {} is dead! (tailscaled control & DERP connections will fail)",
+                ts_proxy,
+                ts_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Tailscale Daemon Proxy",
+            format!("{}", ts_path.display()),
+            ts_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tailscaled fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Tailscale Daemon Proxy",
+            "/etc/default/tailscaled & /etc/systemd/system/tailscaled.service.d/http-proxy.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -29781,5 +30245,69 @@ Environment="NGROK_HTTP_PROXY=http://10.0.0.115:8080"
         let input_comment = "# proxy_url: http://127.0.0.1:7890\n; proxy-url: 127.0.0.1:7890\n";
         assert_eq!(parse_ngrok_proxy(input_comment), None);
         assert_eq!(parse_ngrok_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_frpc_proxy() {
+        let frpc_toml = r#"
+serverAddr = "127.0.0.1"
+serverPort = 7000
+transport.proxyURL = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_frpc_proxy(frpc_toml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let frpc_ini = r#"
+[common]
+server_addr = 127.0.0.1
+server_port = 7000
+http_proxy = http://127.0.0.1:10809
+"#;
+        assert_eq!(
+            parse_frpc_proxy(frpc_ini),
+            Some("http://127.0.0.1:10809".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_frpc_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# transport.proxyURL = \"http://127.0.0.1:7890\"\n; http_proxy = 127.0.0.1:7890\n";
+        assert_eq!(parse_frpc_proxy(input_comment), None);
+        assert_eq!(parse_frpc_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tailscale_proxy() {
+        let default_file = r#"
+# Tailscale startup config
+HTTP_PROXY="http://127.0.0.1:7890"
+HTTPS_PROXY="http://127.0.0.1:7890"
+ALL_PROXY="socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_tailscale_proxy(default_file),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="ALL_PROXY=socks5://10.0.0.120:1080"
+"#;
+        assert_eq!(
+            parse_tailscale_proxy(dropin),
+            Some("socks5://10.0.0.120:1080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; ALL_PROXY=socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_tailscale_proxy(input_comment), None);
+        assert_eq!(parse_tailscale_proxy(""), None);
     }
 }
