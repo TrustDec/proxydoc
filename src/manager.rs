@@ -17314,6 +17314,410 @@ pub fn unset_caddy_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_envoy_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_envoy = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "envoy_http_proxy" {
+                        lines.push(format!("Environment=\"ENVOY_HTTP_PROXY={}\"", proxy_url));
+                        replaced_envoy = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("envoy_http_proxy=") {
+                lines.push(format!("ENVOY_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_envoy = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_envoy {
+            lines.push(format!("Environment=\"ENVOY_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // Envoy YAML or JSON
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http_proxy" || key == "https_proxy" || key == "proxy" || key == "proxy_url" || key == "envoy_http_proxy" {
+                let indent = line.len() - line.trim_start().len();
+                if trimmed.contains('"') && trimmed.ends_with(',') {
+                    lines.push(format!("{:indent$}\"http_proxy\": \"{}\",", "", proxy_url, indent = indent));
+                } else {
+                    lines.push(format!("{:indent$}http_proxy: \"{}\"", "", proxy_url, indent = indent));
+                }
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(format!("http_proxy: \"{}\"", proxy_url));
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_envoy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "envoy_http_proxy"
+                    || k_low == "envoy_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("envoy_http_proxy=")
+            || lower.starts_with("envoy_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if let Some((k, _)) = trimmed.split_once(':') {
+            let key = k.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            if key == "http_proxy" || key == "https_proxy" || key == "proxy" || key == "proxy_url" || key == "envoy_http_proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_envoy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_envoy_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_envoy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_envoy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_envoy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_envoy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_haproxy_proxy(content: &str, proxy_url: &str) -> String {
+    let has_systemd = content.lines().any(|l| {
+        let lower = l.trim().to_ascii_lowercase();
+        lower.starts_with("environment=")
+            || lower.starts_with("execstart=")
+            || lower == "[unit]"
+            || lower == "[service]"
+            || lower == "[install]"
+    });
+
+    if has_systemd {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_haproxy = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "haproxy_http_proxy" {
+                        lines.push(format!("Environment=\"HAPROXY_HTTP_PROXY={}\"", proxy_url));
+                        replaced_haproxy = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("haproxy_http_proxy=") {
+                lines.push(format!("HAPROXY_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_haproxy = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_haproxy {
+            lines.push(format!("Environment=\"HAPROXY_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // haproxy.cfg format
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let directive = parts[0].to_lowercase();
+            if directive == "http-proxy" || directive == "http_proxy" || directive == "proxy" {
+                let indent = line.len() - line.trim_start().len();
+                lines.push(format!("{:indent$}http-proxy {}", "", proxy_url, indent = indent));
+                replaced_proxy = true;
+                continue;
+            }
+        }
+        if parts.len() >= 3 && parts[0].eq_ignore_ascii_case("default-server") && parts[1].eq_ignore_ascii_case("http-proxy") {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}default-server http-proxy {}", "", proxy_url, indent = indent));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(format!("    http-proxy {}", proxy_url));
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_haproxy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "haproxy_http_proxy"
+                    || k_low == "haproxy_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("haproxy_http_proxy=")
+            || lower.starts_with("haproxy_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if !parts.is_empty() {
+            let directive = parts[0].to_lowercase();
+            if directive == "http-proxy" || directive == "http_proxy" || directive == "proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        if parts.len() >= 2 && parts[0].eq_ignore_ascii_case("default-server") && parts[1].eq_ignore_ascii_case("http-proxy") {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_haproxy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_haproxy_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_haproxy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_haproxy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_haproxy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_haproxy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -17428,6 +17832,8 @@ pub async fn turn_on(
     vault: bool,
     traefik: bool,
     caddy: bool,
+    envoy: bool,
+    haproxy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -17541,6 +17947,8 @@ pub async fn turn_on(
     let set_vault = vault || all;
     let set_traefik = traefik || all;
     let set_caddy = caddy || all;
+    let set_envoy = envoy || all;
+    let set_haproxy = haproxy || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -19122,6 +19530,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_envoy {
+        match set_envoy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Envoy service proxy daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Envoy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_haproxy {
+        match set_haproxy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ HAProxy load balancer daemon proxy ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update HAProxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -19249,6 +19687,8 @@ pub fn turn_off(
     vault: bool,
     traefik: bool,
     caddy: bool,
+    envoy: bool,
+    haproxy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -19362,6 +19802,8 @@ pub fn turn_off(
     let unset_vault = vault || all;
     let unset_traefik = traefik || all;
     let unset_caddy = caddy || all;
+    let unset_envoy = envoy || all;
+    let unset_haproxy = haproxy || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -20327,6 +20769,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Caddy web server daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Caddy web server proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Caddy web server daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_envoy {
+        match unset_envoy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Envoy service proxy daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Envoy service proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Envoy service proxy daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_haproxy {
+        match unset_haproxy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ HAProxy load balancer daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ HAProxy load balancer proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset HAProxy load balancer daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -23023,5 +23481,50 @@ serversTransport:
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("CADDY_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_envoy_proxy() {
+        let yaml_initial = r#"
+http_proxy: "http://127.0.0.1:7890"
+"#;
+        let yaml_updated = apply_envoy_proxy(yaml_initial, "http://10.0.0.38:8080");
+        assert!(yaml_updated.contains("http_proxy: \"http://10.0.0.38:8080\""));
+        let (yaml_cleaned, yaml_removed) = remove_envoy_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("http_proxy:"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_envoy_proxy(dropin_initial, "http://10.0.0.38:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.38:8080\""));
+        assert!(dropin_updated.contains("Environment=\"ENVOY_HTTP_PROXY=http://10.0.0.38:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_envoy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("ENVOY_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_haproxy_proxy() {
+        let haproxy_initial = r#"
+defaults
+    http-proxy http://127.0.0.1:7890
+"#;
+        let haproxy_updated = apply_haproxy_proxy(haproxy_initial, "http://10.0.0.39:8080");
+        assert!(haproxy_updated.contains("http-proxy http://10.0.0.39:8080"));
+        let (haproxy_cleaned, haproxy_removed) = remove_haproxy_proxy(&haproxy_updated);
+        assert!(haproxy_removed);
+        assert!(!haproxy_cleaned.contains("http-proxy http://"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_haproxy_proxy(dropin_initial, "http://10.0.0.39:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.39:8080\""));
+        assert!(dropin_updated.contains("Environment=\"HAPROXY_HTTP_PROXY=http://10.0.0.39:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_haproxy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("HAPROXY_HTTP_PROXY="));
     }
 }

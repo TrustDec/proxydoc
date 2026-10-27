@@ -16876,6 +16876,457 @@ pub fn get_caddy_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_envoy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ENVOY_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("ENVOY_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("envoy.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("envoy").join("envoy.yaml"),
+            home.join(".config").join("envoy").join("envoy.json"),
+            home.join(".envoy").join("envoy.yaml"),
+            home.join(".envoy").join("envoy.json"),
+            home.join(".config").join("systemd").join("user").join("envoy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/envoy/envoy.yaml"),
+        PathBuf::from("/etc/envoy/envoy.json"),
+        PathBuf::from("/etc/envoy/proxy.yaml"),
+        PathBuf::from("/etc/default/envoy"),
+        PathBuf::from("/etc/sysconfig/envoy"),
+        PathBuf::from("/etc/systemd/system/envoy.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/envoy-proxy.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/envoy/envoy.yaml"),
+        PathBuf::from("C:\\ProgramData\\envoy\\envoy.yaml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_envoy_config_path() -> Option<PathBuf> {
+    let paths = get_envoy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_envoy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_envoy_write_path() -> PathBuf {
+    if let Some(p) = get_envoy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ENVOY_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_envoy = PathBuf::from("/etc/envoy");
+    if etc_envoy.is_dir() {
+        return etc_envoy.join("envoy.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/envoy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("envoy").join("envoy.yaml");
+    }
+    PathBuf::from("/etc/envoy/envoy.yaml")
+}
+
+pub fn parse_envoy_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "envoy_http_proxy"
+                        || k_low == "envoy_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/envoy
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "envoy_http_proxy"
+                || k_low == "envoy_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // JSON format: "proxy": "..." or "http_proxy": "..."
+        for key in &["\"http_proxy\"", "\"https_proxy\"", "\"proxy\"", "\"proxy_url\"", "\"envoy_http_proxy\""] {
+            if let Some(idx) = trimmed.find(key) {
+                let rest = &trimmed[idx + key.len()..];
+                if let Some(colon_idx) = rest.find(':') {
+                    let val_part = &rest[colon_idx + 1..];
+                    let trimmed_val = val_part.trim();
+                    let val = if trimmed_val.starts_with('"') {
+                        if let Some(end_quote) = trimmed_val[1..].find('"') {
+                            &trimmed_val[1..1 + end_quote]
+                        } else {
+                            trimmed_val.trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c == '}' || c == ']').trim()
+                        }
+                    } else if trimmed_val.starts_with('\'') {
+                        if let Some(end_quote) = trimmed_val[1..].find('\'') {
+                            &trimmed_val[1..1 + end_quote]
+                        } else {
+                            trimmed_val.trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c == '}' || c == ']').trim()
+                        }
+                    } else {
+                        trimmed_val.trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c == '}' || c == ']').trim()
+                    };
+                    if !val.is_empty()
+                        && (val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                            || val.contains(':'))
+                    {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        // YAML format: http_proxy: "..." or proxy: "..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().trim_matches('"').trim_matches('\'').to_lowercase();
+            if k_low == "http_proxy" || k_low == "https_proxy" || k_low == "proxy" || k_low == "proxy_url" || k_low == "envoy_http_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim_matches(',').trim_matches('}').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_envoy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_envoy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_envoy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ENVOY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ENVOY_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_haproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("HAPROXY_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("HAPROXY_CFG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("haproxy").join("haproxy.cfg"),
+            home.join(".haproxy").join("haproxy.cfg"),
+            home.join(".config").join("systemd").join("user").join("haproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/haproxy/haproxy.cfg"),
+        PathBuf::from("/etc/haproxy/proxy.cfg"),
+        PathBuf::from("/etc/default/haproxy"),
+        PathBuf::from("/etc/sysconfig/haproxy"),
+        PathBuf::from("/etc/systemd/system/haproxy.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/haproxy-proxy.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/haproxy/haproxy.cfg"),
+        PathBuf::from("C:\\ProgramData\\haproxy\\haproxy.cfg"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_haproxy_config_path() -> Option<PathBuf> {
+    let paths = get_haproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_haproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_haproxy_write_path() -> PathBuf {
+    if let Some(p) = get_haproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("HAPROXY_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_haproxy = PathBuf::from("/etc/haproxy");
+    if etc_haproxy.is_dir() {
+        return etc_haproxy.join("haproxy.cfg");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/haproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("haproxy").join("haproxy.cfg");
+    }
+    PathBuf::from("/etc/haproxy/haproxy.cfg")
+}
+
+pub fn parse_haproxy_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "haproxy_http_proxy"
+                        || k_low == "haproxy_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/haproxy
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "haproxy_http_proxy"
+                || k_low == "haproxy_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // HAProxy config directives:
+        // http-proxy http://... or http_proxy http://... or proxy http://...
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let directive = parts[0].to_lowercase();
+            if directive == "http-proxy" || directive == "http_proxy" || directive == "proxy" {
+                let val = parts[1].trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+        // default-server http-proxy <url>
+        if parts.len() >= 3 && parts[0].eq_ignore_ascii_case("default-server") && parts[1].eq_ignore_ascii_case("http-proxy") {
+            let val = parts[2].trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty()
+                && (val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                    || val.contains(':'))
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_haproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_haproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_haproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("HAPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HAPROXY_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -21425,6 +21876,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Caddy Web Server",
             "/etc/caddy/Caddyfile & ~/.config/caddy/Caddyfile",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Envoy Cloud-Native Service Proxy (/etc/envoy/envoy.yaml / ~/.config/envoy/envoy.yaml / /etc/systemd/system/envoy.service.d/http-proxy.conf)
+    if let Some((ev_proxy, ev_path)) = get_envoy_proxy() {
+        let ok = verify_proxy_url(&ev_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Envoy service proxy daemon proxy `{}` in {} is dead! (Envoy upstream clusters, dynamic Discovery Service EDS/CDS, and egress will fail)",
+                ev_proxy,
+                ev_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Envoy Service Proxy",
+            format!("{}", ev_path.display()),
+            ev_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (envoy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Envoy Service Proxy",
+            "/etc/envoy/envoy.yaml & ~/.config/envoy/envoy.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // HAProxy Load Balancer Daemon Proxy (/etc/haproxy/haproxy.cfg / ~/.config/haproxy/haproxy.cfg / /etc/systemd/system/haproxy.service.d/http-proxy.conf)
+    if let Some((ha_proxy, ha_path)) = get_haproxy_proxy() {
+        let ok = verify_proxy_url(&ha_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "HAProxy load balancer daemon proxy `{}` in {} is dead! (HAProxy health checking, OCSP stapling, and backend proxying will fail)",
+                ha_proxy,
+                ha_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "HAProxy Load Balancer",
+            format!("{}", ha_path.display()),
+            ha_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (haproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "HAProxy Load Balancer",
+            "/etc/haproxy/haproxy.cfg & ~/.config/haproxy/haproxy.cfg",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -26239,5 +26754,84 @@ Environment="CADDY_HTTP_PROXY=http://10.0.0.90:8080"
         let input_comment = "# proxy http://127.0.0.1:7890\n// proxy http://127.0.0.1:7890\n; proxy http://127.0.0.1:7890\n";
         assert_eq!(parse_caddy_proxy(input_comment), None);
         assert_eq!(parse_caddy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_envoy_proxy() {
+        let envoy_yaml = r#"
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9901 }
+http_proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_envoy_proxy(envoy_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="ENVOY_HTTP_PROXY=http://10.0.0.95:8080"
+"#;
+        assert_eq!(
+            parse_envoy_proxy(dropin),
+            Some("http://10.0.0.95:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.96:8080\"\n";
+        assert_eq!(
+            parse_envoy_proxy(default_env),
+            Some("http://10.0.0.96:8080".to_string())
+        );
+
+        let json_conf = r#"{"static_resources": {"clusters": [{"name": "service_proxy", "http_proxy": "http://10.0.0.97:8080"}]}}"#;
+        assert_eq!(
+            parse_envoy_proxy(json_conf),
+            Some("http://10.0.0.97:8080".to_string())
+        );
+
+        let input_comment = "# http_proxy: \"http://127.0.0.1:7890\"\n// http_proxy: \"http://127.0.0.1:7890\"\n; http_proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_envoy_proxy(input_comment), None);
+        assert_eq!(parse_envoy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_haproxy_proxy() {
+        let haproxy_cfg = r#"
+global
+    log /dev/log local0
+
+defaults
+    http-proxy http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_haproxy_proxy(haproxy_cfg),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HAPROXY_HTTP_PROXY=http://10.0.0.98:8080"
+"#;
+        assert_eq!(
+            parse_haproxy_proxy(dropin),
+            Some("http://10.0.0.98:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.99:8080\"\n";
+        assert_eq!(
+            parse_haproxy_proxy(default_env),
+            Some("http://10.0.0.99:8080".to_string())
+        );
+
+        let default_server_line = "default-server http-proxy http://10.0.0.100:8080\n";
+        assert_eq!(
+            parse_haproxy_proxy(default_server_line),
+            Some("http://10.0.0.100:8080".to_string())
+        );
+
+        let input_comment = "# http-proxy http://127.0.0.1:7890\n// http-proxy http://127.0.0.1:7890\n; http-proxy http://127.0.0.1:7890\n";
+        assert_eq!(parse_haproxy_proxy(input_comment), None);
+        assert_eq!(parse_haproxy_proxy(""), None);
     }
 }

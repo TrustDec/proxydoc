@@ -798,6 +798,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Varnish Cache CDN",
         "https://varnish-cache.org",
     ),
+    (
+        "Apache Cassandra CDN",
+        "https://cassandra.apache.org",
+    ),
+    (
+        "Apache Flink CDN",
+        "https://flink.apache.org",
+    ),
+    (
+        "Apache Spark CDN",
+        "https://spark.apache.org",
+    ),
+    (
+        "Apache Pulsar CDN",
+        "https://pulsar.apache.org",
+    ),
+    (
+        "Apache Airflow CDN",
+        "https://airflow.apache.org",
+    ),
+    (
+        "ScyllaDB CDN",
+        "https://www.scylladb.com",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1706,6 +1730,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Varnish Cache CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Cassandra CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Flink CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Spark CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Pulsar CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Airflow CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ScyllaDB CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

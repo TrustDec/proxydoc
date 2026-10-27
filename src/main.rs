@@ -401,7 +401,13 @@ enum Commands {
         /// Also configure Caddy enterprise web server daemon proxy (/etc/caddy/Caddyfile / ~/.config/caddy/Caddyfile / /etc/systemd/system/caddy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "caddy-server", visible_alias = "caddyserver")]
         caddy: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, and caddy proxy
+        /// Also configure Envoy cloud-native service proxy (/etc/envoy/envoy.yaml / ~/.config/envoy/envoy.yaml / /etc/systemd/system/envoy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "envoy-proxy", visible_alias = "envoyproxy")]
+        envoy: bool,
+        /// Also configure HAProxy load balancer daemon proxy (/etc/haproxy/haproxy.cfg / ~/.config/haproxy/haproxy.cfg / /etc/systemd/system/haproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "ha-proxy", visible_alias = "haproxy-server")]
+        haproxy: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, and haproxy proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -746,7 +752,13 @@ enum Commands {
         /// Also unset Caddy enterprise web server daemon proxy (/etc/caddy/Caddyfile / ~/.config/caddy/Caddyfile / /etc/systemd/system/caddy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "caddy-server", visible_alias = "caddyserver")]
         caddy: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, and caddy proxy
+        /// Also unset Envoy cloud-native service proxy (/etc/envoy/envoy.yaml / ~/.config/envoy/envoy.yaml / /etc/systemd/system/envoy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "envoy-proxy", visible_alias = "envoyproxy")]
+        envoy: bool,
+        /// Also unset HAProxy load balancer daemon proxy (/etc/haproxy/haproxy.cfg / ~/.config/haproxy/haproxy.cfg / /etc/systemd/system/haproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "ha-proxy", visible_alias = "haproxy-server")]
+        haproxy: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, and haproxy proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -902,6 +914,8 @@ async fn main() -> Result<()> {
             vault,
             traefik,
             caddy,
+            envoy,
+            haproxy,
             all,
             shell,
         }) => {
@@ -1019,6 +1033,8 @@ async fn main() -> Result<()> {
                 vault,
                 traefik,
                 caddy,
+                envoy,
+                haproxy,
                 all,
                 shell.as_deref(),
             )
@@ -1137,6 +1153,8 @@ async fn main() -> Result<()> {
             vault,
             traefik,
             caddy,
+            envoy,
+            haproxy,
             all,
             shell,
         }) => {
@@ -1253,6 +1271,8 @@ async fn main() -> Result<()> {
                 vault,
                 traefik,
                 caddy,
+                envoy,
+                haproxy,
                 all,
                 shell.as_deref(),
             )?;
@@ -4339,6 +4359,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { caddy, .. }) => {
                 assert!(caddy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_envoy() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--envoy"]).unwrap();
+        match cli.command {
+            Some(Commands::On { envoy, .. }) => {
+                assert!(envoy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--envoy-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { envoy, .. }) => {
+                assert!(envoy);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_envoy() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--envoy"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { envoy, .. }) => {
+                assert!(envoy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_haproxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--haproxy"]).unwrap();
+        match cli.command {
+            Some(Commands::On { haproxy, .. }) => {
+                assert!(haproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--ha-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { haproxy, .. }) => {
+                assert!(haproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_haproxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--haproxy"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { haproxy, .. }) => {
+                assert!(haproxy);
             }
             _ => panic!("Expected Off command"),
         }
