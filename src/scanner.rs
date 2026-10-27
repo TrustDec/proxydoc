@@ -75,6 +75,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (10813, false, "Cloak Proxy Client Daemon (Obfuscation/Tunnel)"),
     (10814, false, "Wireproxy Proxy Daemon (WireGuard/Tunnel)"),
     (10815, false, "MTG Proxy Daemon (MTProto/Tunnel)"),
+    (10816, false, "Kcptun Proxy Client Daemon (KCP/Tunnel)"),
+    (10817, false, "Glider Proxy Daemon (Forward/Multi-protocol)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

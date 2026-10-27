@@ -521,7 +521,13 @@ enum Commands {
         /// Also configure MTG daemon proxy (/etc/mtg.toml / ~/.config/mtg/config.toml / /etc/systemd/system/mtg.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "mtg-daemon", visible_alias = "mtg-proxy")]
         mtg: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, and mtg proxy
+        /// Also configure Kcptun daemon proxy (/etc/kcptun/client.json / ~/.config/kcptun/client.json / /etc/systemd/system/kcptun.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "kcptun-client", visible_alias = "kcptun-proxy")]
+        kcptun: bool,
+        /// Also configure Glider daemon proxy (/etc/glider/glider.conf / ~/.config/glider/glider.conf / /etc/systemd/system/glider.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "glider-proxy", visible_alias = "glider-daemon")]
+        glider: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, and glider proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -986,7 +992,13 @@ enum Commands {
         /// Also unset MTG daemon proxy (/etc/mtg.toml / ~/.config/mtg/config.toml / /etc/systemd/system/mtg.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "mtg-daemon", visible_alias = "mtg-proxy")]
         mtg: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, and mtg proxy
+        /// Also unset Kcptun daemon proxy (/etc/kcptun/client.json / ~/.config/kcptun/client.json / /etc/systemd/system/kcptun.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "kcptun-client", visible_alias = "kcptun-proxy")]
+        kcptun: bool,
+        /// Also unset Glider daemon proxy (/etc/glider/glider.conf / ~/.config/glider/glider.conf / /etc/systemd/system/glider.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "glider-proxy", visible_alias = "glider-daemon")]
+        glider: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, and glider proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1182,6 +1194,8 @@ async fn main() -> Result<()> {
             cloak,
             wireproxy,
             mtg,
+            kcptun,
+            glider,
             all,
             shell,
         }) => {
@@ -1339,6 +1353,8 @@ async fn main() -> Result<()> {
                 cloak,
                 wireproxy,
                 mtg,
+                kcptun,
+                glider,
                 all,
                 shell.as_deref(),
             )
@@ -1497,6 +1513,8 @@ async fn main() -> Result<()> {
             cloak,
             wireproxy,
             mtg,
+            kcptun,
+            glider,
             all,
             shell,
         }) => {
@@ -1653,6 +1671,8 @@ async fn main() -> Result<()> {
                 cloak,
                 wireproxy,
                 mtg,
+                kcptun,
+                glider,
                 all,
                 shell.as_deref(),
             )?;
@@ -6003,6 +6023,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { mtg, .. }) => {
                 assert!(mtg);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_kcptun() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--kcptun"]).unwrap();
+        match cli.command {
+            Some(Commands::On { kcptun, .. }) => {
+                assert!(kcptun);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--kcptun-client"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { kcptun, .. }) => {
+                assert!(kcptun);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_kcptun() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--kcptun"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { kcptun, .. }) => {
+                assert!(kcptun);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_glider() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--glider"]).unwrap();
+        match cli.command {
+            Some(Commands::On { glider, .. }) => {
+                assert!(glider);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--glider-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { glider, .. }) => {
+                assert!(glider);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_glider() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--glider"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { glider, .. }) => {
+                assert!(glider);
             }
             _ => panic!("Expected Off command"),
         }

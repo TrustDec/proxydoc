@@ -1278,6 +1278,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Fish-Speech AI CDN",
         "https://github.com/fishaudio/fish-speech",
     ),
+    (
+        "Kcptun Proxy CDN",
+        "https://github.com/xtaci/kcptun/releases",
+    ),
+    (
+        "Glider Proxy CDN",
+        "https://github.com/nadoo/glider/releases",
+    ),
+    (
+        "Qwen2.5-VL AI CDN",
+        "https://github.com/QwenLM/Qwen2.5-VL",
+    ),
+    (
+        "HunyuanVideo AI CDN",
+        "https://github.com/Tencent/HunyuanVideo",
+    ),
+    (
+        "Aider AI CDN",
+        "https://github.com/Aider-AI/aider",
+    ),
+    (
+        "MiniCPM AI CDN",
+        "https://github.com/OpenBMB/MiniCPM",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2546,6 +2570,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Fish-Speech AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Kcptun Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Glider Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen2.5-VL AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HunyuanVideo AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Aider AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MiniCPM AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

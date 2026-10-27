@@ -26077,6 +26077,462 @@ pub fn get_mtg_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_kcptun_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("KCPTUN_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("kcptun").join("client.json"),
+            home.join(".config").join("kcptun").join("kcptun.json"),
+            home.join(".kcptun").join("client.json"),
+            home.join(".kcptun").join("kcptun.json"),
+            home.join(".config").join("systemd").join("user").join("kcptun.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/kcptun/client.json"),
+        PathBuf::from("/etc/kcptun/kcptun.json"),
+        PathBuf::from("/etc/kcptun.json"),
+        PathBuf::from("/usr/local/etc/kcptun/client.json"),
+        PathBuf::from("/etc/default/kcptun"),
+        PathBuf::from("/etc/sysconfig/kcptun"),
+        PathBuf::from("/etc/systemd/system/kcptun.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_kcptun_config_path() -> Option<PathBuf> {
+    let paths = get_kcptun_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_kcptun_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_kcptun_write_path() -> PathBuf {
+    if let Some(p) = get_kcptun_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("KCPTUN_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("kcptun");
+        if dir.is_dir() {
+            return dir.join("client.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/kcptun");
+    if etc_dir.is_dir() {
+        return etc_dir.join("client.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/kcptun.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("kcptun").join("client.json");
+    }
+    PathBuf::from("/etc/kcptun/client.json")
+}
+
+pub fn parse_kcptun_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "kcptun_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "kcptun_proxy"
+                        || k_low == "kcptun_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "kcptun_proxy"
+                || k_low == "kcptun_http_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_kcptun_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_kcptun_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_kcptun_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("KCPTUN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KCPTUN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("KCPTUN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KCPTUN_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_glider_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("GLIDER_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("glider").join("glider.conf"),
+            home.join(".glider").join("glider.conf"),
+            home.join(".config").join("systemd").join("user").join("glider.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/glider/glider.conf"),
+        PathBuf::from("/usr/local/etc/glider/glider.conf"),
+        PathBuf::from("/etc/default/glider"),
+        PathBuf::from("/etc/sysconfig/glider"),
+        PathBuf::from("/etc/systemd/system/glider.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_glider_config_path() -> Option<PathBuf> {
+    let paths = get_glider_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_glider_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_glider_write_path() -> PathBuf {
+    if let Some(p) = get_glider_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("GLIDER_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("glider");
+        if dir.is_dir() {
+            return dir.join("glider.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/glider");
+    if etc_dir.is_dir() {
+        return etc_dir.join("glider.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/glider.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("glider").join("glider.conf");
+    }
+    PathBuf::from("/etc/glider/glider.conf")
+}
+
+pub fn parse_glider_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "forward",
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "glider_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "glider_proxy"
+                        || k_low == "glider_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "forward"
+                || k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "glider_proxy"
+                || k_low == "glider_http_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_glider_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_glider_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_glider_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GLIDER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GLIDER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GLIDER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GLIDER_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -31906,6 +32362,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "MTG Daemon Proxy",
             "~/.config/mtg/config.toml & /etc/mtg.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Kcptun Daemon Proxy (/etc/kcptun/client.json / ~/.config/kcptun/client.json / /etc/systemd/system/kcptun.service.d/http-proxy.conf)
+    if let Some((kcptun_proxy, kcptun_path)) = get_kcptun_proxy() {
+        let ok = verify_proxy_url(&kcptun_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Kcptun daemon proxy `{}` in {} is dead! (kcptun tunnel will fail)",
+                kcptun_proxy,
+                kcptun_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Kcptun Daemon Proxy",
+            format!("{}", kcptun_path.display()),
+            kcptun_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (kcptun fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Kcptun Daemon Proxy",
+            "~/.config/kcptun/client.json & /etc/kcptun/client.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Glider Daemon Proxy (/etc/glider/glider.conf / ~/.config/glider/glider.conf / /etc/systemd/system/glider.service.d/http-proxy.conf)
+    if let Some((glider_proxy, glider_path)) = get_glider_proxy() {
+        let ok = verify_proxy_url(&glider_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Glider daemon proxy `{}` in {} is dead! (glider forwarding will fail)",
+                glider_proxy,
+                glider_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Glider Daemon Proxy",
+            format!("{}", glider_path.display()),
+            glider_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (glider fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Glider Daemon Proxy",
+            "~/.config/glider/glider.conf & /etc/glider/glider.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -38303,5 +38823,91 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; mtg_proxy = http://127.0.0.1:7890\n";
         assert_eq!(parse_mtg_proxy(input_comment), None);
         assert_eq!(parse_mtg_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_kcptun_proxy() {
+        let kcptun_json = r#"{
+            "localaddr": ":12948",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_kcptun_proxy(kcptun_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kcptun_yaml = r#"
+localaddr: ":12948"
+kcptun_proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_kcptun_proxy(kcptun_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kcptun_env = r#"
+# Kcptun environment config
+KCPTUN_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_kcptun_proxy(kcptun_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_kcptun_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; kcptun_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_kcptun_proxy(input_comment), None);
+        assert_eq!(parse_kcptun_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_glider_proxy() {
+        let glider_json = r#"{
+            "verbose": true,
+            "forward": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_glider_proxy(glider_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let glider_conf = r#"
+verbose = true
+forward = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_glider_proxy(glider_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let glider_env = r#"
+# Glider environment config
+GLIDER_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_glider_proxy(glider_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_glider_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# forward = http://127.0.0.1:7890\n; glider_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_glider_proxy(input_comment), None);
+        assert_eq!(parse_glider_proxy(""), None);
     }
 }
