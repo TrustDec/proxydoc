@@ -30809,6 +30809,382 @@ pub fn unset_stubby_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_kresd_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("http_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kresd_proxy"
+                    || k_low == "kresd_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"KRESD_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("kresd_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                lines.push(format!("KRESD_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("kresd_proxy:") || clean.starts_with("kresd_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+                if clean.contains('=') {
+                    lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+                } else {
+                    lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.contains('=') {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http_proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_kresd_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["http_proxy", "http-proxy", "proxy", "all_proxy", "kresd_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kresd_proxy"
+                    || k_low == "kresd_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("kresd_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("kresd_proxy:") || clean.starts_with("kresd_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_kresd_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_kresd_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_kresd_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_kresd_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_kresd_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_kresd_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_pdns_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("http_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pdns_proxy"
+                    || k_low == "pdns_http_proxy"
+                    || k_low == "recursor_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"PDNS_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("pdns_proxy=")
+            || lower.starts_with("recursor_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                lines.push(format!("PDNS_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("pdns_proxy:") || clean.starts_with("pdns_proxy=")
+            || clean.starts_with("recursor_proxy:") || clean.starts_with("recursor_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+                if clean.contains('=') {
+                    lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+                } else {
+                    lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.contains('=') {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http_proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pdns_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["http_proxy", "http-proxy", "proxy", "all_proxy", "pdns_proxy", "recursor_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pdns_proxy"
+                    || k_low == "pdns_http_proxy"
+                    || k_low == "recursor_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("pdns_proxy=")
+            || lower.starts_with("recursor_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("pdns_proxy:") || clean.starts_with("pdns_proxy=")
+            || clean.starts_with("recursor_proxy:") || clean.starts_with("recursor_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_pdns_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pdns_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_pdns_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_pdns_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pdns_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pdns_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -30985,6 +31361,8 @@ pub async fn turn_on(
     pihole: bool,
     blocky: bool,
     stubby: bool,
+    kresd: bool,
+    pdns: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -31160,6 +31538,8 @@ pub async fn turn_on(
     let set_pihole = pihole || all;
     let set_blocky = blocky || all;
     let set_stubby = stubby || all;
+    let set_kresd = kresd || all;
+    let set_pdns = pdns || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -33671,6 +34051,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_kresd {
+        match set_kresd_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Knot Resolver daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Knot Resolver daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_pdns {
+        match set_pdns_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ PowerDNS Recursor daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update PowerDNS Recursor daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -33860,6 +34270,8 @@ pub fn turn_off(
     pihole: bool,
     blocky: bool,
     stubby: bool,
+    kresd: bool,
+    pdns: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -34035,6 +34447,8 @@ pub fn turn_off(
     let unset_pihole = pihole || all;
     let unset_blocky = blocky || all;
     let unset_stubby = stubby || all;
+    let unset_kresd = kresd || all;
+    let unset_pdns = pdns || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -35496,6 +35910,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Stubby daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Stubby proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Stubby daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_kresd {
+        match unset_kresd_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Knot Resolver daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Knot Resolver proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Knot Resolver daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pdns {
+        match unset_pdns_proxy() {
+            Ok(true) => eprintln!("{}", "✔ PowerDNS Recursor daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ PowerDNS Recursor proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset PowerDNS Recursor daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -39818,5 +40248,57 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("STUBBY_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_kresd_proxy() {
+        let kresd_initial = "http_proxy: \"http://127.0.0.1:7890\"\n";
+        let kresd_updated = apply_kresd_proxy(kresd_initial, "socks5://10.0.0.128:1080");
+        assert!(kresd_updated.contains("http_proxy: \"socks5://10.0.0.128:1080\""));
+        let (kresd_cleaned, kresd_removed) = remove_kresd_proxy(&kresd_updated);
+        assert!(kresd_removed);
+        assert!(!kresd_cleaned.contains("http_proxy"));
+
+        let conf_initial = "proxy = \"http://127.0.0.1:7890\"\n";
+        let conf_updated = apply_kresd_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_kresd_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("proxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_kresd_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"KRESD_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_kresd_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("KRESD_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pdns_proxy() {
+        let pdns_initial = "http_proxy: \"http://127.0.0.1:7890\"\n";
+        let pdns_updated = apply_pdns_proxy(pdns_initial, "socks5://10.0.0.128:1080");
+        assert!(pdns_updated.contains("http_proxy: \"socks5://10.0.0.128:1080\""));
+        let (pdns_cleaned, pdns_removed) = remove_pdns_proxy(&pdns_updated);
+        assert!(pdns_removed);
+        assert!(!pdns_cleaned.contains("http_proxy"));
+
+        let conf_initial = "http_proxy = \"http://127.0.0.1:7890\"\n";
+        let conf_updated = apply_pdns_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_pdns_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("http_proxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_pdns_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"PDNS_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_pdns_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("PDNS_PROXY="));
     }
 }

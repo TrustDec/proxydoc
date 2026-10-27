@@ -1542,6 +1542,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Dagger AI CDN",
         "https://github.com/dagger/dagger",
     ),
+    (
+        "Knot Resolver Proxy CDN",
+        "https://github.com/CZ-NIC/knot-resolver",
+    ),
+    (
+        "PowerDNS Proxy CDN",
+        "https://github.com/PowerDNS/pdns",
+    ),
+    (
+        "LibreChat AI CDN",
+        "https://github.com/danny-avila/LibreChat",
+    ),
+    (
+        "LocalAI AI CDN",
+        "https://github.com/mudler/LocalAI",
+    ),
+    (
+        "Tabby AI CDN",
+        "https://github.com/TabbyML/tabby",
+    ),
+    (
+        "Khoj AI CDN",
+        "https://github.com/khoj-ai/khoj",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3008,6 +3032,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Dagger AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Knot Resolver Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "PowerDNS Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LibreChat AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LocalAI AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Tabby AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Khoj AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
