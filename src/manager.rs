@@ -24061,6 +24061,462 @@ pub fn unset_leaf_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_mihomo_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("MIHOMO_PROXY=")
+                || t.starts_with("CLASH_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_mh = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "mihomo_proxy" || k_low == "clash_proxy" || k_low == "mihomo_http_proxy" {
+                        lines.push(format!("Environment=\"MIHOMO_PROXY={}\"", proxy_url));
+                        replaced_mh = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("mihomo_proxy=") || lower.starts_with("clash_proxy=") {
+                lines.push(format!("MIHOMO_PROXY=\"{}\"", proxy_url));
+                replaced_mh = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_mh {
+            lines.push(format!("Environment=\"MIHOMO_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let is_yaml_or_conf = content.contains(':') || content.contains('=');
+    if is_yaml_or_conf {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if (lower.starts_with("proxy:") || lower.starts_with("proxy =") || lower.starts_with("proxy=")) && !lower.starts_with("proxy-providers") && !lower.starts_with("proxy_url") {
+                lines.push(format!("proxy: {}", proxy_url));
+                replaced = true;
+                continue;
+            } else if lower.starts_with("mihomo_proxy:") || lower.starts_with("mihomo_proxy =") {
+                lines.push(format!("proxy: {}", proxy_url));
+                replaced = true;
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            lines.push(format!("proxy: {}", proxy_url));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_mihomo_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "upstream_proxy", "target_proxy", "mihomo_proxy", "clash_proxy", "mihomo_http_proxy", "http_proxy", "https_proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "mihomo_proxy"
+                    || k_low == "clash_proxy"
+                    || k_low == "mihomo_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("mihomo_proxy=")
+            || lower.starts_with("mihomo_proxy:")
+            || lower.starts_with("clash_proxy=")
+            || lower.starts_with("clash_proxy:")
+            || lower.starts_with("upstream_proxy=")
+            || lower.starts_with("upstream_proxy:")
+            || lower.starts_with("target_proxy=")
+            || lower.starts_with("target_proxy:")
+            || lower.starts_with("mihomo_http_proxy=")
+            || lower.starts_with("all_proxy=")
+            || ((lower.starts_with("proxy:") || lower.starts_with("proxy =") || lower.starts_with("proxy=")) && !lower.starts_with("proxy-providers") && !lower.starts_with("proxy_url"))
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_mihomo_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_mihomo_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_mihomo_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_mihomo_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_mihomo_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_mihomo_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_stunnel_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("STUNNEL_PROXY=")
+                || t.starts_with("STUNNEL4_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_st = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "stunnel_proxy" || k_low == "stunnel4_proxy" || k_low == "stunnel_http_proxy" {
+                        lines.push(format!("Environment=\"STUNNEL_PROXY={}\"", proxy_url));
+                        replaced_st = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("stunnel_proxy=") || lower.starts_with("stunnel4_proxy=") {
+                lines.push(format!("STUNNEL_PROXY=\"{}\"", proxy_url));
+                replaced_st = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_st {
+            lines.push(format!("Environment=\"STUNNEL_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let is_conf = content.contains('[') || content.lines().any(|l| l.contains('='));
+    if is_conf {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if (lower.starts_with("proxy=") || lower.starts_with("proxy =") || lower.starts_with("proxy:")) && !lower.starts_with("proxy_url") {
+                lines.push(format!("proxy = {}", proxy_url));
+                replaced = true;
+                continue;
+            } else if lower.starts_with("stunnel_proxy=") || lower.starts_with("stunnel_proxy =") {
+                lines.push(format!("proxy = {}", proxy_url));
+                replaced = true;
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            lines.push(format!("proxy = {}", proxy_url));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_stunnel_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "upstream_proxy", "target_proxy", "stunnel_proxy", "stunnel4_proxy", "stunnel_http_proxy", "http_proxy", "https_proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "stunnel_proxy"
+                    || k_low == "stunnel4_proxy"
+                    || k_low == "stunnel_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("stunnel_proxy=")
+            || lower.starts_with("stunnel4_proxy=")
+            || lower.starts_with("upstream_proxy=")
+            || lower.starts_with("upstream_proxy:")
+            || lower.starts_with("proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy:")
+            || lower.starts_with("target_proxy=")
+            || lower.starts_with("target_proxy:")
+            || lower.starts_with("stunnel_http_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_stunnel_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_stunnel_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_stunnel_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_stunnel_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_stunnel_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_stunnel_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -24207,6 +24663,8 @@ pub async fn turn_on(
     juicity: bool,
     snell: bool,
     leaf: bool,
+    mihomo: bool,
+    stunnel: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -24352,6 +24810,8 @@ pub async fn turn_on(
     let set_juicity = juicity || all;
     let set_snell = snell || all;
     let set_leaf = leaf || all;
+    let set_mihomo = mihomo || all;
+    let set_stunnel = stunnel || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -26413,6 +26873,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_mihomo {
+        match set_mihomo_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Mihomo daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Mihomo daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_stunnel {
+        match set_stunnel_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Stunnel daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Stunnel daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -26572,6 +27062,8 @@ pub fn turn_off(
     juicity: bool,
     snell: bool,
     leaf: bool,
+    mihomo: bool,
+    stunnel: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -26717,6 +27209,8 @@ pub fn turn_off(
     let unset_juicity = juicity || all;
     let unset_snell = snell || all;
     let unset_leaf = leaf || all;
+    let unset_mihomo = mihomo || all;
+    let unset_stunnel = stunnel || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -27938,6 +28432,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Leaf daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Leaf proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Leaf daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_mihomo {
+        match unset_mihomo_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Mihomo daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Mihomo proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Mihomo daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_stunnel {
+        match unset_stunnel_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Stunnel daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Stunnel proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Stunnel daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -31433,5 +31943,61 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("LEAF_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_mihomo_proxy() {
+        let mh_initial = r#"{
+  "mixed-port": 7890
+}"#;
+        let mh_updated = apply_mihomo_proxy(mh_initial, "http://10.0.0.109:8080");
+        assert!(mh_updated.contains("\"proxy\": \"http://10.0.0.109:8080\""));
+        let (mh_cleaned, mh_removed) = remove_mihomo_proxy(&mh_updated);
+        assert!(mh_removed);
+        assert!(!mh_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "mixed-port: 7890\nmode: rule\n";
+        let conf_updated = apply_mihomo_proxy(conf_initial, "http://10.0.0.109:8080");
+        assert!(conf_updated.contains("proxy: http://10.0.0.109:8080"));
+        let (conf_cleaned, conf_removed) = remove_mihomo_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("proxy:"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_mihomo_proxy(dropin_initial, "http://10.0.0.109:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.109:8080\""));
+        assert!(dropin_updated.contains("Environment=\"MIHOMO_PROXY=http://10.0.0.109:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_mihomo_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("MIHOMO_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_stunnel_proxy() {
+        let st_initial = r#"{
+  "client": "yes"
+}"#;
+        let st_updated = apply_stunnel_proxy(st_initial, "http://10.0.0.110:8080");
+        assert!(st_updated.contains("\"proxy\": \"http://10.0.0.110:8080\""));
+        let (st_cleaned, st_removed) = remove_stunnel_proxy(&st_updated);
+        assert!(st_removed);
+        assert!(!st_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "[client]\nclient = yes\naccept = 127.0.0.1:10807\nconnect = 127.0.0.1:8443\n";
+        let conf_updated = apply_stunnel_proxy(conf_initial, "http://10.0.0.110:8080");
+        assert!(conf_updated.contains("proxy = http://10.0.0.110:8080"));
+        let (conf_cleaned, conf_removed) = remove_stunnel_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("proxy ="));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_stunnel_proxy(dropin_initial, "http://10.0.0.110:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.110:8080\""));
+        assert!(dropin_updated.contains("Environment=\"STUNNEL_PROXY=http://10.0.0.110:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_stunnel_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("STUNNEL_PROXY="));
     }
 }

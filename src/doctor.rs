@@ -24199,6 +24199,472 @@ pub fn get_leaf_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_mihomo_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MIHOMO_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MIHOMO_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("mihomo").join("config.yaml"),
+            home.join(".config").join("mihomo").join("config.yml"),
+            home.join(".mihomo").join("config.yaml"),
+            home.join(".mihomo").join("config.yml"),
+            home.join(".config").join("systemd").join("user").join("mihomo.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/mihomo/config.yaml"),
+        PathBuf::from("/etc/mihomo/config.yml"),
+        PathBuf::from("/usr/local/etc/mihomo/config.yaml"),
+        PathBuf::from("/etc/default/mihomo"),
+        PathBuf::from("/etc/sysconfig/mihomo"),
+        PathBuf::from("/etc/systemd/system/mihomo.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_mihomo_config_path() -> Option<PathBuf> {
+    let paths = get_mihomo_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_mihomo_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_mihomo_write_path() -> PathBuf {
+    if let Some(p) = get_mihomo_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MIHOMO_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("mihomo");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/mihomo");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/mihomo.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("mihomo").join("config.yaml");
+    }
+    PathBuf::from("/etc/mihomo/config.yaml")
+}
+
+pub fn parse_mihomo_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "mihomo_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "mihomo_proxy"
+                        || k_low == "mihomo_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "mihomo_proxy"
+                || k_low == "mihomo_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_mihomo_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_mihomo_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_mihomo_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MIHOMO_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MIHOMO_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MIHOMO_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MIHOMO_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_stunnel_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("STUNNEL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("STUNNEL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("stunnel").join("stunnel.conf"),
+            home.join(".stunnel").join("stunnel.conf"),
+            home.join(".config").join("systemd").join("user").join("stunnel.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("stunnel4.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/stunnel/stunnel.conf"),
+        PathBuf::from("/etc/stunnel/stunnel4.conf"),
+        PathBuf::from("/etc/stunnel/client.conf"),
+        PathBuf::from("/usr/local/etc/stunnel/stunnel.conf"),
+        PathBuf::from("/etc/stunnel4/stunnel.conf"),
+        PathBuf::from("/etc/default/stunnel4"),
+        PathBuf::from("/etc/sysconfig/stunnel"),
+        PathBuf::from("/etc/systemd/system/stunnel.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/stunnel4.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_stunnel_config_path() -> Option<PathBuf> {
+    let paths = get_stunnel_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_stunnel_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_stunnel_write_path() -> PathBuf {
+    if let Some(p) = get_stunnel_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("STUNNEL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("stunnel");
+        if dir.is_dir() {
+            return dir.join("stunnel.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/stunnel");
+    if etc_dir.is_dir() {
+        return etc_dir.join("stunnel.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/stunnel.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("stunnel").join("stunnel.conf");
+    }
+    PathBuf::from("/etc/stunnel/stunnel.conf")
+}
+
+pub fn parse_stunnel_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "stunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "stunnel_proxy"
+                        || k_low == "stunnel_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "stunnel_proxy"
+                || k_low == "stunnel_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_stunnel_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_stunnel_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_stunnel_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("STUNNEL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:STUNNEL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("STUNNEL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:STUNNEL_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -29772,6 +30238,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Leaf Daemon Proxy",
             "~/.config/leaf/leaf.conf & /etc/leaf/leaf.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Mihomo Daemon Proxy (/etc/mihomo/config.yaml / ~/.config/mihomo/config.yaml / /etc/systemd/system/mihomo.service.d/http-proxy.conf)
+    if let Some((mh_proxy, mh_path)) = get_mihomo_proxy() {
+        let ok = verify_proxy_url(&mh_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Mihomo daemon proxy `{}` in {} is dead! (mihomo/clash-meta upstream routing will fail)",
+                mh_proxy,
+                mh_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Mihomo Daemon Proxy",
+            format!("{}", mh_path.display()),
+            mh_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (mihomo fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Mihomo Daemon Proxy",
+            "~/.config/mihomo/config.yaml & /etc/mihomo/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Stunnel Daemon Proxy (/etc/stunnel/stunnel.conf / ~/.config/stunnel/stunnel.conf / /etc/systemd/system/stunnel.service.d/http-proxy.conf)
+    if let Some((st_proxy, st_path)) = get_stunnel_proxy() {
+        let ok = verify_proxy_url(&st_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Stunnel daemon proxy `{}` in {} is dead! (stunnel/stunnel4 upstream routing will fail)",
+                st_proxy,
+                st_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Stunnel Daemon Proxy",
+            format!("{}", st_path.display()),
+            st_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (stunnel fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Stunnel Daemon Proxy",
+            "~/.config/stunnel/stunnel.conf & /etc/stunnel/stunnel.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -35820,5 +36350,96 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; leaf_proxy = http://127.0.0.1:7890\n";
         assert_eq!(parse_leaf_proxy(input_comment), None);
         assert_eq!(parse_leaf_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_mihomo_proxy() {
+        let mh_json = r#"{
+            "mixed-port": 7890,
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_mihomo_proxy(mh_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let mh_yaml = r#"
+port: 7890
+socks-port: 7891
+mixed-port: 7890
+proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_mihomo_proxy(mh_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let mh_env = r#"
+# Mihomo environment config
+MIHOMO_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mihomo_proxy(mh_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mihomo_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; mihomo_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_mihomo_proxy(input_comment), None);
+        assert_eq!(parse_mihomo_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_stunnel_proxy() {
+        let st_json = r#"{
+            "client": "yes",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_stunnel_proxy(st_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let st_conf = r#"
+[client]
+client = yes
+accept = 127.0.0.1:10807
+connect = 127.0.0.1:8443
+proxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_stunnel_proxy(st_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let st_env = r#"
+# Stunnel environment config
+STUNNEL_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_stunnel_proxy(st_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_stunnel_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; stunnel_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_stunnel_proxy(input_comment), None);
+        assert_eq!(parse_stunnel_proxy(""), None);
     }
 }

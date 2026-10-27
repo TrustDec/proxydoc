@@ -1182,6 +1182,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Mini-Omni AI CDN",
         "https://github.com/gpt-omni/mini-omni",
     ),
+    (
+        "Mihomo Proxy CDN",
+        "https://github.com/MetaCubeX/mihomo/releases",
+    ),
+    (
+        "Stunnel Proxy CDN",
+        "https://github.com/mtrojnar/stunnel/releases",
+    ),
+    (
+        "QwQ AI CDN",
+        "https://github.com/QwenLM/QwQ",
+    ),
+    (
+        "RAGFlow AI CDN",
+        "https://github.com/infiniflow/ragflow",
+    ),
+    (
+        "LobeChat AI CDN",
+        "https://github.com/lobehub/lobe-chat",
+    ),
+    (
+        "Moshi AI CDN",
+        "https://github.com/kyutai-labs/moshi",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2378,6 +2402,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Mini-Omni AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Mihomo Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Stunnel Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "QwQ AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "RAGFlow AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LobeChat AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Moshi AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
