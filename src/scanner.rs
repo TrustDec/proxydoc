@@ -63,6 +63,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (5678, false, "Hysteria Proxy Client Daemon (HTTP/SOCKS5)"),
     (10801, false, "Trojan-Go Local Forwarder (HTTP)"),
     (8443, false, "NaïveProxy / Trojan HTTPS Ingress (HTTPS/Mixed)"),
+    (10802, false, "Tuic Proxy Daemon (HTTP/Mixed)"),
+    (10803, false, "Juicity Proxy Daemon (HTTP/Mixed)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

@@ -23252,6 +23252,478 @@ pub fn get_naive_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_tuic_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TUIC_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TUIC_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("tuic").join("client.json"),
+            home.join(".config").join("tuic").join("config.json"),
+            home.join(".tuic").join("client.json"),
+            home.join(".tuic").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("tuic.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("tuic-client.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tuic/client.json"),
+        PathBuf::from("/etc/tuic/config.json"),
+        PathBuf::from("/etc/tuic.json"),
+        PathBuf::from("/usr/local/etc/tuic/client.json"),
+        PathBuf::from("/usr/local/etc/tuic/config.json"),
+        PathBuf::from("/etc/default/tuic"),
+        PathBuf::from("/etc/sysconfig/tuic"),
+        PathBuf::from("/etc/systemd/system/tuic.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/tuic-client.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_tuic_config_path() -> Option<PathBuf> {
+    let paths = get_tuic_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tuic_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tuic_write_path() -> PathBuf {
+    if let Some(p) = get_tuic_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TUIC_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("tuic");
+        if dir.is_dir() {
+            return dir.join("client.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/tuic");
+    if etc_dir.is_dir() {
+        return etc_dir.join("client.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tuic.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("tuic").join("client.json");
+    }
+    PathBuf::from("/etc/tuic/client.json")
+}
+
+pub fn parse_tuic_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "outbound_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "tuic_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "tuic_proxy"
+                        || k_low == "tuic_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "tuic_proxy"
+                || k_low == "tuic_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tuic_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tuic_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tuic_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TUIC_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUIC_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TUIC_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUIC_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_juicity_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("JUICITY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("JUICITY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("juicity").join("client.json"),
+            home.join(".config").join("juicity").join("config.json"),
+            home.join(".juicity").join("client.json"),
+            home.join(".juicity").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("juicity.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("juicity-client.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/juicity/client.json"),
+        PathBuf::from("/etc/juicity/config.json"),
+        PathBuf::from("/etc/juicity.json"),
+        PathBuf::from("/usr/local/etc/juicity/client.json"),
+        PathBuf::from("/usr/local/etc/juicity/config.json"),
+        PathBuf::from("/etc/default/juicity"),
+        PathBuf::from("/etc/sysconfig/juicity"),
+        PathBuf::from("/etc/systemd/system/juicity.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/juicity-client.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_juicity_config_path() -> Option<PathBuf> {
+    let paths = get_juicity_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_juicity_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_juicity_write_path() -> PathBuf {
+    if let Some(p) = get_juicity_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("JUICITY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("juicity");
+        if dir.is_dir() {
+            return dir.join("client.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/juicity");
+    if etc_dir.is_dir() {
+        return etc_dir.join("client.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/juicity.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("juicity").join("client.json");
+    }
+    PathBuf::from("/etc/juicity/client.json")
+}
+
+pub fn parse_juicity_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "outbound_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "juicity_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "juicity_proxy"
+                        || k_low == "juicity_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "juicity_proxy"
+                || k_low == "juicity_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_juicity_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_juicity_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_juicity_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("JUICITY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JUICITY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("JUICITY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JUICITY_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -28697,6 +29169,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "NaïveProxy Daemon Proxy",
             "~/.config/naiveproxy/config.json & /etc/naiveproxy/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Tuic Daemon Proxy (/etc/tuic/client.json / ~/.config/tuic/client.json / /etc/systemd/system/tuic.service.d/http-proxy.conf)
+    if let Some((tu_proxy, tu_path)) = get_tuic_proxy() {
+        let ok = verify_proxy_url(&tu_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Tuic daemon proxy `{}` in {} is dead! (tuic-client upstream routing will fail)",
+                tu_proxy,
+                tu_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Tuic Daemon Proxy",
+            format!("{}", tu_path.display()),
+            tu_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tuic fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Tuic Daemon Proxy",
+            "~/.config/tuic/client.json & /etc/tuic/client.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Juicity Daemon Proxy (/etc/juicity/client.json / ~/.config/juicity/client.json / /etc/systemd/system/juicity.service.d/http-proxy.conf)
+    if let Some((ju_proxy, ju_path)) = get_juicity_proxy() {
+        let ok = verify_proxy_url(&ju_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Juicity daemon proxy `{}` in {} is dead! (juicity-client upstream routing will fail)",
+                ju_proxy,
+                ju_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Juicity Daemon Proxy",
+            format!("{}", ju_path.display()),
+            ju_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (juicity fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Juicity Daemon Proxy",
+            "~/.config/juicity/client.json & /etc/juicity/client.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -34568,5 +35104,91 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy=http://127.0.0.1:7890\n; naive_proxy=http://127.0.0.1:7890\n";
         assert_eq!(parse_naive_proxy(input_comment), None);
         assert_eq!(parse_naive_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tuic_proxy() {
+        let tu_json = r#"{
+            "server": "1.2.3.4:8443",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_tuic_proxy(tu_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let tu_outbound_json = r#"{
+            "server": "1.2.3.4:8443",
+            "outbound_proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_tuic_proxy(tu_outbound_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let tu_env = r#"
+# Tuic environment config
+TUIC_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tuic_proxy(tu_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tuic_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy=http://127.0.0.1:7890\n; tuic_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_tuic_proxy(input_comment), None);
+        assert_eq!(parse_tuic_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_juicity_proxy() {
+        let ju_json = r#"{
+            "listen": ":1080",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_juicity_proxy(ju_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ju_outbound_json = r#"{
+            "listen": ":1080",
+            "outbound_proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_juicity_proxy(ju_outbound_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let ju_env = r#"
+# Juicity environment config
+JUICITY_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_juicity_proxy(ju_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_juicity_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy=http://127.0.0.1:7890\n; juicity_proxy=http://127.0.0.1:7890\n";
+        assert_eq!(parse_juicity_proxy(input_comment), None);
+        assert_eq!(parse_juicity_proxy(""), None);
     }
 }

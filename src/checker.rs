@@ -1134,6 +1134,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Open-NotebookLM CDN",
         "https://github.com/gabrielchua/open-notebooklm",
     ),
+    (
+        "Tuic Proxy CDN",
+        "https://github.com/EAimTY/tuic/releases",
+    ),
+    (
+        "Juicity Proxy CDN",
+        "https://github.com/juicity/juicity/releases",
+    ),
+    (
+        "Open-R1 AI CDN",
+        "https://github.com/huggingface/open-r1",
+    ),
+    (
+        "MCP Servers CDN",
+        "https://github.com/modelcontextprotocol/servers",
+    ),
+    (
+        "Qwen AI CDN",
+        "https://github.com/QwenLM/Qwen2.5",
+    ),
+    (
+        "Moonshot Kimi AI CDN",
+        "https://kimi.moonshot.cn",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2294,6 +2318,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Open-NotebookLM CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Tuic Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Juicity Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-R1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MCP Servers CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Moonshot Kimi AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
