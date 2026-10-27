@@ -99,6 +99,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8053, false, "Stubby DNS Privacy DoT Stub Resolver Daemon (DoT/DNS)"),
     (5323, false, "Knot Resolver Validating DNS Resolver Daemon (DNS/DoT)"),
     (5300, false, "PowerDNS Recursor Resolving DNS Cache Proxy Daemon (DNS)"),
+    (5199, false, "dnsdist DNS Load Balancer & DoH/DoT Proxy Daemon (Console/DNS)"),
+    (953, false, "BIND 9 (named) Domain Name System & RNDC Control Daemon (RNDC/DNS)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

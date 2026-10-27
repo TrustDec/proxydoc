@@ -31912,6 +31912,577 @@ pub fn get_pdns_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_dnsdist_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DNSDIST_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DNSDIST_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("dnsdist").join("dnsdist.conf"),
+            home.join(".dnsdist.conf"),
+            home.join(".config").join("dnsdist.conf"),
+            home.join(".config").join("systemd").join("user").join("dnsdist.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/dnsdist/dnsdist.conf"),
+        PathBuf::from("/etc/dnsdist.conf"),
+        PathBuf::from("/usr/local/etc/dnsdist/dnsdist.conf"),
+        PathBuf::from("/opt/homebrew/etc/dnsdist/dnsdist.conf"),
+        PathBuf::from("/etc/default/dnsdist"),
+        PathBuf::from("/etc/sysconfig/dnsdist"),
+        PathBuf::from("/etc/systemd/system/dnsdist.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_dnsdist_config_path() -> Option<PathBuf> {
+    let paths = get_dnsdist_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_dnsdist_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_dnsdist_write_path() -> PathBuf {
+    if let Some(p) = get_dnsdist_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DNSDIST_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("DNSDIST_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("dnsdist");
+        if dir.is_dir() {
+            return dir.join("dnsdist.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/dnsdist");
+    if etc_dir.is_dir() {
+        return etc_dir.join("dnsdist.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/dnsdist.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("dnsdist").join("dnsdist.conf");
+    }
+    PathBuf::from("/etc/dnsdist/dnsdist.conf")
+}
+
+pub fn parse_dnsdist_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "dnsdist_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("--") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dnsdist_proxy"
+                    || k_low == "dnsdist_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dnsdist_proxy"
+                    || k_low == "dnsdist_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("dnsdist_proxy:")
+            || clean.starts_with("dnsdist_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("dnsdist_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_dnsdist_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_dnsdist_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_dnsdist_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DNSDIST_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DNSDIST_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DNSDIST_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DNSDIST_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_bind_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("NAMED_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("BIND_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NAMED_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("bind").join("named.conf"),
+            home.join(".config").join("named").join("named.conf"),
+            home.join(".named.conf"),
+            home.join(".config").join("named.conf"),
+            home.join(".config").join("systemd").join("user").join("named.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("bind9.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/bind/named.conf"),
+        PathBuf::from("/etc/bind/named.conf.options"),
+        PathBuf::from("/etc/named.conf"),
+        PathBuf::from("/etc/named/named.conf"),
+        PathBuf::from("/usr/local/etc/bind/named.conf"),
+        PathBuf::from("/usr/local/etc/named.conf"),
+        PathBuf::from("/opt/homebrew/etc/bind/named.conf"),
+        PathBuf::from("/etc/default/named"),
+        PathBuf::from("/etc/default/bind9"),
+        PathBuf::from("/etc/sysconfig/named"),
+        PathBuf::from("/etc/systemd/system/named.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/bind9.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_bind_config_path() -> Option<PathBuf> {
+    let paths = get_bind_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_bind_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_bind_write_path() -> PathBuf {
+    if let Some(p) = get_bind_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("NAMED_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("BIND_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("bind");
+        if dir.is_dir() {
+            return dir.join("named.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/bind");
+    if etc_dir.is_dir() {
+        return etc_dir.join("named.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/named.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("bind").join("named.conf");
+    }
+    PathBuf::from("/etc/bind/named.conf")
+}
+
+pub fn parse_bind_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "bind_proxy",
+                "named_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "bind_proxy"
+                    || k_low == "named_proxy"
+                    || k_low == "bind_http_proxy"
+                    || k_low == "named_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "bind_proxy"
+                    || k_low == "named_proxy"
+                    || k_low == "bind_http_proxy"
+                    || k_low == "named_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("bind_proxy:")
+            || clean.starts_with("bind_proxy=")
+            || clean.starts_with("named_proxy:")
+            || clean.starts_with("named_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("bind_proxy=")
+                || clean.starts_with("named_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_bind_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_bind_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_bind_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NAMED_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NAMED_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BIND_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BIND_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("NAMED_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NAMED_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BIND_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BIND_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -38509,6 +39080,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "PowerDNS Recursor Daemon Proxy",
             "~/.config/powerdns/recursor.conf & /etc/powerdns/recursor.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // dnsdist DNS Load Balancer & DoH/DoT Proxy Daemon (~/.config/dnsdist/dnsdist.conf / /etc/dnsdist/dnsdist.conf / /etc/systemd/system/dnsdist.service.d/http-proxy.conf)
+    if let Some((dnsdist_proxy, dnsdist_path)) = get_dnsdist_proxy() {
+        let ok = verify_proxy_url(&dnsdist_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "dnsdist proxy `{}` in {} is dead! (dnsdist DNS resolution will fail)",
+                dnsdist_proxy,
+                dnsdist_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "dnsdist Daemon Proxy",
+            format!("{}", dnsdist_path.display()),
+            dnsdist_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (dnsdist fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "dnsdist Daemon Proxy",
+            "~/.config/dnsdist/dnsdist.conf & /etc/dnsdist/dnsdist.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // BIND 9 (named) Domain Name System & Resolver Proxy Daemon (~/.config/bind/named.conf / /etc/bind/named.conf / /etc/systemd/system/named.service.d/http-proxy.conf)
+    if let Some((bind_proxy, bind_path)) = get_bind_proxy() {
+        let ok = verify_proxy_url(&bind_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "BIND 9 (named) proxy `{}` in {} is dead! (named DNS resolution will fail)",
+                bind_proxy,
+                bind_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "BIND 9 (named) Daemon Proxy",
+            format!("{}", bind_path.display()),
+            bind_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (named fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "BIND 9 (named) Daemon Proxy",
+            "~/.config/bind/named.conf & /etc/bind/named.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -46032,5 +46667,91 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http_proxy=http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_pdns_proxy(input_comment), None);
         assert_eq!(parse_pdns_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_dnsdist_proxy() {
+        let dnsdist_conf = r#"
+-- dnsdist configuration
+setKey("secret-key")
+http_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnsdist_proxy(dnsdist_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dnsdist_colon = r#"
+proxy: socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_dnsdist_proxy(dnsdist_colon),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dnsdist_json = r#"{
+            "http_proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_dnsdist_proxy(dnsdist_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnsdist_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "-- http_proxy = http://127.0.0.1:7890\n# proxy = socks5://127.0.0.1:1080\n; http_proxy: http://127.0.0.1:7890\n";
+        assert_eq!(parse_dnsdist_proxy(input_comment), None);
+        assert_eq!(parse_dnsdist_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_bind_proxy() {
+        let bind_conf = r#"
+// BIND 9 configuration
+options {
+    directory "/var/named";
+};
+http_proxy = "http://127.0.0.1:7890";
+"#;
+        assert_eq!(
+            parse_bind_proxy(bind_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let bind_colon = r#"
+proxy: socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_bind_proxy(bind_colon),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let bind_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_bind_proxy(bind_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_bind_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "// http_proxy = http://127.0.0.1:7890\n# proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
+        assert_eq!(parse_bind_proxy(input_comment), None);
+        assert_eq!(parse_bind_proxy(""), None);
     }
 }

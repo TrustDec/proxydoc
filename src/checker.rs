@@ -1566,6 +1566,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Khoj AI CDN",
         "https://github.com/khoj-ai/khoj",
     ),
+    (
+        "dnsdist Proxy CDN",
+        "https://dnsdist.org",
+    ),
+    (
+        "BIND 9 Proxy CDN",
+        "https://gitlab.isc.org/isc-projects/bind9",
+    ),
+    (
+        "Open-Interpreter AI CDN",
+        "https://github.com/openinterpreter/open-interpreter",
+    ),
+    (
+        "Text-Gen-WebUI AI CDN",
+        "https://github.com/oobabooga/text-generation-webui",
+    ),
+    (
+        "Fooocus AI CDN",
+        "https://github.com/lllyasviel/Fooocus",
+    ),
+    (
+        "InvokeAI AI CDN",
+        "https://github.com/invoke-ai/InvokeAI",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3050,6 +3074,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Khoj AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "dnsdist Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "BIND 9 Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-Interpreter AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Text-Gen-WebUI AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fooocus AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InvokeAI AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
