@@ -20924,6 +20924,373 @@ pub fn get_chisel_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_nebula_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("NEBULA_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NEBULA_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("nebula").join("config.yaml"),
+            home.join(".config").join("nebula").join("config.yml"),
+            home.join(".nebula").join("config.yaml"),
+            home.join(".nebula").join("config.yml"),
+            home.join(".config").join("systemd").join("user").join("nebula.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/nebula/config.yaml"),
+        PathBuf::from("/etc/nebula/config.yml"),
+        PathBuf::from("/usr/local/etc/nebula/config.yaml"),
+        PathBuf::from("/etc/default/nebula"),
+        PathBuf::from("/etc/sysconfig/nebula"),
+        PathBuf::from("/etc/systemd/system/nebula.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_nebula_config_path() -> Option<PathBuf> {
+    let paths = get_nebula_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_nebula_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_nebula_write_path() -> PathBuf {
+    if let Some(p) = get_nebula_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("NEBULA_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let config_dir = home.join(".config").join("nebula");
+        if config_dir.is_dir() {
+            return config_dir.join("config.yaml");
+        }
+    }
+    let etc_nebula = PathBuf::from("/etc/nebula");
+    if etc_nebula.is_dir() {
+        return etc_nebula.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/nebula.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("nebula").join("config.yaml");
+    }
+    PathBuf::from("/etc/nebula/config.yaml")
+}
+
+pub fn parse_nebula_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "nebula_proxy"
+                        || k_low == "nebula_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "outboundproxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "nebula_proxy"
+                || k_low == "nebula_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nebula_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_nebula_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_nebula_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NEBULA_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NEBULA_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_bore_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("BORE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("BORE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("bore").join("bore.toml"),
+            home.join(".config").join("bore").join("config.toml"),
+            home.join(".bore").join("bore.toml"),
+            home.join(".bore").join("config.toml"),
+            home.join(".config").join("systemd").join("user").join("bore.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/bore/bore.toml"),
+        PathBuf::from("/etc/bore/config.toml"),
+        PathBuf::from("/usr/local/etc/bore/bore.toml"),
+        PathBuf::from("/etc/default/bore"),
+        PathBuf::from("/etc/sysconfig/bore"),
+        PathBuf::from("/etc/systemd/system/bore.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_bore_config_path() -> Option<PathBuf> {
+    let paths = get_bore_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_bore_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_bore_write_path() -> PathBuf {
+    if let Some(p) = get_bore_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("BORE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let config_dir = home.join(".config").join("bore");
+        if config_dir.is_dir() {
+            return config_dir.join("bore.toml");
+        }
+    }
+    let etc_bore = PathBuf::from("/etc/bore");
+    if etc_bore.is_dir() {
+        return etc_bore.join("bore.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/bore.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("bore").join("bore.toml");
+    }
+    PathBuf::from("/etc/bore/bore.toml")
+}
+
+pub fn parse_bore_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "bore_proxy"
+                        || k_low == "bore_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "bore_proxy"
+                || k_low == "bore_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_bore_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_bore_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_bore_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("BORE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BORE_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -26049,6 +26416,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Chisel Daemon Proxy",
             "~/.config/chisel/config.json & /etc/chisel/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Nebula Mesh Overlay Network Daemon Proxy (/etc/nebula/config.yaml / ~/.config/nebula/config.yaml / /etc/systemd/system/nebula.service.d/http-proxy.conf)
+    if let Some((nebula_proxy, nebula_path)) = get_nebula_proxy() {
+        let ok = verify_proxy_url(&nebula_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Nebula daemon proxy `{}` in {} is dead! (nebula mesh lighthouse and relay handshakes will fail)",
+                nebula_proxy,
+                nebula_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Nebula Daemon Proxy",
+            format!("{}", nebula_path.display()),
+            nebula_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (nebula fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Nebula Daemon Proxy",
+            "~/.config/nebula/config.yaml & /etc/nebula/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Bore Modern Tunnel Daemon Proxy (/etc/bore/bore.toml / ~/.config/bore/bore.toml / /etc/systemd/system/bore.service.d/http-proxy.conf)
+    if let Some((bore_proxy, bore_path)) = get_bore_proxy() {
+        let ok = verify_proxy_url(&bore_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Bore daemon proxy `{}` in {} is dead! (bore client port-forward tunnels will fail)",
+                bore_proxy,
+                bore_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Bore Daemon Proxy",
+            format!("{}", bore_path.display()),
+            bore_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (bore fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Bore Daemon Proxy",
+            "~/.config/bore/bore.toml & /etc/bore/bore.toml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -31511,5 +31942,75 @@ Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
         let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; proxy = \"http://127.0.0.1:7890\"\n";
         assert_eq!(parse_chisel_proxy(input_comment), None);
         assert_eq!(parse_chisel_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_nebula_proxy() {
+        let nebula_yaml = r#"
+outbound_proxy: "http://127.0.0.1:7890"
+lighthouse:
+  am_lighthouse: false
+"#;
+        assert_eq!(
+            parse_nebula_proxy(nebula_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let nebula_env = r#"
+# Nebula startup config
+NEBULA_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_nebula_proxy(nebula_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_nebula_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# outbound_proxy: http://127.0.0.1:7890\n; proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_nebula_proxy(input_comment), None);
+        assert_eq!(parse_nebula_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_bore_proxy() {
+        let bore_toml = r#"
+[client]
+server = "bore.pub"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_bore_proxy(bore_toml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let bore_env = r#"
+# Bore startup config
+BORE_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_bore_proxy(bore_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_bore_proxy(dropin),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# HTTP_PROXY=http://127.0.0.1:7890\n; proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(parse_bore_proxy(input_comment), None);
+        assert_eq!(parse_bore_proxy(""), None);
     }
 }

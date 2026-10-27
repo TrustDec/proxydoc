@@ -53,6 +53,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (10800, false, "GO Simple Tunnel / Gost (HTTP)"),
     (2333, false, "Rathole NAT Traversal (Default)"),
     (4959, false, "Chisel HTTP Tunnel Service (HTTP)"),
+    (4242, false, "Nebula Mesh Overlay Network (Control/UDP)"),
+    (7835, false, "Bore Modern Tunnel Service (TCP)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

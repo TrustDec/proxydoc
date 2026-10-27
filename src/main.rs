@@ -455,7 +455,13 @@ enum Commands {
         /// Also configure Chisel HTTP tunnel daemon proxy (/etc/chisel/config.json / ~/.config/chisel/config.json / /etc/systemd/system/chisel.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "chisel-tunnel")]
         chisel: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, and chisel proxy
+        /// Also configure Nebula mesh overlay daemon proxy (/etc/nebula/config.yaml / ~/.config/nebula/config.yaml / /etc/systemd/system/nebula.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "neb", visible_alias = "slack-nebula")]
+        nebula: bool,
+        /// Also configure Bore modern tunnel daemon proxy (/etc/bore/bore.toml / ~/.config/bore/bore.toml / /etc/systemd/system/bore.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "bore-tunnel")]
+        bore: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, and bore proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -854,7 +860,13 @@ enum Commands {
         /// Also unset Chisel HTTP tunnel daemon proxy (/etc/chisel/config.json / ~/.config/chisel/config.json / /etc/systemd/system/chisel.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "chisel-tunnel")]
         chisel: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, and chisel proxy
+        /// Also unset Nebula mesh overlay daemon proxy (/etc/nebula/config.yaml / ~/.config/nebula/config.yaml / /etc/systemd/system/nebula.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "neb", visible_alias = "slack-nebula")]
+        nebula: bool,
+        /// Also unset Bore modern tunnel daemon proxy (/etc/bore/bore.toml / ~/.config/bore/bore.toml / /etc/systemd/system/bore.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "bore-tunnel")]
+        bore: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, and bore proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1028,6 +1040,8 @@ async fn main() -> Result<()> {
             gost,
             rathole,
             chisel,
+            nebula,
+            bore,
             all,
             shell,
         }) => {
@@ -1163,6 +1177,8 @@ async fn main() -> Result<()> {
                 gost,
                 rathole,
                 chisel,
+                nebula,
+                bore,
                 all,
                 shell.as_deref(),
             )
@@ -1299,6 +1315,8 @@ async fn main() -> Result<()> {
             gost,
             rathole,
             chisel,
+            nebula,
+            bore,
             all,
             shell,
         }) => {
@@ -1433,6 +1451,8 @@ async fn main() -> Result<()> {
                 gost,
                 rathole,
                 chisel,
+                nebula,
+                bore,
                 all,
                 shell.as_deref(),
             )?;
@@ -5059,6 +5079,74 @@ mod tests {
         match cli.command {
             Some(Commands::Off { chisel, .. }) => {
                 assert!(chisel);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_nebula() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--nebula"]).unwrap();
+        match cli.command {
+            Some(Commands::On { nebula, .. }) => {
+                assert!(nebula);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--neb"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { nebula, .. }) => {
+                assert!(nebula);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--slack-nebula"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { nebula, .. }) => {
+                assert!(nebula);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_nebula() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--nebula"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { nebula, .. }) => {
+                assert!(nebula);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_bore() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--bore"]).unwrap();
+        match cli.command {
+            Some(Commands::On { bore, .. }) => {
+                assert!(bore);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--bore-tunnel"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { bore, .. }) => {
+                assert!(bore);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_bore() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--bore"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { bore, .. }) => {
+                assert!(bore);
             }
             _ => panic!("Expected Off command"),
         }

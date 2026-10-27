@@ -21152,6 +21152,421 @@ pub fn unset_chisel_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_nebula_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("NEBULA_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_nebula = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "nebula_proxy" || k_low == "nebula_http_proxy" {
+                        lines.push(format!("Environment=\"NEBULA_PROXY={}\"", proxy_url));
+                        replaced_nebula = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("nebula_proxy=") || lower.starts_with("nebula_http_proxy=") {
+                lines.push(format!("NEBULA_PROXY=\"{}\"", proxy_url));
+                replaced_nebula = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_nebula {
+            lines.push(format!("Environment=\"NEBULA_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("outbound_proxy:") || lower.starts_with("proxy:") || lower.starts_with("http_proxy:") {
+            lines.push(format!("outbound_proxy: \"{}\"", proxy_url));
+            replaced = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.trim().is_empty() {
+            return format!("outbound_proxy: \"{}\"\n", proxy_url);
+        } else {
+            lines.push(format!("outbound_proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    let joined = lines.join("\n");
+    if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    }
+}
+
+pub fn remove_nebula_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "nebula_proxy"
+                    || k_low == "nebula_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("nebula_proxy=")
+            || lower.starts_with("nebula_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("outbound_proxy:")
+            || lower.starts_with("proxy:")
+            || lower.starts_with("http_proxy:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_nebula_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_nebula_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_nebula_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_nebula_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_nebula_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_nebula_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_bore_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("BORE_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_bore = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "bore_proxy" || k_low == "bore_http_proxy" {
+                        lines.push(format!("Environment=\"BORE_PROXY={}\"", proxy_url));
+                        replaced_bore = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("bore_proxy=") || lower.starts_with("bore_http_proxy=") {
+                lines.push(format!("BORE_PROXY=\"{}\"", proxy_url));
+                replaced_bore = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_bore {
+            lines.push(format!("Environment=\"BORE_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+    let mut in_client = false;
+    let mut has_client = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[client]" {
+            in_client = true;
+            has_client = true;
+            lines.push(line.to_string());
+            continue;
+        } else if trimmed.starts_with('[') {
+            if in_client && !replaced {
+                lines.push(format!("proxy = \"{}\"", proxy_url));
+                replaced = true;
+            }
+            in_client = false;
+        }
+
+        if in_client && (trimmed.starts_with("proxy =") || trimmed.starts_with("proxy=")) {
+            lines.push(format!("proxy = \"{}\"", proxy_url));
+            replaced = true;
+            continue;
+        }
+
+        if !in_client && (trimmed.starts_with("proxy =") || trimmed.starts_with("proxy=")) {
+            lines.push(format!("proxy = \"{}\"", proxy_url));
+            replaced = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if in_client && !replaced {
+        lines.push(format!("proxy = \"{}\"", proxy_url));
+        replaced = true;
+    }
+
+    if !replaced {
+        if has_client {
+            // Handled
+        } else if content.trim().is_empty() {
+            return format!("[client]\nproxy = \"{}\"\n", proxy_url);
+        } else {
+            lines.push("".to_string());
+            lines.push("[client]".to_string());
+            lines.push(format!("proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    let joined = lines.join("\n");
+    if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    }
+}
+
+pub fn remove_bore_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "bore_proxy"
+                    || k_low == "bore_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        } else if lower.starts_with("bore_proxy=")
+            || lower.starts_with("bore_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy=")
+            || lower.starts_with("http_proxy =")
+            || lower.starts_with("http_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_bore_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_bore_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_bore_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_bore_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_bore_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_bore_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -21284,6 +21699,8 @@ pub async fn turn_on(
     gost: bool,
     rathole: bool,
     chisel: bool,
+    nebula: bool,
+    bore: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -21415,6 +21832,8 @@ pub async fn turn_on(
     let set_gost = gost || all;
     let set_rathole = rathole || all;
     let set_chisel = chisel || all;
+    let set_nebula = nebula || all;
+    let set_bore = bore || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -23266,6 +23685,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_nebula {
+        match set_nebula_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Nebula daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Nebula daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_bore {
+        match set_bore_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Bore daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Bore daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -23411,6 +23860,8 @@ pub fn turn_off(
     gost: bool,
     rathole: bool,
     chisel: bool,
+    nebula: bool,
+    bore: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -23542,6 +23993,8 @@ pub fn turn_off(
     let unset_gost = gost || all;
     let unset_rathole = rathole || all;
     let unset_chisel = chisel || all;
+    let unset_nebula = nebula || all;
+    let unset_bore = bore || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -24651,6 +25104,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Chisel daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Chisel proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Chisel daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_nebula {
+        match unset_nebula_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Nebula daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Nebula proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Nebula daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_bore {
+        match unset_bore_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Bore daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Bore proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Bore daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -27831,5 +28300,49 @@ proxy = "http://127.0.0.1:7890"
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("CHISEL_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_nebula_proxy() {
+        let nebula_initial = r#"
+lighthouse:
+  am_lighthouse: false
+"#;
+        let nebula_updated = apply_nebula_proxy(nebula_initial, "http://10.0.0.80:8080");
+        assert!(nebula_updated.contains("outbound_proxy: \"http://10.0.0.80:8080\""));
+        let (nebula_cleaned, nebula_removed) = remove_nebula_proxy(&nebula_updated);
+        assert!(nebula_removed);
+        assert!(!nebula_cleaned.contains("outbound_proxy:"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_nebula_proxy(dropin_initial, "http://10.0.0.80:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.80:8080\""));
+        assert!(dropin_updated.contains("Environment=\"NEBULA_PROXY=http://10.0.0.80:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_nebula_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("NEBULA_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_bore_proxy() {
+        let bore_initial = r#"
+[client]
+server = "bore.pub"
+"#;
+        let bore_updated = apply_bore_proxy(bore_initial, "http://10.0.0.85:8080");
+        assert!(bore_updated.contains("proxy = \"http://10.0.0.85:8080\""));
+        let (bore_cleaned, bore_removed) = remove_bore_proxy(&bore_updated);
+        assert!(bore_removed);
+        assert!(!bore_cleaned.contains("proxy ="));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_bore_proxy(dropin_initial, "http://10.0.0.85:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.85:8080\""));
+        assert!(dropin_updated.contains("Environment=\"BORE_PROXY=http://10.0.0.85:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_bore_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("BORE_PROXY="));
     }
 }
