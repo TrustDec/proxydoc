@@ -431,7 +431,13 @@ enum Commands {
         /// Also configure Tor anonymity network proxy daemon (/etc/tor/torrc / /usr/local/etc/tor/torrc / ~/.torrc / /etc/systemd/system/tor.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "tor-daemon", visible_alias = "torrc")]
         tor: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, and tor proxy
+        /// Also configure Cloudflare Tunnel daemon proxy (~/.cloudflared/config.yml / /etc/cloudflared/config.yml / /etc/systemd/system/cloudflared.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cf-tunnel", visible_alias = "tunnel")]
+        cloudflared: bool,
+        /// Also configure Ngrok tunnel daemon proxy (~/.config/ngrok/ngrok.yml / ~/Library/Application Support/ngrok/ngrok.yml / /etc/systemd/system/ngrok.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "ngrok-tunnel", visible_alias = "ngrok-agent")]
+        ngrok: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, and ngrok proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -806,7 +812,13 @@ enum Commands {
         /// Also unset Tor anonymity network proxy daemon (/etc/tor/torrc / /usr/local/etc/tor/torrc / ~/.torrc / /etc/systemd/system/tor.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "tor-daemon", visible_alias = "torrc")]
         tor: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, and tor proxy
+        /// Also unset Cloudflare Tunnel daemon proxy (~/.cloudflared/config.yml / /etc/cloudflared/config.yml / /etc/systemd/system/cloudflared.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cf-tunnel", visible_alias = "tunnel")]
+        cloudflared: bool,
+        /// Also unset Ngrok tunnel daemon proxy (~/.config/ngrok/ngrok.yml / ~/Library/Application Support/ngrok/ngrok.yml / /etc/systemd/system/ngrok.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "ngrok-tunnel", visible_alias = "ngrok-agent")]
+        ngrok: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, and ngrok proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -972,6 +984,8 @@ async fn main() -> Result<()> {
             tinyproxy,
             mitmproxy,
             tor,
+            cloudflared,
+            ngrok,
             all,
             shell,
         }) => {
@@ -1099,6 +1113,8 @@ async fn main() -> Result<()> {
                 tinyproxy,
                 mitmproxy,
                 tor,
+                cloudflared,
+                ngrok,
                 all,
                 shell.as_deref(),
             )
@@ -1227,6 +1243,8 @@ async fn main() -> Result<()> {
             tinyproxy,
             mitmproxy,
             tor,
+            cloudflared,
+            ngrok,
             all,
             shell,
         }) => {
@@ -1353,6 +1371,8 @@ async fn main() -> Result<()> {
                 tinyproxy,
                 mitmproxy,
                 tor,
+                cloudflared,
+                ngrok,
                 all,
                 shell.as_deref(),
             )?;
@@ -4739,6 +4759,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { tor, .. }) => {
                 assert!(tor);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_cloudflared() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--cloudflared"]).unwrap();
+        match cli.command {
+            Some(Commands::On { cloudflared, .. }) => {
+                assert!(cloudflared);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--cf-tunnel"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { cloudflared, .. }) => {
+                assert!(cloudflared);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_cloudflared() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--cloudflared"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { cloudflared, .. }) => {
+                assert!(cloudflared);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_ngrok() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--ngrok"]).unwrap();
+        match cli.command {
+            Some(Commands::On { ngrok, .. }) => {
+                assert!(ngrok);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--ngrok-agent"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { ngrok, .. }) => {
+                assert!(ngrok);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_ngrok() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--ngrok"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { ngrok, .. }) => {
+                assert!(ngrok);
             }
             _ => panic!("Expected Off command"),
         }

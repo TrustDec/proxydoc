@@ -45,6 +45,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8118, false, "Privoxy forwarding daemon (HTTP)"),
     (8888, false, "Tinyproxy / Fiddler (HTTP)"),
     (3128, false, "Squid caching proxy (HTTP)"),
+    (4040, false, "Ngrok Web Inspection (HTTP)"),
+    (2024, false, "Cloudflare Tunnel Metrics (HTTP)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

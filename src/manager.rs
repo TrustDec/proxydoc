@@ -19465,6 +19465,390 @@ pub fn unset_tor_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_cloudflared_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("TUNNEL_PROXY_ADDRESS=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_tunnel = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "tunnel_proxy_address" {
+                        lines.push(format!("Environment=\"TUNNEL_PROXY_ADDRESS={}\"", proxy_url));
+                        replaced_tunnel = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("tunnel_proxy_address=") {
+                lines.push(format!("TUNNEL_PROXY_ADDRESS=\"{}\"", proxy_url));
+                replaced_tunnel = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_tunnel {
+            lines.push(format!("Environment=\"TUNNEL_PROXY_ADDRESS={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let target_line = format!("proxy-address: {}", proxy_url);
+
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("proxy-address:") || trimmed.starts_with("proxy_address:") {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}{}", "", target_line, indent = indent));
+            replaced_proxy = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(target_line);
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_cloudflared_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnel_proxy_address"
+                    || k_low == "cloudflared_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("tunnel_proxy_address=")
+            || lower.starts_with("cloudflared_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if trimmed.starts_with("proxy-address:") || trimmed.starts_with("proxy_address:") {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_cloudflared_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_cloudflared_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_cloudflared_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_cloudflared_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_cloudflared_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_cloudflared_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_ngrok_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("NGROK_HTTP_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_ngrok = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "ngrok_http_proxy" {
+                        lines.push(format!("Environment=\"NGROK_HTTP_PROXY={}\"", proxy_url));
+                        replaced_ngrok = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("ngrok_http_proxy=") {
+                lines.push(format!("NGROK_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_ngrok = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_ngrok {
+            lines.push(format!("Environment=\"NGROK_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let target_line = format!("proxy_url: \"{}\"", proxy_url);
+
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("proxy_url:") || trimmed.starts_with("proxy-url:") {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}{}", "", target_line, indent = indent));
+            replaced_proxy = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(target_line);
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_ngrok_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ngrok_http_proxy"
+                    || k_low == "ngrok_proxy_url"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("ngrok_http_proxy=")
+            || lower.starts_with("ngrok_proxy_url=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if trimmed.starts_with("proxy_url:") || trimmed.starts_with("proxy-url:") {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_ngrok_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_ngrok_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_ngrok_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_ngrok_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_ngrok_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_ngrok_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -19589,6 +19973,8 @@ pub async fn turn_on(
     tinyproxy: bool,
     mitmproxy: bool,
     tor: bool,
+    cloudflared: bool,
+    ngrok: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -19712,6 +20098,8 @@ pub async fn turn_on(
     let set_tinyproxy = tinyproxy || all;
     let set_mitmproxy = mitmproxy || all;
     let set_tor = tor || all;
+    let set_cloudflared = cloudflared || all;
+    let set_ngrok = ngrok || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -21443,6 +21831,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_cloudflared {
+        match set_cloudflared_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Cloudflare Tunnel daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Cloudflare Tunnel config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_ngrok {
+        match set_ngrok_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Ngrok daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Ngrok config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -21580,6 +21998,8 @@ pub fn turn_off(
     tinyproxy: bool,
     mitmproxy: bool,
     tor: bool,
+    cloudflared: bool,
+    ngrok: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -21703,6 +22123,8 @@ pub fn turn_off(
     let unset_tinyproxy = tinyproxy || all;
     let unset_mitmproxy = mitmproxy || all;
     let unset_tor = tor || all;
+    let unset_cloudflared = cloudflared || all;
+    let unset_ngrok = ngrok || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -22748,6 +23170,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Tor anonymity network proxy daemon removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Tor anonymity network proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Tor anonymity network proxy daemon: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_cloudflared {
+        match unset_cloudflared_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Cloudflare Tunnel daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Cloudflare Tunnel proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Cloudflare Tunnel daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_ngrok {
+        match unset_ngrok_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Ngrok daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Ngrok proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Ngrok daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -25697,5 +26135,52 @@ HTTPSProxy 127.0.0.1:7890
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("TOR_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cloudflared_proxy() {
+        let cf_initial = r#"
+tunnel: 6ff42ae2-765d-4adf-8112-31c55c155133
+proxy-address: http://127.0.0.1:7890
+"#;
+        let cf_updated = apply_cloudflared_proxy(cf_initial, "http://10.0.0.52:8080");
+        assert!(cf_updated.contains("proxy-address: http://10.0.0.52:8080"));
+        let (cf_cleaned, cf_removed) = remove_cloudflared_proxy(&cf_updated);
+        assert!(cf_removed);
+        assert!(!cf_cleaned.contains("proxy-address: http://10.0.0.52:8080"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_cloudflared_proxy(dropin_initial, "http://10.0.0.52:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.52:8080\""));
+        assert!(dropin_updated.contains("Environment=\"TUNNEL_PROXY_ADDRESS=http://10.0.0.52:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_cloudflared_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TUNNEL_PROXY_ADDRESS="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_ngrok_proxy() {
+        let ngrok_initial = r#"
+version: "2"
+authtoken: token123
+proxy_url: "http://127.0.0.1:7890"
+"#;
+        let ngrok_updated = apply_ngrok_proxy(ngrok_initial, "http://10.0.0.54:8080");
+        assert!(ngrok_updated.contains("proxy_url: \"http://10.0.0.54:8080\""));
+        let (ngrok_cleaned, ngrok_removed) = remove_ngrok_proxy(&ngrok_updated);
+        assert!(ngrok_removed);
+        assert!(!ngrok_cleaned.contains("proxy_url: \"http://10.0.0.54:8080\""));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_ngrok_proxy(dropin_initial, "http://10.0.0.54:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.54:8080\""));
+        assert!(dropin_updated.contains("Environment=\"NGROK_HTTP_PROXY=http://10.0.0.54:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_ngrok_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("NGROK_HTTP_PROXY="));
     }
 }
