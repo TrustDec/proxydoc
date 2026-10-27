@@ -28457,6 +28457,472 @@ pub fn get_cow_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_sniproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SNIPROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("sniproxy").join("sniproxy.conf"),
+            home.join(".config").join("sniproxy").join("config"),
+            home.join(".sniproxy.conf"),
+            home.join(".config").join("systemd").join("user").join("sniproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/sniproxy.conf"),
+        PathBuf::from("/etc/sniproxy/sniproxy.conf"),
+        PathBuf::from("/usr/local/etc/sniproxy.conf"),
+        PathBuf::from("/etc/default/sniproxy"),
+        PathBuf::from("/etc/sysconfig/sniproxy"),
+        PathBuf::from("/etc/systemd/system/sniproxy.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_sniproxy_config_path() -> Option<PathBuf> {
+    let paths = get_sniproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_sniproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_sniproxy_write_path() -> PathBuf {
+    if let Some(p) = get_sniproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SNIPROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("sniproxy");
+        if dir.is_dir() {
+            return dir.join("sniproxy.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/sniproxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("sniproxy.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/sniproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("sniproxy").join("sniproxy.conf");
+    }
+    PathBuf::from("/etc/sniproxy.conf")
+}
+
+pub fn parse_sniproxy_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "upstream",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "sniproxy_proxy",
+                "http-proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "sniproxy_proxy"
+                        || k_low == "sniproxy_http_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("upstream ") || lower.starts_with("fallback ") {
+            let rest = trimmed.split_whitespace().nth(1).unwrap_or("").trim();
+            let clean = rest.trim_matches('"').trim_matches('\'').trim_end_matches(';').trim();
+            if !clean.is_empty() && (clean.contains(':') || clean.starts_with("http://") || clean.starts_with("socks")) {
+                return Some(if clean.starts_with("http://") || clean.starts_with("https://") || clean.starts_with("socks") {
+                    clean.to_string()
+                } else {
+                    format!("http://{}", clean)
+                });
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "upstream"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "sniproxy_proxy"
+                || k_low == "http-proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_sniproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_sniproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_sniproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SNIPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SNIPROXY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SNIPROXY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SNIPROXY_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_dnsproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DNSPROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("dnsproxy").join("config.yaml"),
+            home.join(".config").join("dnsproxy").join("dnsproxy.yml"),
+            home.join(".config").join("dnsproxy").join("config.json"),
+            home.join(".dnsproxy.yaml"),
+            home.join(".dnsproxy.conf"),
+            home.join(".config").join("systemd").join("user").join("dnsproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/dnsproxy/config.yaml"),
+        PathBuf::from("/etc/dnsproxy.yaml"),
+        PathBuf::from("/etc/dnsproxy.conf"),
+        PathBuf::from("/usr/local/etc/dnsproxy.yaml"),
+        PathBuf::from("/etc/default/dnsproxy"),
+        PathBuf::from("/etc/sysconfig/dnsproxy"),
+        PathBuf::from("/etc/systemd/system/dnsproxy.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_dnsproxy_config_path() -> Option<PathBuf> {
+    let paths = get_dnsproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_dnsproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_dnsproxy_write_path() -> PathBuf {
+    if let Some(p) = get_dnsproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DNSPROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("dnsproxy");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/dnsproxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/dnsproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("dnsproxy").join("config.yaml");
+    }
+    PathBuf::from("/etc/dnsproxy/config.yaml")
+}
+
+pub fn parse_dnsproxy_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "http-proxy",
+                "http_proxy",
+                "https_proxy",
+                "proxy",
+                "upstream-proxy",
+                "all_proxy",
+                "dnsproxy_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "dnsproxy_proxy"
+                        || k_low == "dnsproxy_http_proxy"
+                        || k_low == "all_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "http-proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "proxy"
+                || k_low == "upstream-proxy"
+                || k_low == "all_proxy"
+                || k_low == "dnsproxy_proxy"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_dnsproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_dnsproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_dnsproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DNSPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DNSPROXY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DNSPROXY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DNSPROXY_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -34606,6 +35072,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "COW Daemon Proxy",
             "~/.cow/rc & /etc/cow/rc",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Sniproxy SNI Forwarding Proxy Daemon (~/.config/sniproxy/sniproxy.conf / /etc/sniproxy.conf / /etc/systemd/system/sniproxy.service.d/http-proxy.conf)
+    if let Some((sniproxy_proxy, sniproxy_path)) = get_sniproxy_proxy() {
+        let ok = verify_proxy_url(&sniproxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Sniproxy proxy `{}` in {} is dead! (sniproxy forwarding will fail)",
+                sniproxy_proxy,
+                sniproxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Sniproxy Daemon Proxy",
+            format!("{}", sniproxy_path.display()),
+            sniproxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (sniproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Sniproxy Daemon Proxy",
+            "~/.config/sniproxy/sniproxy.conf & /etc/sniproxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Dnsproxy AdGuard DNS Proxy Daemon (~/.config/dnsproxy/config.yaml / /etc/dnsproxy/config.yaml / /etc/systemd/system/dnsproxy.service.d/http-proxy.conf)
+    if let Some((dnsproxy_proxy, dnsproxy_path)) = get_dnsproxy_proxy() {
+        let ok = verify_proxy_url(&dnsproxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Dnsproxy proxy `{}` in {} is dead! (dnsproxy forwarding will fail)",
+                dnsproxy_proxy,
+                dnsproxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Dnsproxy Daemon Proxy",
+            format!("{}", dnsproxy_path.display()),
+            dnsproxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (dnsproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Dnsproxy Daemon Proxy",
+            "~/.config/dnsproxy/config.yaml & /etc/dnsproxy/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -41463,5 +41993,98 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = socks5://127.0.0.1:1080\n; cow_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_cow_proxy(input_comment), None);
         assert_eq!(parse_cow_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_sniproxy_proxy() {
+        let sni_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_sniproxy_proxy(sni_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sni_conf = r#"
+error_log {
+    syslog daemon
+}
+listen 8081 {
+    proto http
+    table default
+}
+table default {
+    upstream 127.0.0.1:7890
+}
+"#;
+        assert_eq!(
+            parse_sniproxy_proxy(sni_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sni_env = r#"
+SNIPROXY_PROXY="socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_sniproxy_proxy(sni_env),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_sniproxy_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# upstream 127.0.0.1:7890\n; sniproxy_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_sniproxy_proxy(input_comment), None);
+        assert_eq!(parse_sniproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_dnsproxy_proxy() {
+        let dns_yaml = r#"
+listen-addrs:
+  - 127.0.0.1
+upstream:
+  - 1.1.1.1
+http-proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnsproxy_proxy(dns_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dns_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_dnsproxy_proxy(dns_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dns_env = r#"
+DNSPROXY_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnsproxy_proxy(dns_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnsproxy_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http-proxy: http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_dnsproxy_proxy(input_comment), None);
+        assert_eq!(parse_dnsproxy_proxy(""), None);
     }
 }

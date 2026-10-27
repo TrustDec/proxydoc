@@ -85,6 +85,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (10822, true, "MicroSOCKS SOCKS5 Proxy Daemon (SOCKS5)"),
     (53128, false, "Cntlm Authenticating Proxy Daemon (HTTP)"),
     (7777, false, "COW HTTP Proxy Daemon (HTTP)"),
+    (8444, false, "Sniproxy SNI Forwarding Proxy Daemon (TLS/HTTP)"),
+    (5353, false, "Dnsproxy AdGuard DNS Proxy Daemon (DNS/DoH)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

@@ -28508,6 +28508,401 @@ pub fn unset_cow_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_sniproxy_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sniproxy_proxy"
+                    || k_low == "sniproxy_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"SNIPROXY_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("sniproxy_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                lines.push(format!("SNIPROXY_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        if lower.starts_with("upstream ") || lower.starts_with("fallback ") {
+            if !replaced {
+                let clean_target = proxy_url
+                    .trim_start_matches("http://")
+                    .trim_start_matches("https://")
+                    .trim_start_matches("socks5://")
+                    .trim_start_matches("socks5h://")
+                    .trim_end_matches('/');
+                lines.push(format!("upstream {}", clean_target));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("sniproxy_proxy:") || clean.starts_with("sniproxy_proxy=")
+            || clean.starts_with("upstream:") || clean.starts_with("upstream="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                if line.contains('=') {
+                    lines.push(format!("proxy = {}", proxy_url));
+                } else {
+                    lines.push(format!("proxy: {}", proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let clean_target = proxy_url
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .trim_start_matches("socks5://")
+            .trim_start_matches("socks5h://")
+            .trim_end_matches('/');
+        if content.contains("table") || content.contains('{') {
+            lines.push(format!("upstream {}", clean_target));
+        } else if content.contains(':') && !content.contains('=') {
+            lines.push(format!("proxy: {}", proxy_url));
+        } else {
+            lines.push(format!("proxy = {}", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_sniproxy_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["proxy", "upstream", "target_proxy", "sniproxy_proxy", "http_proxy", "https_proxy", "all_proxy", "http-proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sniproxy_proxy"
+                    || k_low == "sniproxy_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("sniproxy_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if lower.starts_with("upstream ") || lower.starts_with("fallback ") {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("sniproxy_proxy:") || clean.starts_with("sniproxy_proxy=")
+            || clean.starts_with("upstream:") || clean.starts_with("upstream="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_sniproxy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_sniproxy_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_sniproxy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_sniproxy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_sniproxy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_sniproxy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_dnsproxy_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("http-proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dnsproxy_proxy"
+                    || k_low == "dnsproxy_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"DNSPROXY_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("dnsproxy_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                lines.push(format!("DNSPROXY_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("upstream-proxy:") || clean.starts_with("upstream-proxy=")
+            || clean.starts_with("dnsproxy_proxy:") || clean.starts_with("dnsproxy_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                if line.contains('=') {
+                    lines.push(format!("http-proxy = \"{}\"", proxy_url));
+                } else {
+                    lines.push(format!("http-proxy: \"{}\"", proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.contains('=') {
+            lines.push(format!("http-proxy = \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http-proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_dnsproxy_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["http-proxy", "http_proxy", "https_proxy", "proxy", "upstream-proxy", "all_proxy", "dnsproxy_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dnsproxy_proxy"
+                    || k_low == "dnsproxy_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("dnsproxy_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("upstream-proxy:") || clean.starts_with("upstream-proxy=")
+            || clean.starts_with("dnsproxy_proxy:") || clean.starts_with("dnsproxy_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_dnsproxy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_dnsproxy_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_dnsproxy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_dnsproxy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_dnsproxy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_dnsproxy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -28672,6 +29067,8 @@ pub async fn turn_on(
     microsocks: bool,
     cntlm: bool,
     cow: bool,
+    sniproxy: bool,
+    dnsproxy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -28835,6 +29232,8 @@ pub async fn turn_on(
     let set_microsocks = microsocks || all;
     let set_cntlm = cntlm || all;
     let set_cow = cow || all;
+    let set_sniproxy = sniproxy || all;
+    let set_dnsproxy = dnsproxy || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -31166,6 +31565,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_sniproxy {
+        match set_sniproxy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Sniproxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Sniproxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_dnsproxy {
+        match set_dnsproxy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Dnsproxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Dnsproxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -31343,6 +31772,8 @@ pub fn turn_off(
     microsocks: bool,
     cntlm: bool,
     cow: bool,
+    sniproxy: bool,
+    dnsproxy: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -31506,6 +31937,8 @@ pub fn turn_off(
     let unset_microsocks = microsocks || all;
     let unset_cntlm = cntlm || all;
     let unset_cow = cow || all;
+    let unset_sniproxy = sniproxy || all;
+    let unset_dnsproxy = dnsproxy || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -32871,6 +33304,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ COW daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ COW proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset COW daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_sniproxy {
+        match unset_sniproxy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Sniproxy daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Sniproxy proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Sniproxy daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_dnsproxy {
+        match unset_dnsproxy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Dnsproxy daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Dnsproxy proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Dnsproxy daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -36877,5 +37326,61 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("COW_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_sniproxy_proxy() {
+        let sni_initial = r#"{
+  "proxy": "http://127.0.0.1:7890"
+}"#;
+        let sni_updated = apply_sniproxy_proxy(sni_initial, "socks5://10.0.0.127:1080");
+        assert!(sni_updated.contains("\"proxy\": \"socks5://10.0.0.127:1080\""));
+        let (sni_cleaned, sni_removed) = remove_sniproxy_proxy(&sni_updated);
+        assert!(sni_removed);
+        assert!(!sni_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "table default {\n  upstream 127.0.0.1:7890\n}\n";
+        let sni_conf_updated = apply_sniproxy_proxy(conf_initial, "http://10.0.0.127:8080");
+        assert!(sni_conf_updated.contains("upstream 10.0.0.127:8080"));
+        let (conf_cleaned, conf_removed) = remove_sniproxy_proxy(&sni_conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("upstream 10.0.0.127:8080"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_sniproxy_proxy(dropin_initial, "http://10.0.0.127:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.127:7890\""));
+        assert!(dropin_updated.contains("Environment=\"SNIPROXY_PROXY=http://10.0.0.127:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_sniproxy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("SNIPROXY_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_dnsproxy_proxy() {
+        let dns_initial = r#"{
+  "http-proxy": "http://127.0.0.1:7890"
+}"#;
+        let dns_updated = apply_dnsproxy_proxy(dns_initial, "socks5://10.0.0.128:1080");
+        assert!(dns_updated.contains("\"http-proxy\": \"socks5://10.0.0.128:1080\""));
+        let (dns_cleaned, dns_removed) = remove_dnsproxy_proxy(&dns_updated);
+        assert!(dns_removed);
+        assert!(!dns_cleaned.contains("\"http-proxy\""));
+
+        let conf_initial = "http-proxy: \"http://127.0.0.1:7890\"\n";
+        let dns_conf_updated = apply_dnsproxy_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(dns_conf_updated.contains("http-proxy: \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_dnsproxy_proxy(&dns_conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("http-proxy:"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_dnsproxy_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"DNSPROXY_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_dnsproxy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("DNSPROXY_PROXY="));
     }
 }

@@ -1398,6 +1398,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "AutoGPT AI CDN",
         "https://github.com/Significant-Gravitas/AutoGPT",
     ),
+    (
+        "Sniproxy Proxy CDN",
+        "https://github.com/dlundquist/sniproxy",
+    ),
+    (
+        "Dnsproxy Proxy CDN",
+        "https://github.com/AdguardTeam/dnsproxy",
+    ),
+    (
+        "LLaVA AI CDN",
+        "https://github.com/haotian-liu/LLaVA",
+    ),
+    (
+        "Whisper AI CDN",
+        "https://github.com/openai/whisper",
+    ),
+    (
+        "Ovis AI CDN",
+        "https://github.com/AIDC-AI/Ovis",
+    ),
+    (
+        "Diffusers AI CDN",
+        "https://github.com/huggingface/diffusers",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2756,6 +2780,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "AutoGPT AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Sniproxy Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Dnsproxy Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LLaVA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Whisper AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Ovis AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Diffusers AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
