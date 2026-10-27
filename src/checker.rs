@@ -894,6 +894,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Tinyproxy CDN",
         "https://tinyproxy.github.io",
     ),
+    (
+        "Mitmproxy CDN",
+        "https://mitmproxy.org",
+    ),
+    (
+        "Tor Project CDN",
+        "https://www.torproject.org",
+    ),
+    (
+        "LangChain CDN",
+        "https://www.langchain.com",
+    ),
+    (
+        "vLLM CDN",
+        "https://vllm.ai",
+    ),
+    (
+        "Open WebUI CDN",
+        "https://openwebui.com",
+    ),
+    (
+        "Dify CDN",
+        "https://dify.ai",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1874,6 +1898,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Tinyproxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Mitmproxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Tor Project CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LangChain CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "vLLM CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open WebUI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Dify CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

@@ -40,6 +40,11 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (2080, false, "Surge Mac (HTTP)"),
     (6152, true, "Surge Mac (SOCKS5)"),
     (6153, false, "Surge Mac (HTTP)"),
+    (8080, false, "Mitmproxy / Burp Suite (HTTP)"),
+    (9050, true, "Tor SOCKS daemon (SOCKS5)"),
+    (8118, false, "Privoxy forwarding daemon (HTTP)"),
+    (8888, false, "Tinyproxy / Fiddler (HTTP)"),
+    (3128, false, "Squid caching proxy (HTTP)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

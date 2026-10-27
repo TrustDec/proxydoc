@@ -18665,6 +18665,477 @@ pub fn get_tinyproxy_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_mitmproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MITMPROXY_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MITMPROXY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("MITMPROXY_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".mitmproxy").join("config.yaml"),
+            home.join(".config").join("mitmproxy").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("mitmproxy.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("mitmdump.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("mitmweb.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/mitmproxy/config.yaml"),
+        PathBuf::from("/etc/mitmproxy.yaml"),
+        PathBuf::from("/etc/default/mitmproxy"),
+        PathBuf::from("/etc/sysconfig/mitmproxy"),
+        PathBuf::from("/etc/systemd/system/mitmproxy.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/mitmdump.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/mitmweb.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/mitmproxy/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/mitmproxy/config.yaml"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_mitmproxy_config_path() -> Option<PathBuf> {
+    let paths = get_mitmproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_mitmproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_mitmproxy_write_path() -> PathBuf {
+    if let Some(p) = get_mitmproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MITMPROXY_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(dir) = std::env::var("MITMPROXY_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config.yaml");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let mitm_dir = home.join(".mitmproxy");
+        if mitm_dir.is_dir() {
+            return mitm_dir.join("config.yaml");
+        }
+    }
+    let opt_brew = PathBuf::from("/opt/homebrew/etc/mitmproxy");
+    if opt_brew.is_dir() {
+        return opt_brew.join("config.yaml");
+    }
+    let usr_local = PathBuf::from("/usr/local/etc/mitmproxy");
+    if usr_local.is_dir() {
+        return usr_local.join("config.yaml");
+    }
+    let etc_mitm = PathBuf::from("/etc/mitmproxy");
+    if etc_mitm.is_dir() {
+        return etc_mitm.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/mitmproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".mitmproxy").join("config.yaml");
+    }
+    PathBuf::from("/etc/mitmproxy/config.yaml")
+}
+
+pub fn parse_mitmproxy_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "mitmproxy_http_proxy"
+                        || k_low == "mitmproxy_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "upstream_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/mitmproxy
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "mitmproxy_http_proxy"
+                || k_low == "mitmproxy_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Mitmproxy YAML mode upstream format:
+        // mode: "upstream:http://127.0.0.1:8080"
+        // mode: [ "upstream:http://127.0.0.1:8080" ]
+        // mode: upstream:http://127.0.0.1:8080
+        // - "upstream:http://127.0.0.1:8080"
+        if trimmed.contains("upstream:") {
+            let idx = trimmed.find("upstream:").unwrap() + "upstream:".len();
+            let after = &trimmed[idx..];
+            let clean = after
+                .trim_matches(|c| c == '"' || c == '\'' || c == '[' || c == ']' || c == ',' || c == ' ');
+            let token = clean.split_whitespace().next().unwrap_or(clean);
+            let token = token.trim_matches(|c| c == '"' || c == '\'' || c == ']' || c == ',');
+            if !token.is_empty() {
+                return Some(if token.starts_with("http://")
+                    || token.starts_with("https://")
+                    || token.starts_with("socks")
+                {
+                    token.to_string()
+                } else {
+                    format!("http://{}", token)
+                });
+            }
+        }
+
+        // upstream_proxy: "http://127.0.0.1:8080" or proxy: "http://..."
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "upstream_proxy" || k_low == "upstream" || k_low == "proxy" || k_low == "http_proxy" {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_mitmproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_mitmproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_mitmproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MITMPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MITMPROXY_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_tor_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TORRC") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TOR_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TOR_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".torrc"),
+            home.join(".config").join("tor").join("torrc"),
+            home.join(".config").join("systemd").join("user").join("tor.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tor/torrc"),
+        PathBuf::from("/etc/torrc"),
+        PathBuf::from("/etc/default/tor"),
+        PathBuf::from("/etc/sysconfig/tor"),
+        PathBuf::from("/etc/systemd/system/tor.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/tor@default.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/tor/torrc"),
+        PathBuf::from("/usr/local/etc/torrc"),
+        PathBuf::from("/opt/homebrew/etc/tor/torrc"),
+        PathBuf::from("C:\\Program Files\\Tor\\torrc"),
+        PathBuf::from("C:\\Program Files (x86)\\Tor\\torrc"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_tor_config_path() -> Option<PathBuf> {
+    let paths = get_tor_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tor_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tor_write_path() -> PathBuf {
+    if let Some(p) = get_tor_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TORRC") {
+        return PathBuf::from(file.trim());
+    }
+    let opt_brew = PathBuf::from("/opt/homebrew/etc/tor");
+    if opt_brew.is_dir() {
+        return opt_brew.join("torrc");
+    }
+    let usr_local = PathBuf::from("/usr/local/etc/tor");
+    if usr_local.is_dir() {
+        return usr_local.join("torrc");
+    }
+    let etc_tor = PathBuf::from("/etc/tor");
+    if etc_tor.is_dir() {
+        return etc_tor.join("torrc");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tor.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".torrc");
+    }
+    PathBuf::from("/etc/tor/torrc")
+}
+
+pub fn parse_tor_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "tor_http_proxy"
+                        || k_low == "tor_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "upstream_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/tor
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "tor_http_proxy"
+                || k_low == "tor_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "upstream_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Tor torrc directives:
+        // HTTPProxy 127.0.0.1:8080
+        // HTTPSProxy 127.0.0.1:8080
+        // Socks4Proxy 127.0.0.1:1080
+        // Socks5Proxy 127.0.0.1:1080
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let directive = parts[0].to_ascii_lowercase();
+            let target = parts[1].trim_matches('"').trim_matches('\'');
+            if !target.is_empty() {
+                if directive == "httpproxy" || directive == "httpsproxy" {
+                    return Some(if target.starts_with("http://") || target.starts_with("https://") || target.starts_with("socks") {
+                        target.to_string()
+                    } else {
+                        format!("http://{}", target)
+                    });
+                } else if directive == "socks5proxy" {
+                    return Some(if target.starts_with("socks") {
+                        target.to_string()
+                    } else {
+                        format!("socks5://{}", target)
+                    });
+                } else if directive == "socks4proxy" {
+                    return Some(if target.starts_with("socks") {
+                        target.to_string()
+                    } else {
+                        format!("socks4://{}", target)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_tor_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tor_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tor_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TOR_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TOR_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -23470,6 +23941,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Tinyproxy HTTP Proxy",
             "/etc/tinyproxy/tinyproxy.conf & /etc/tinyproxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Mitmproxy HTTPS Intercepting Proxy Daemon (~/.mitmproxy/config.yaml / /etc/mitmproxy/config.yaml / /etc/systemd/system/mitmproxy.service.d/http-proxy.conf)
+    if let Some((mitmproxy_proxy, mitmproxy_path)) = get_mitmproxy_proxy() {
+        let ok = verify_proxy_url(&mitmproxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Mitmproxy proxy daemon upstream proxy `{}` in {} is dead! (Mitmproxy upstream mode will fail)",
+                mitmproxy_proxy,
+                mitmproxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Mitmproxy Daemon Proxy",
+            format!("{}", mitmproxy_path.display()),
+            mitmproxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (mitmproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Mitmproxy Daemon Proxy",
+            "~/.mitmproxy/config.yaml & /etc/mitmproxy/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Tor SOCKS/HTTP Anonymity Proxy Daemon (/etc/tor/torrc / /usr/local/etc/tor/torrc / ~/.torrc / /etc/systemd/system/tor.service.d/http-proxy.conf)
+    if let Some((tor_proxy, tor_path)) = get_tor_proxy() {
+        let ok = verify_proxy_url(&tor_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Tor proxy daemon upstream proxy `{}` in {} is dead! (Tor relay/exit connections will fail)",
+                tor_proxy,
+                tor_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Tor Daemon Proxy",
+            format!("{}", tor_path.display()),
+            tor_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tor fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Tor Daemon Proxy",
+            "/etc/tor/torrc & ~/.torrc",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -28569,5 +29104,74 @@ Environment="TINYPROXY_HTTP_PROXY=http://10.0.0.111:8080"
         let input_comment = "# Upstream http 127.0.0.1:7890\n; Upstream http 127.0.0.1:7890\n";
         assert_eq!(parse_tinyproxy_proxy(input_comment), None);
         assert_eq!(parse_tinyproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_mitmproxy_proxy() {
+        let mitm_conf = r#"
+mode: ["upstream:http://127.0.0.1:7890"]
+listen_port: 8080
+"#;
+        assert_eq!(
+            parse_mitmproxy_proxy(mitm_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let mitm_unquoted = "mode: upstream:http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_mitmproxy_proxy(mitm_unquoted),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let socks_conf = "mode: [\"upstream:socks5://127.0.0.1:1080\"]\n";
+        assert_eq!(
+            parse_mitmproxy_proxy(socks_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="MITMPROXY_HTTP_PROXY=http://10.0.0.112:8080"
+"#;
+        assert_eq!(
+            parse_mitmproxy_proxy(dropin),
+            Some("http://10.0.0.112:8080".to_string())
+        );
+
+        let input_comment = "# mode: [\"upstream:http://127.0.0.1:7890\"]\n; mode: upstream\n";
+        assert_eq!(parse_mitmproxy_proxy(input_comment), None);
+        assert_eq!(parse_mitmproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tor_proxy() {
+        let tor_conf = r#"
+DataDirectory /var/lib/tor
+HTTPProxy 127.0.0.1:8080
+HTTPSProxy 127.0.0.1:8080
+"#;
+        assert_eq!(
+            parse_tor_proxy(tor_conf),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let socks_conf = "Socks5Proxy 127.0.0.1:1080\n";
+        assert_eq!(
+            parse_tor_proxy(socks_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="TOR_HTTP_PROXY=http://10.0.0.113:8080"
+"#;
+        assert_eq!(
+            parse_tor_proxy(dropin),
+            Some("http://10.0.0.113:8080".to_string())
+        );
+
+        let input_comment = "# HTTPProxy 127.0.0.1:8080\n; Socks5Proxy 127.0.0.1:1080\n";
+        assert_eq!(parse_tor_proxy(input_comment), None);
+        assert_eq!(parse_tor_proxy(""), None);
     }
 }

@@ -19034,6 +19034,437 @@ pub fn unset_tinyproxy_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_mitmproxy_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("MITMPROXY_HTTP_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_mitm = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "mitmproxy_http_proxy" {
+                        lines.push(format!("Environment=\"MITMPROXY_HTTP_PROXY={}\"", proxy_url));
+                        replaced_mitm = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("mitmproxy_http_proxy=") {
+                lines.push(format!("MITMPROXY_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_mitm = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_mitm {
+            lines.push(format!("Environment=\"MITMPROXY_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let target_line = format!("mode: [\"upstream:{}\"]", proxy_url);
+
+    let mut lines = Vec::new();
+    let mut replaced_mode = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("mode:") {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}{}", "", target_line, indent = indent));
+            replaced_mode = true;
+            continue;
+        }
+        if trimmed.starts_with("upstream_proxy:") {
+            let indent = line.len() - line.trim_start().len();
+            lines.push(format!("{:indent$}{}", "", target_line, indent = indent));
+            replaced_mode = true;
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_mode {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    out.push(target_line);
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_mitmproxy_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "mitmproxy_http_proxy"
+                    || k_low == "mitmproxy_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "upstream_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("mitmproxy_http_proxy=")
+            || lower.starts_with("mitmproxy_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        if trimmed.starts_with("mode:") && trimmed.contains("upstream:") {
+            removed = true;
+            continue;
+        }
+        if trimmed.starts_with("upstream_proxy:") {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_mitmproxy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_mitmproxy_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_mitmproxy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_mitmproxy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_mitmproxy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_mitmproxy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_tor_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("TOR_HTTP_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_tor = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "tor_http_proxy" {
+                        lines.push(format!("Environment=\"TOR_HTTP_PROXY={}\"", proxy_url));
+                        replaced_tor = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("tor_http_proxy=") {
+                lines.push(format!("TOR_HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_tor = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_tor {
+            lines.push(format!("Environment=\"TOR_HTTP_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    let (is_socks5, host_port) = if let Ok(u) = url::Url::parse(proxy_url) {
+        let is_socks = u.scheme().starts_with("socks");
+        let h = u.host_str().unwrap_or("127.0.0.1");
+        let p = u.port().unwrap_or(if is_socks { 1080 } else { 8080 });
+        (is_socks, format!("{}:{}", h, p))
+    } else {
+        (false, "127.0.0.1:7890".to_string())
+    };
+
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if !parts.is_empty() {
+            let directive = parts[0].to_ascii_lowercase();
+            if directive == "httpproxy"
+                || directive == "httpsproxy"
+                || directive == "socks5proxy"
+                || directive == "socks4proxy"
+            {
+                if !replaced_proxy {
+                    let indent = line.len() - line.trim_start().len();
+                    if is_socks5 {
+                        lines.push(format!("{:indent$}Socks5Proxy {}", "", host_port, indent = indent));
+                    } else {
+                        lines.push(format!("{:indent$}HTTPProxy {}", "", host_port, indent = indent));
+                        lines.push(format!("{:indent$}HTTPSProxy {}", "", host_port, indent = indent));
+                    }
+                    replaced_proxy = true;
+                }
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if replaced_proxy {
+        return lines.join("\n") + "\n";
+    }
+
+    let mut out = Vec::new();
+    if !content.trim().is_empty() {
+        out.push(content.trim_end().to_string());
+    }
+    if is_socks5 {
+        out.push(format!("Socks5Proxy {}", host_port));
+    } else {
+        out.push(format!("HTTPProxy {}", host_port));
+        out.push(format!("HTTPSProxy {}", host_port));
+    }
+
+    out.join("\n") + "\n"
+}
+
+pub fn remove_tor_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tor_http_proxy"
+                    || k_low == "tor_https_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "upstream_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("tor_http_proxy=")
+            || lower.starts_with("tor_https_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if !parts.is_empty() {
+            let directive = parts[0].to_ascii_lowercase();
+            if directive == "httpproxy"
+                || directive == "httpsproxy"
+                || directive == "socks5proxy"
+                || directive == "socks4proxy"
+            {
+                removed = true;
+                continue;
+            }
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.trim().is_empty() {
+        String::new()
+    } else {
+        joined.trim_end().to_string() + "\n"
+    };
+
+    (result, removed)
+}
+
+pub fn set_tor_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tor_write_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let new_content = apply_tor_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_tor_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tor_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tor_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -19156,6 +19587,8 @@ pub async fn turn_on(
     squid: bool,
     privoxy: bool,
     tinyproxy: bool,
+    mitmproxy: bool,
+    tor: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -19277,6 +19710,8 @@ pub async fn turn_on(
     let set_squid = squid || all;
     let set_privoxy = privoxy || all;
     let set_tinyproxy = tinyproxy || all;
+    let set_mitmproxy = mitmproxy || all;
+    let set_tor = tor || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -20978,6 +21413,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_mitmproxy {
+        match set_mitmproxy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Mitmproxy HTTPS intercepting proxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Mitmproxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_tor {
+        match set_tor_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Tor anonymity network proxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Tor daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -21113,6 +21578,8 @@ pub fn turn_off(
     squid: bool,
     privoxy: bool,
     tinyproxy: bool,
+    mitmproxy: bool,
+    tor: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -21234,6 +21701,8 @@ pub fn turn_off(
     let unset_squid = squid || all;
     let unset_privoxy = privoxy || all;
     let unset_tinyproxy = tinyproxy || all;
+    let unset_mitmproxy = mitmproxy || all;
+    let unset_tor = tor || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -22263,6 +22732,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Tinyproxy HTTP proxy daemon removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Tinyproxy HTTP proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Tinyproxy HTTP proxy daemon: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_mitmproxy {
+        match unset_mitmproxy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Mitmproxy HTTPS intercepting proxy daemon removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Mitmproxy HTTPS intercepting proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Mitmproxy HTTPS intercepting proxy daemon: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tor {
+        match unset_tor_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Tor anonymity network proxy daemon removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Tor anonymity network proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Tor anonymity network proxy daemon: {}", "▲".yellow(), e),
         }
     }
 
@@ -25159,5 +25644,58 @@ Upstream none ".internal.net"
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("TINYPROXY_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_mitmproxy_proxy() {
+        let mitm_initial = r#"
+listen_port: 8080
+mode: ["upstream:http://127.0.0.1:7890"]
+"#;
+        let mitm_updated = apply_mitmproxy_proxy(mitm_initial, "http://10.0.0.48:8080");
+        assert!(mitm_updated.contains("mode: [\"upstream:http://10.0.0.48:8080\"]"));
+        let (mitm_cleaned, mitm_removed) = remove_mitmproxy_proxy(&mitm_updated);
+        assert!(mitm_removed);
+        assert!(!mitm_cleaned.contains("upstream:http://10.0.0.48:8080"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_mitmproxy_proxy(dropin_initial, "http://10.0.0.48:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.48:8080\""));
+        assert!(dropin_updated.contains("Environment=\"MITMPROXY_HTTP_PROXY=http://10.0.0.48:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_mitmproxy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("MITMPROXY_HTTP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tor_proxy() {
+        let tor_initial = r#"
+DataDirectory /var/lib/tor
+HTTPProxy 127.0.0.1:7890
+HTTPSProxy 127.0.0.1:7890
+"#;
+        let tor_updated = apply_tor_proxy(tor_initial, "http://10.0.0.50:8080");
+        assert!(tor_updated.contains("HTTPProxy 10.0.0.50:8080"));
+        assert!(tor_updated.contains("HTTPSProxy 10.0.0.50:8080"));
+        let (tor_cleaned, tor_removed) = remove_tor_proxy(&tor_updated);
+        assert!(tor_removed);
+        assert!(!tor_cleaned.contains("HTTPProxy 10.0.0.50:8080"));
+
+        // SOCKS5 format
+        let socks_updated = apply_tor_proxy(tor_initial, "socks5://10.0.0.51:1080");
+        assert!(socks_updated.contains("Socks5Proxy 10.0.0.51:1080"));
+        assert!(!socks_updated.contains("HTTPProxy"));
+
+        // Systemd drop-in format
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_tor_proxy(dropin_initial, "http://10.0.0.50:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.50:8080\""));
+        assert!(dropin_updated.contains("Environment=\"TOR_HTTP_PROXY=http://10.0.0.50:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_tor_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TOR_HTTP_PROXY="));
     }
 }
