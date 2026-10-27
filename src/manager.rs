@@ -29683,6 +29683,381 @@ pub fn unset_adguardhome_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_dnscrypt_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("http_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dnscrypt_proxy"
+                    || k_low == "dnscrypt_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"DNSCRYPT_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("dnscrypt_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                lines.push(format!("DNSCRYPT_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("dnscrypt_proxy:") || clean.starts_with("dnscrypt_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                if line.contains('=') {
+                    lines.push(format!("http_proxy = '{}'", proxy_url));
+                } else {
+                    lines.push(format!("http_proxy: '{}'", proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.contains('=') {
+            lines.push(format!("http_proxy = '{}'", proxy_url));
+        } else if content.contains(':') {
+            lines.push(format!("http_proxy: '{}'", proxy_url));
+        } else {
+            lines.push(format!("http_proxy = '{}'", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_dnscrypt_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["http_proxy", "http-proxy", "proxy", "all_proxy", "dnscrypt_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dnscrypt_proxy"
+                    || k_low == "dnscrypt_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("dnscrypt_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("dnscrypt_proxy:") || clean.starts_with("dnscrypt_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_dnscrypt_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_dnscrypt_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_dnscrypt_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_dnscrypt_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_dnscrypt_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_dnscrypt_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_unbound_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("http-proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "unbound_proxy"
+                    || k_low == "unbound_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"UNBOUND_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("unbound_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                lines.push(format!("UNBOUND_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("forward-addr:") || clean.starts_with("forward-addr=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("unbound_proxy:") || clean.starts_with("unbound_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+                if line.contains('=') {
+                    lines.push(format!("{}http-proxy = \"{}\"", indent, proxy_url));
+                } else {
+                    lines.push(format!("{}http-proxy: \"{}\"", indent, proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.contains('=') {
+            lines.push(format!("http-proxy = \"{}\"", proxy_url));
+        } else if content.contains(':') {
+            lines.push(format!("    http-proxy: \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http-proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_unbound_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["http-proxy", "http_proxy", "proxy", "forward-addr", "all_proxy", "unbound_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "unbound_proxy"
+                    || k_low == "unbound_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("unbound_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("forward-addr:") || clean.starts_with("forward-addr=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("unbound_proxy:") || clean.starts_with("unbound_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_unbound_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_unbound_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_unbound_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_unbound_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_unbound_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_unbound_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -29853,6 +30228,8 @@ pub async fn turn_on(
     smartdns: bool,
     coredns: bool,
     adguard: bool,
+    dnscrypt: bool,
+    unbound: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -30022,6 +30399,8 @@ pub async fn turn_on(
     let set_smartdns = smartdns || all;
     let set_coredns = coredns || all;
     let set_adguard = adguard || all;
+    let set_dnscrypt = dnscrypt || all;
+    let set_unbound = unbound || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -32443,6 +32822,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_dnscrypt {
+        match set_dnscrypt_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ DNSCrypt-proxy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update DNSCrypt-proxy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_unbound {
+        match set_unbound_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Unbound daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Unbound daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -32626,6 +33035,8 @@ pub fn turn_off(
     smartdns: bool,
     coredns: bool,
     adguard: bool,
+    dnscrypt: bool,
+    unbound: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -32795,6 +33206,8 @@ pub fn turn_off(
     let unset_smartdns = smartdns || all;
     let unset_coredns = coredns || all;
     let unset_adguard = adguard || all;
+    let unset_dnscrypt = dnscrypt || all;
+    let unset_unbound = unbound || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -34208,6 +34621,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ AdGuard Home daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ AdGuard Home proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset AdGuard Home daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_dnscrypt {
+        match unset_dnscrypt_proxy() {
+            Ok(true) => eprintln!("{}", "✔ DNSCrypt-proxy daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ DNSCrypt-proxy proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset DNSCrypt-proxy daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_unbound {
+        match unset_unbound_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Unbound daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Unbound proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Unbound daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -38374,5 +38803,57 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("ADGUARD_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_dnscrypt_proxy() {
+        let dnscrypt_initial = "http_proxy = 'http://127.0.0.1:7890'\n";
+        let dnscrypt_updated = apply_dnscrypt_proxy(dnscrypt_initial, "socks5://10.0.0.128:1080");
+        assert!(dnscrypt_updated.contains("http_proxy = 'socks5://10.0.0.128:1080'"));
+        let (dnscrypt_cleaned, dnscrypt_removed) = remove_dnscrypt_proxy(&dnscrypt_updated);
+        assert!(dnscrypt_removed);
+        assert!(!dnscrypt_cleaned.contains("http_proxy"));
+
+        let conf_initial = "proxy = 'http://127.0.0.1:7890'\n";
+        let conf_updated = apply_dnscrypt_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = 'http://10.0.0.128:7890'"));
+        let (conf_cleaned, conf_removed) = remove_dnscrypt_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("proxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_dnscrypt_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"DNSCRYPT_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_dnscrypt_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("DNSCRYPT_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_unbound_proxy() {
+        let unbound_initial = "    http-proxy: \"http://127.0.0.1:7890\"\n";
+        let unbound_updated = apply_unbound_proxy(unbound_initial, "socks5://10.0.0.128:1080");
+        assert!(unbound_updated.contains("http-proxy: \"socks5://10.0.0.128:1080\""));
+        let (unbound_cleaned, unbound_removed) = remove_unbound_proxy(&unbound_updated);
+        assert!(unbound_removed);
+        assert!(!unbound_cleaned.contains("http-proxy:"));
+
+        let conf_initial = "forward-addr: 127.0.0.1@7890\n";
+        let conf_updated = apply_unbound_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http-proxy: \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_unbound_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("forward-addr:"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_unbound_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"UNBOUND_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_unbound_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("UNBOUND_PROXY="));
     }
 }

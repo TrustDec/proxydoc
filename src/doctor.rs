@@ -29892,6 +29892,493 @@ pub fn get_adguardhome_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_dnscrypt_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DNSCRYPT_PROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DNSCRYPT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("dnscrypt-proxy").join("dnscrypt-proxy.toml"),
+            home.join(".dnscrypt-proxy").join("dnscrypt-proxy.toml"),
+            home.join(".config").join("dnscrypt-proxy.toml"),
+            home.join(".dnscrypt-proxy.toml"),
+            home.join(".config").join("systemd").join("user").join("dnscrypt-proxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/dnscrypt-proxy/dnscrypt-proxy.toml"),
+        PathBuf::from("/etc/dnscrypt-proxy.toml"),
+        PathBuf::from("/usr/local/etc/dnscrypt-proxy/dnscrypt-proxy.toml"),
+        PathBuf::from("/usr/local/etc/dnscrypt-proxy.toml"),
+        PathBuf::from("/opt/dnscrypt-proxy/dnscrypt-proxy.toml"),
+        PathBuf::from("/etc/default/dnscrypt-proxy"),
+        PathBuf::from("/etc/sysconfig/dnscrypt-proxy"),
+        PathBuf::from("/etc/systemd/system/dnscrypt-proxy.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_dnscrypt_config_path() -> Option<PathBuf> {
+    let paths = get_dnscrypt_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_dnscrypt_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_dnscrypt_write_path() -> PathBuf {
+    if let Some(p) = get_dnscrypt_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DNSCRYPT_PROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("DNSCRYPT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("dnscrypt-proxy");
+        if dir.is_dir() {
+            return dir.join("dnscrypt-proxy.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/dnscrypt-proxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("dnscrypt-proxy.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/dnscrypt-proxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("dnscrypt-proxy").join("dnscrypt-proxy.toml");
+    }
+    PathBuf::from("/etc/dnscrypt-proxy/dnscrypt-proxy.toml")
+}
+
+pub fn parse_dnscrypt_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "http_proxy",
+                "http-proxy",
+                "proxy",
+                "https_proxy",
+                "all_proxy",
+                "dnscrypt_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dnscrypt_proxy"
+                    || k_low == "dnscrypt_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+                || k_low == "proxy"
+                || k_low == "all_proxy"
+                || k_low == "dnscrypt_proxy"
+                || k_low == "dnscrypt_http_proxy"
+                || k_low == "socks5"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_dnscrypt_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_dnscrypt_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_dnscrypt_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DNSCRYPT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DNSCRYPT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DNSCRYPT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DNSCRYPT_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_unbound_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("UNBOUND_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("UNBOUND_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("unbound").join("unbound.conf"),
+            home.join(".unbound").join("unbound.conf"),
+            home.join(".config").join("unbound.conf"),
+            home.join(".unbound.conf"),
+            home.join(".config").join("systemd").join("user").join("unbound.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/unbound/unbound.conf"),
+        PathBuf::from("/etc/unbound/conf.d/proxy.conf"),
+        PathBuf::from("/usr/local/etc/unbound/unbound.conf"),
+        PathBuf::from("/etc/unbound.conf"),
+        PathBuf::from("/etc/default/unbound"),
+        PathBuf::from("/etc/sysconfig/unbound"),
+        PathBuf::from("/etc/systemd/system/unbound.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_unbound_config_path() -> Option<PathBuf> {
+    let paths = get_unbound_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_unbound_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_unbound_write_path() -> PathBuf {
+    if let Some(p) = get_unbound_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("UNBOUND_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("UNBOUND_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("unbound");
+        if dir.is_dir() {
+            return dir.join("unbound.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/unbound");
+    if etc_dir.is_dir() {
+        return etc_dir.join("unbound.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/unbound.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("unbound").join("unbound.conf");
+    }
+    PathBuf::from("/etc/unbound/unbound.conf")
+}
+
+pub fn parse_unbound_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "forward-addr",
+                "forward_addr",
+                "forward-host",
+                "forward_host",
+                "http_proxy",
+                "http-proxy",
+                "proxy",
+                "https_proxy",
+                "all_proxy",
+                "unbound_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            let clean = if let Some((h, p)) = trim.split_once('@') {
+                                format!("{}:{}", h, p)
+                            } else {
+                                trim.to_string()
+                            };
+                            return Some(if clean.starts_with("http://")
+                                || clean.starts_with("https://")
+                                || clean.starts_with("socks")
+                            {
+                                clean
+                            } else {
+                                format!("http://{}", clean)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "unbound_proxy"
+                    || k_low == "unbound_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "forward-addr"
+                || k_low == "forward_addr"
+                || k_low == "forward-host"
+                || k_low == "forward_host"
+                || k_low == "http-proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "proxy"
+                || k_low == "all_proxy"
+                || k_low == "unbound_proxy"
+                || k_low == "socks5"
+            {
+                let val = v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':')
+                        || val.contains('@'))
+                {
+                    let clean = if let Some((h, p)) = val.split_once('@') {
+                        format!("{}:{}", h, p)
+                    } else {
+                        val.to_string()
+                    };
+                    return Some(if clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("socks")
+                    {
+                        clean
+                    } else {
+                        format!("http://{}", clean)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_unbound_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_unbound_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_unbound_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("UNBOUND_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:UNBOUND_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("UNBOUND_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:UNBOUND_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -36233,6 +36720,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "AdGuard Home Daemon Proxy",
             "~/.config/AdGuardHome/AdGuardHome.yaml & /etc/AdGuardHome/AdGuardHome.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // DNSCrypt-proxy Encrypted DNS Proxy Daemon (~/.config/dnscrypt-proxy/dnscrypt-proxy.toml / /etc/dnscrypt-proxy/dnscrypt-proxy.toml / /etc/systemd/system/dnscrypt-proxy.service.d/http-proxy.conf)
+    if let Some((dnscrypt_proxy, dnscrypt_path)) = get_dnscrypt_proxy() {
+        let ok = verify_proxy_url(&dnscrypt_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "DNSCrypt-proxy proxy `{}` in {} is dead! (dnscrypt encrypted resolution will fail)",
+                dnscrypt_proxy,
+                dnscrypt_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "DNSCrypt-proxy Daemon Proxy",
+            format!("{}", dnscrypt_path.display()),
+            dnscrypt_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (dnscrypt fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "DNSCrypt-proxy Daemon Proxy",
+            "~/.config/dnscrypt-proxy/dnscrypt-proxy.toml & /etc/dnscrypt-proxy/dnscrypt-proxy.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Unbound Validating Recursive DNS Proxy Daemon (~/.config/unbound/unbound.conf / /etc/unbound/unbound.conf / /etc/systemd/system/unbound.service.d/http-proxy.conf)
+    if let Some((unbound_proxy, unbound_path)) = get_unbound_proxy() {
+        let ok = verify_proxy_url(&unbound_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Unbound proxy `{}` in {} is dead! (unbound recursive resolution will fail)",
+                unbound_proxy,
+                unbound_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Unbound Daemon Proxy",
+            format!("{}", unbound_path.display()),
+            unbound_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (unbound fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Unbound Daemon Proxy",
+            "~/.config/unbound/unbound.conf & /etc/unbound/unbound.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -43371,5 +43922,114 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http_proxy: http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_adguardhome_proxy(input_comment), None);
         assert_eq!(parse_adguardhome_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_dnscrypt_proxy() {
+        let dnscrypt_toml = r#"
+listen_addresses = ['127.0.0.1:5354']
+http_proxy = 'http://127.0.0.1:7890'
+"#;
+        assert_eq!(
+            parse_dnscrypt_proxy(dnscrypt_toml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dnscrypt_socks = r#"
+proxy = "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_dnscrypt_proxy(dnscrypt_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dnscrypt_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_dnscrypt_proxy(dnscrypt_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dnscrypt_env = r#"
+DNSCRYPT_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnscrypt_proxy(dnscrypt_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dnscrypt_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = 'http://127.0.0.1:7890'\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_dnscrypt_proxy(input_comment), None);
+        assert_eq!(parse_dnscrypt_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_unbound_proxy() {
+        let unbound_conf = r#"
+server:
+    verbosity: 1
+forward-zone:
+    name: "."
+    forward-addr: 127.0.0.1@7890
+"#;
+        assert_eq!(
+            parse_unbound_proxy(unbound_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let unbound_http = r#"
+http-proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_unbound_proxy(unbound_http),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let unbound_socks = r#"
+proxy: "socks5://127.0.0.1:1080"
+"#;
+        assert_eq!(
+            parse_unbound_proxy(unbound_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let unbound_json = r#"{
+            "proxy": "socks5://127.0.0.1:1080"
+        }"#;
+        assert_eq!(
+            parse_unbound_proxy(unbound_json),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let unbound_env = r#"
+UNBOUND_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_unbound_proxy(unbound_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_unbound_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http-proxy: http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_unbound_proxy(input_comment), None);
+        assert_eq!(parse_unbound_proxy(""), None);
     }
 }

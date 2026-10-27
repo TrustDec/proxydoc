@@ -1470,6 +1470,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Torchtune AI CDN",
         "https://github.com/pytorch/torchtune",
     ),
+    (
+        "DNSCrypt-proxy Proxy CDN",
+        "https://github.com/DNSCrypt/dnscrypt-proxy",
+    ),
+    (
+        "Unbound Proxy CDN",
+        "https://github.com/NLnetLabs/unbound",
+    ),
+    (
+        "Roo-Code AI CDN",
+        "https://github.com/RooVetGit/Roo-Cline",
+    ),
+    (
+        "Haystack AI CDN",
+        "https://github.com/deepset-ai/haystack",
+    ),
+    (
+        "Zed AI CDN",
+        "https://github.com/zed-industries/zed",
+    ),
+    (
+        "Plandex AI CDN",
+        "https://github.com/plandex-ai/plandex",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2882,6 +2906,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Torchtune AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DNSCrypt-proxy Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Unbound Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Roo-Code AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Haystack AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Zed AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Plandex AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

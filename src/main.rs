@@ -569,7 +569,13 @@ enum Commands {
         /// Also configure AdGuard Home DNS and web proxy daemon (~/.config/AdGuardHome/AdGuardHome.yaml / /etc/AdGuardHome/AdGuardHome.yaml / /etc/systemd/system/AdGuardHome.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "adguardhome", visible_alias = "adguard-home", visible_alias = "adguard-daemon")]
         adguard: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, and adguard proxy
+        /// Also configure DNSCrypt-proxy Encrypted DNS proxy daemon (~/.config/dnscrypt-proxy/dnscrypt-proxy.toml / /etc/dnscrypt-proxy/dnscrypt-proxy.toml / /etc/systemd/system/dnscrypt-proxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dnscrypt-daemon", visible_alias = "dnscrypt-proxy")]
+        dnscrypt: bool,
+        /// Also configure Unbound validating recursive DNS proxy daemon (~/.config/unbound/unbound.conf / /etc/unbound/unbound.conf / /etc/systemd/system/unbound.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "unbound-daemon", visible_alias = "unbound-proxy")]
+        unbound: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, and unbound proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1082,7 +1088,13 @@ enum Commands {
         /// Also unset AdGuard Home DNS and web proxy daemon (~/.config/AdGuardHome/AdGuardHome.yaml / /etc/AdGuardHome/AdGuardHome.yaml / /etc/systemd/system/AdGuardHome.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "adguardhome", visible_alias = "adguard-home", visible_alias = "adguard-daemon")]
         adguard: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, and adguard proxy
+        /// Also unset DNSCrypt-proxy Encrypted DNS proxy daemon (~/.config/dnscrypt-proxy/dnscrypt-proxy.toml / /etc/dnscrypt-proxy/dnscrypt-proxy.toml / /etc/systemd/system/dnscrypt-proxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dnscrypt-daemon", visible_alias = "dnscrypt-proxy")]
+        dnscrypt: bool,
+        /// Also unset Unbound validating recursive DNS proxy daemon (~/.config/unbound/unbound.conf / /etc/unbound/unbound.conf / /etc/systemd/system/unbound.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "unbound-daemon", visible_alias = "unbound-proxy")]
+        unbound: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, and unbound proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1294,6 +1306,8 @@ async fn main() -> Result<()> {
             smartdns,
             coredns,
             adguard,
+            dnscrypt,
+            unbound,
             all,
             shell,
         }) => {
@@ -1467,6 +1481,8 @@ async fn main() -> Result<()> {
                 smartdns,
                 coredns,
                 adguard,
+                dnscrypt,
+                unbound,
                 all,
                 shell.as_deref(),
             )
@@ -1641,6 +1657,8 @@ async fn main() -> Result<()> {
             smartdns,
             coredns,
             adguard,
+            dnscrypt,
+            unbound,
             all,
             shell,
         }) => {
@@ -1813,6 +1831,8 @@ async fn main() -> Result<()> {
                 smartdns,
                 coredns,
                 adguard,
+                dnscrypt,
+                unbound,
                 all,
                 shell.as_deref(),
             )?;
@@ -6643,6 +6663,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { adguard, .. }) => {
                 assert!(adguard);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_dnscrypt() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--dnscrypt"]).unwrap();
+        match cli.command {
+            Some(Commands::On { dnscrypt, .. }) => {
+                assert!(dnscrypt);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--dnscrypt-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { dnscrypt, .. }) => {
+                assert!(dnscrypt);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--dnscrypt-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { dnscrypt, .. }) => {
+                assert!(dnscrypt);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_dnscrypt() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--dnscrypt"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { dnscrypt, .. }) => {
+                assert!(dnscrypt);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_unbound() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--unbound"]).unwrap();
+        match cli.command {
+            Some(Commands::On { unbound, .. }) => {
+                assert!(unbound);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--unbound-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { unbound, .. }) => {
+                assert!(unbound);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--unbound-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { unbound, .. }) => {
+                assert!(unbound);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_unbound() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--unbound"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { unbound, .. }) => {
+                assert!(unbound);
             }
             _ => panic!("Expected Off command"),
         }
