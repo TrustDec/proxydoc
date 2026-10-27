@@ -581,7 +581,13 @@ enum Commands {
         /// Also configure Pi-hole FTL DNS and sinkhole proxy daemon (~/.config/pihole/pihole-FTL.conf / /etc/pihole/pihole-FTL.conf / /etc/systemd/system/pihole-FTL.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "pihole-daemon", visible_alias = "pihole-ftl", visible_alias = "pi-hole")]
         pihole: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, and pihole proxy
+        /// Also configure Blocky fast DNS and ad-blocker proxy daemon (~/.config/blocky/config.yml / /etc/blocky/config.yml / /etc/systemd/system/blocky.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "blocky-daemon", visible_alias = "blocky-proxy")]
+        blocky: bool,
+        /// Also configure Stubby DNS Privacy DNS-over-TLS stub resolver proxy daemon (~/.config/stubby/stubby.yml / /etc/stubby/stubby.yml / /etc/systemd/system/stubby.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "stubby-daemon", visible_alias = "stubby-proxy")]
+        stubby: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, and stubby proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1106,7 +1112,13 @@ enum Commands {
         /// Also unset Pi-hole FTL DNS and sinkhole proxy daemon (~/.config/pihole/pihole-FTL.conf / /etc/pihole/pihole-FTL.conf / /etc/systemd/system/pihole-FTL.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "pihole-daemon", visible_alias = "pihole-ftl", visible_alias = "pi-hole")]
         pihole: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, and pihole proxy
+        /// Also unset Blocky fast DNS and ad-blocker proxy daemon (~/.config/blocky/config.yml / /etc/blocky/config.yml / /etc/systemd/system/blocky.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "blocky-daemon", visible_alias = "blocky-proxy")]
+        blocky: bool,
+        /// Also unset Stubby DNS Privacy DNS-over-TLS stub resolver proxy daemon (~/.config/stubby/stubby.yml / /etc/stubby/stubby.yml / /etc/systemd/system/stubby.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "stubby-daemon", visible_alias = "stubby-proxy")]
+        stubby: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, and stubby proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1322,6 +1334,8 @@ async fn main() -> Result<()> {
             unbound,
             dnsmasq,
             pihole,
+            blocky,
+            stubby,
             all,
             shell,
         }) => {
@@ -1499,6 +1513,8 @@ async fn main() -> Result<()> {
                 unbound,
                 dnsmasq,
                 pihole,
+                blocky,
+                stubby,
                 all,
                 shell.as_deref(),
             )
@@ -1677,6 +1693,8 @@ async fn main() -> Result<()> {
             unbound,
             dnsmasq,
             pihole,
+            blocky,
+            stubby,
             all,
             shell,
         }) => {
@@ -1853,6 +1871,8 @@ async fn main() -> Result<()> {
                 unbound,
                 dnsmasq,
                 pihole,
+                blocky,
+                stubby,
                 all,
                 shell.as_deref(),
             )?;
@@ -6843,6 +6863,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { pihole, .. }) => {
                 assert!(pihole);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_blocky() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--blocky"]).unwrap();
+        match cli.command {
+            Some(Commands::On { blocky, .. }) => {
+                assert!(blocky);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--blocky-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { blocky, .. }) => {
+                assert!(blocky);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--blocky-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { blocky, .. }) => {
+                assert!(blocky);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_blocky() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--blocky"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { blocky, .. }) => {
+                assert!(blocky);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_stubby() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--stubby"]).unwrap();
+        match cli.command {
+            Some(Commands::On { stubby, .. }) => {
+                assert!(stubby);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--stubby-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { stubby, .. }) => {
+                assert!(stubby);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--stubby-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { stubby, .. }) => {
+                assert!(stubby);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_stubby() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--stubby"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { stubby, .. }) => {
+                assert!(stubby);
             }
             _ => panic!("Expected Off command"),
         }

@@ -30873,6 +30873,515 @@ pub fn get_pihole_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_blocky_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("BLOCKY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("BLOCKY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("blocky").join("config.yml"),
+            home.join(".config").join("blocky").join("config.yaml"),
+            home.join(".blocky.yml"),
+            home.join(".blocky.yaml"),
+            home.join(".config").join("blocky.yml"),
+            home.join(".config").join("systemd").join("user").join("blocky.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/blocky/config.yml"),
+        PathBuf::from("/etc/blocky/config.yaml"),
+        PathBuf::from("/etc/blocky.yml"),
+        PathBuf::from("/usr/local/etc/blocky/config.yml"),
+        PathBuf::from("/opt/homebrew/etc/blocky/config.yml"),
+        PathBuf::from("/etc/default/blocky"),
+        PathBuf::from("/etc/sysconfig/blocky"),
+        PathBuf::from("/etc/systemd/system/blocky.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_blocky_config_path() -> Option<PathBuf> {
+    let paths = get_blocky_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_blocky_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_blocky_write_path() -> PathBuf {
+    if let Some(p) = get_blocky_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("BLOCKY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("BLOCKY_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("blocky");
+        if dir.is_dir() {
+            return dir.join("config.yml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/blocky");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/blocky.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("blocky").join("config.yml");
+    }
+    PathBuf::from("/etc/blocky/config.yml")
+}
+
+pub fn parse_blocky_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "http_proxy",
+                "http-proxy",
+                "proxy",
+                "https_proxy",
+                "all_proxy",
+                "blocky_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "blocky_proxy"
+                    || k_low == "blocky_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "blocky_proxy"
+                    || k_low == "blocky_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("blocky_proxy:")
+            || clean.starts_with("blocky_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_blocky_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_blocky_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_blocky_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("BLOCKY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BLOCKY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BLOCKY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BLOCKY_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_stubby_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("STUBBY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("STUBBY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("stubby").join("stubby.yml"),
+            home.join(".config").join("stubby").join("stubby.yaml"),
+            home.join(".stubby.yml"),
+            home.join(".stubby.yaml"),
+            home.join(".config").join("stubby.yml"),
+            home.join(".config").join("systemd").join("user").join("stubby.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/stubby/stubby.yml"),
+        PathBuf::from("/etc/stubby/stubby.yaml"),
+        PathBuf::from("/usr/local/etc/stubby/stubby.yml"),
+        PathBuf::from("/opt/homebrew/etc/stubby/stubby.yml"),
+        PathBuf::from("/etc/default/stubby"),
+        PathBuf::from("/etc/sysconfig/stubby"),
+        PathBuf::from("/etc/systemd/system/stubby.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_stubby_config_path() -> Option<PathBuf> {
+    let paths = get_stubby_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_stubby_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_stubby_write_path() -> PathBuf {
+    if let Some(p) = get_stubby_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("STUBBY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("STUBBY_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("stubby");
+        if dir.is_dir() {
+            return dir.join("stubby.yml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/stubby");
+    if etc_dir.is_dir() {
+        return etc_dir.join("stubby.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/stubby.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("stubby").join("stubby.yml");
+    }
+    PathBuf::from("/etc/stubby/stubby.yml")
+}
+
+pub fn parse_stubby_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "stubby_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "stubby_proxy"
+                    || k_low == "stubby_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "stubby_proxy"
+                    || k_low == "stubby_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("stubby_proxy:")
+            || clean.starts_with("stubby_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_stubby_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_stubby_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_stubby_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("STUBBY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:STUBBY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("STUBBY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:STUBBY_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -37342,6 +37851,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Pi-hole Daemon Proxy",
             "~/.config/pihole/pihole-FTL.conf & /etc/pihole/pihole-FTL.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Blocky Fast DNS & Ad-blocker Proxy Daemon (~/.config/blocky/config.yml / /etc/blocky/config.yml / /etc/systemd/system/blocky.service.d/http-proxy.conf)
+    if let Some((blocky_proxy, blocky_path)) = get_blocky_proxy() {
+        let ok = verify_proxy_url(&blocky_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Blocky proxy `{}` in {} is dead! (blocky DNS resolution and list updates will fail)",
+                blocky_proxy,
+                blocky_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Blocky Daemon Proxy",
+            format!("{}", blocky_path.display()),
+            blocky_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (blocky fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Blocky Daemon Proxy",
+            "~/.config/blocky/config.yml & /etc/blocky/config.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Stubby DNS Privacy DoT Stub Resolver Daemon (~/.config/stubby/stubby.yml / /etc/stubby/stubby.yml / /etc/systemd/system/stubby.service.d/http-proxy.conf)
+    if let Some((stubby_proxy, stubby_path)) = get_stubby_proxy() {
+        let ok = verify_proxy_url(&stubby_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Stubby proxy `{}` in {} is dead! (stubby DoT resolution will fail)",
+                stubby_proxy,
+                stubby_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Stubby Daemon Proxy",
+            format!("{}", stubby_path.display()),
+            stubby_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (stubby fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Stubby Daemon Proxy",
+            "~/.config/stubby/stubby.yml & /etc/stubby/stubby.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -44695,5 +45268,91 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# PROXY_SETTINGS=http://127.0.0.1:7890\n; PIHOLE_PROXY=socks5://127.0.0.1:1080\n";
         assert_eq!(parse_pihole_proxy(input_comment), None);
         assert_eq!(parse_pihole_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_blocky_proxy() {
+        let blocky_yaml = r#"
+upstream:
+  default:
+    - 1.1.1.1
+http_proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_blocky_proxy(blocky_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let blocky_colon = r#"
+proxy: socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_blocky_proxy(blocky_colon),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let blocky_json = r#"{
+            "http_proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_blocky_proxy(blocky_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_blocky_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy: http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_blocky_proxy(input_comment), None);
+        assert_eq!(parse_blocky_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_stubby_proxy() {
+        let stubby_yaml = r#"
+resolution_type: GETDNS_RESOLUTION_STUB
+dns_transport_list:
+  - GETDNS_TRANSPORT_TLS
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_stubby_proxy(stubby_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let stubby_http = r#"
+http_proxy: socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_stubby_proxy(stubby_http),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let stubby_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_stubby_proxy(stubby_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_stubby_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; http_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_stubby_proxy(input_comment), None);
+        assert_eq!(parse_stubby_proxy(""), None);
     }
 }
