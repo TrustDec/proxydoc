@@ -23600,6 +23600,467 @@ pub fn unset_juicity_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_snell_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("SNELL_PROXY=")
+                || t.starts_with("SNELL_SERVER_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_sn = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "snell_proxy" || k_low == "snell_server_proxy" || k_low == "snell_http_proxy" {
+                        lines.push(format!("Environment=\"SNELL_PROXY={}\"", proxy_url));
+                        replaced_sn = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("snell_proxy=") || lower.starts_with("snell_server_proxy=") {
+                lines.push(format!("SNELL_PROXY=\"{}\"", proxy_url));
+                replaced_sn = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_sn {
+            lines.push(format!("Environment=\"SNELL_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let is_conf = content.contains('[') || content.lines().any(|l| l.contains('='));
+    if is_conf {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if (lower.starts_with("proxy=") || lower.starts_with("proxy =") || lower.starts_with("proxy:")) && !lower.starts_with("proxy_url") {
+                lines.push(format!("proxy = {}", proxy_url));
+                replaced = true;
+                continue;
+            } else if lower.starts_with("snell_proxy=") || lower.starts_with("snell_proxy =") {
+                lines.push(format!("proxy = {}", proxy_url));
+                replaced = true;
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            lines.push(format!("proxy = {}", proxy_url));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_snell_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "outbound_proxy", "target_proxy", "snell_proxy", "snell_server_proxy", "snell_http_proxy", "http_proxy", "https_proxy", "all_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "snell_proxy"
+                    || k_low == "snell_server_proxy"
+                    || k_low == "snell_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("snell_proxy=")
+            || lower.starts_with("snell_server_proxy=")
+            || lower.starts_with("outbound_proxy=")
+            || lower.starts_with("outbound_proxy:")
+            || lower.starts_with("proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy:")
+            || lower.starts_with("target_proxy=")
+            || lower.starts_with("target_proxy:")
+            || lower.starts_with("snell_http_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_snell_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_snell_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_snell_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_snell_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_snell_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_snell_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_leaf_proxy(content: &str, proxy_url: &str) -> String {
+    let is_systemd_or_env = content.contains("[Service]")
+        || content.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Environment=")
+                || t.starts_with("HTTP_PROXY=")
+                || t.starts_with("LEAF_PROXY=")
+                || t.starts_with("LEAF_DAEMON_PROXY=")
+        });
+
+    if is_systemd_or_env {
+        let mut lines = Vec::new();
+        let mut replaced_http = false;
+        let mut replaced_https = false;
+        let mut replaced_lf = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.starts_with("environment=") {
+                let env_part = trimmed["environment=".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if let Some((k, _)) = env_part.split_once('=') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    if k_low == "http_proxy" {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        replaced_http = true;
+                        continue;
+                    } else if k_low == "https_proxy" {
+                        lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+                        replaced_https = true;
+                        continue;
+                    } else if k_low == "leaf_proxy" || k_low == "leaf_daemon_proxy" || k_low == "leaf_http_proxy" {
+                        lines.push(format!("Environment=\"LEAF_PROXY={}\"", proxy_url));
+                        replaced_lf = true;
+                        continue;
+                    }
+                }
+            } else if lower.starts_with("http_proxy=") {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced_http = true;
+                continue;
+            } else if lower.starts_with("https_proxy=") {
+                lines.push(format!("HTTPS_PROXY=\"{}\"", proxy_url));
+                replaced_https = true;
+                continue;
+            } else if lower.starts_with("leaf_proxy=") || lower.starts_with("leaf_daemon_proxy=") {
+                lines.push(format!("LEAF_PROXY=\"{}\"", proxy_url));
+                replaced_lf = true;
+                continue;
+            }
+
+            lines.push(line.to_string());
+        }
+
+        if !replaced_http {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        }
+        if !replaced_https {
+            lines.push(format!("Environment=\"HTTPS_PROXY={}\"", proxy_url));
+        }
+        if !replaced_lf {
+            lines.push(format!("Environment=\"LEAF_PROXY={}\"", proxy_url));
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let is_conf = content.contains('[') || content.lines().any(|l| l.contains('='));
+    if is_conf {
+        let mut lines = Vec::new();
+        let mut replaced = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+
+            if (lower.starts_with("http =") || lower.starts_with("http=") || lower.starts_with("http:")) && !lower.starts_with("http://") && !lower.starts_with("https://") {
+                lines.push(format!("http = {}", proxy_url));
+                replaced = true;
+                continue;
+            } else if (lower.starts_with("proxy=") || lower.starts_with("proxy =") || lower.starts_with("proxy:")) && !lower.starts_with("proxy_url") {
+                lines.push(format!("proxy = {}", proxy_url));
+                replaced = true;
+                continue;
+            } else if lower.starts_with("leaf_proxy=") || lower.starts_with("leaf_proxy =") {
+                lines.push(format!("proxy = {}", proxy_url));
+                replaced = true;
+                continue;
+            }
+            lines.push(line.to_string());
+        }
+
+        if !replaced {
+            lines.push(format!("proxy = {}", proxy_url));
+        }
+        return lines.join("\n") + "\n";
+    }
+
+    let mut root = serde_json::Map::new();
+    root.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+    serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap_or_default() + "\n"
+}
+
+pub fn remove_leaf_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["proxy", "outbound_proxy", "target_proxy", "leaf_proxy", "leaf_daemon_proxy", "leaf_http_proxy", "http_proxy", "https_proxy", "all_proxy", "http"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "leaf_proxy"
+                    || k_low == "leaf_daemon_proxy"
+                    || k_low == "leaf_http_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("leaf_proxy=")
+            || lower.starts_with("leaf_daemon_proxy=")
+            || lower.starts_with("outbound_proxy=")
+            || lower.starts_with("outbound_proxy:")
+            || lower.starts_with("proxy=")
+            || lower.starts_with("proxy =")
+            || lower.starts_with("proxy:")
+            || lower.starts_with("target_proxy=")
+            || lower.starts_with("target_proxy:")
+            || lower.starts_with("leaf_http_proxy=")
+            || lower.starts_with("all_proxy=")
+            || ((lower.starts_with("http =") || lower.starts_with("http=") || lower.starts_with("http:")) && !lower.starts_with("http://") && !lower.starts_with("https://"))
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let joined = lines.join("\n");
+    let result = if joined.ends_with('\n') {
+        joined
+    } else {
+        joined + "\n"
+    };
+    (result, removed)
+}
+
+pub fn set_leaf_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_leaf_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_leaf_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+
+    #[cfg(target_os = "linux")]
+    if path.to_string_lossy().contains("systemd") {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(path)
+}
+
+pub fn unset_leaf_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_leaf_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_leaf_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -23744,6 +24205,8 @@ pub async fn turn_on(
     naive: bool,
     tuic: bool,
     juicity: bool,
+    snell: bool,
+    leaf: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -23887,6 +24350,8 @@ pub async fn turn_on(
     let set_naive = naive || all;
     let set_tuic = tuic || all;
     let set_juicity = juicity || all;
+    let set_snell = snell || all;
+    let set_leaf = leaf || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -25918,6 +26383,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_snell {
+        match set_snell_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Snell daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Snell daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_leaf {
+        match set_leaf_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Leaf daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Leaf daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -26075,6 +26570,8 @@ pub fn turn_off(
     naive: bool,
     tuic: bool,
     juicity: bool,
+    snell: bool,
+    leaf: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -26218,6 +26715,8 @@ pub fn turn_off(
     let unset_naive = naive || all;
     let unset_tuic = tuic || all;
     let unset_juicity = juicity || all;
+    let unset_snell = snell || all;
+    let unset_leaf = leaf || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -27423,6 +27922,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Juicity daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Juicity proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Juicity daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_snell {
+        match unset_snell_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Snell daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Snell proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Snell daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_leaf {
+        match unset_leaf_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Leaf daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Leaf proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Leaf daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -30862,5 +31377,61 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("JUICITY_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_snell_proxy() {
+        let sn_initial = r#"{
+  "listen": "0.0.0.0:13254"
+}"#;
+        let sn_updated = apply_snell_proxy(sn_initial, "http://10.0.0.107:8080");
+        assert!(sn_updated.contains("\"proxy\": \"http://10.0.0.107:8080\""));
+        let (sn_cleaned, sn_removed) = remove_snell_proxy(&sn_updated);
+        assert!(sn_removed);
+        assert!(!sn_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "[snell-server]\nlisten = 0.0.0.0:13254\npsk = secret\n";
+        let conf_updated = apply_snell_proxy(conf_initial, "http://10.0.0.107:8080");
+        assert!(conf_updated.contains("proxy = http://10.0.0.107:8080"));
+        let (conf_cleaned, conf_removed) = remove_snell_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("proxy ="));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_snell_proxy(dropin_initial, "http://10.0.0.107:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.107:8080\""));
+        assert!(dropin_updated.contains("Environment=\"SNELL_PROXY=http://10.0.0.107:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_snell_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("SNELL_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_leaf_proxy() {
+        let lf_initial = r#"{
+  "general": { "loglevel": "info" }
+}"#;
+        let lf_updated = apply_leaf_proxy(lf_initial, "http://10.0.0.108:8080");
+        assert!(lf_updated.contains("\"proxy\": \"http://10.0.0.108:8080\""));
+        let (lf_cleaned, lf_removed) = remove_leaf_proxy(&lf_updated);
+        assert!(lf_removed);
+        assert!(!lf_cleaned.contains("\"proxy\""));
+
+        let conf_initial = "[general]\nloglevel = info\n\n[proxy]\nhttp = http://127.0.0.1:7890\n";
+        let conf_updated = apply_leaf_proxy(conf_initial, "http://10.0.0.108:8080");
+        assert!(conf_updated.contains("http = http://10.0.0.108:8080"));
+        let (conf_cleaned, conf_removed) = remove_leaf_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("http = http://10.0.0.108:8080"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_leaf_proxy(dropin_initial, "http://10.0.0.108:8080");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.108:8080\""));
+        assert!(dropin_updated.contains("Environment=\"LEAF_PROXY=http://10.0.0.108:8080\""));
+        let (dropin_cleaned, dropin_removed) = remove_leaf_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("LEAF_PROXY="));
     }
 }

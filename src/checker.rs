@@ -1158,6 +1158,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Moonshot Kimi AI CDN",
         "https://kimi.moonshot.cn",
     ),
+    (
+        "Snell Proxy CDN",
+        "https://github.com/surge-networks/snell/releases",
+    ),
+    (
+        "Leaf Proxy CDN",
+        "https://github.com/eycorsican/leaf/releases",
+    ),
+    (
+        "DeepSeek-R1 AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-R1",
+    ),
+    (
+        "OpenManus AI CDN",
+        "https://github.com/mannaandpoem/OpenManus",
+    ),
+    (
+        "Claude Code CDN",
+        "https://github.com/anthropics/claude-code",
+    ),
+    (
+        "Mini-Omni AI CDN",
+        "https://github.com/gpt-omni/mini-omni",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -2336,6 +2360,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Moonshot Kimi AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Snell Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Leaf Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-R1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenManus AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Claude Code CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Mini-Omni AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

@@ -491,7 +491,13 @@ enum Commands {
         /// Also configure Juicity daemon proxy (/etc/juicity/client.json / ~/.config/juicity/client.json / /etc/systemd/system/juicity.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "juicity-client")]
         juicity: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, and juicity proxy
+        /// Also configure Snell daemon proxy (/etc/snell/snell.conf / ~/.config/snell/snell.conf / /etc/systemd/system/snell.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "snell-server", visible_alias = "snell-client")]
+        snell: bool,
+        /// Also configure Leaf daemon proxy (/etc/leaf/leaf.conf / ~/.config/leaf/leaf.conf / /etc/systemd/system/leaf.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "leaf-proxy", visible_alias = "leaf-daemon")]
+        leaf: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, and leaf proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -926,7 +932,13 @@ enum Commands {
         /// Also unset Juicity daemon proxy (/etc/juicity/client.json / ~/.config/juicity/client.json / /etc/systemd/system/juicity.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "juicity-client")]
         juicity: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, and juicity proxy
+        /// Also unset Snell daemon proxy (/etc/snell/snell.conf / ~/.config/snell/snell.conf / /etc/systemd/system/snell.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "snell-server", visible_alias = "snell-client")]
+        snell: bool,
+        /// Also unset Leaf daemon proxy (/etc/leaf/leaf.conf / ~/.config/leaf/leaf.conf / /etc/systemd/system/leaf.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "leaf-proxy", visible_alias = "leaf-daemon")]
+        leaf: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, and leaf proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1112,6 +1124,8 @@ async fn main() -> Result<()> {
             naive,
             tuic,
             juicity,
+            snell,
+            leaf,
             all,
             shell,
         }) => {
@@ -1259,6 +1273,8 @@ async fn main() -> Result<()> {
                 naive,
                 tuic,
                 juicity,
+                snell,
+                leaf,
                 all,
                 shell.as_deref(),
             )
@@ -1407,6 +1423,8 @@ async fn main() -> Result<()> {
             naive,
             tuic,
             juicity,
+            snell,
+            leaf,
             all,
             shell,
         }) => {
@@ -1553,6 +1571,8 @@ async fn main() -> Result<()> {
                 naive,
                 tuic,
                 juicity,
+                snell,
+                leaf,
                 all,
                 shell.as_deref(),
             )?;
@@ -5603,6 +5623,66 @@ mod tests {
         match cli.command {
             Some(Commands::Off { juicity, .. }) => {
                 assert!(juicity);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_snell() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--snell"]).unwrap();
+        match cli.command {
+            Some(Commands::On { snell, .. }) => {
+                assert!(snell);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--snell-server"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { snell, .. }) => {
+                assert!(snell);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_snell() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--snell"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { snell, .. }) => {
+                assert!(snell);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_leaf() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--leaf"]).unwrap();
+        match cli.command {
+            Some(Commands::On { leaf, .. }) => {
+                assert!(leaf);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--leaf-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { leaf, .. }) => {
+                assert!(leaf);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_leaf() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--leaf"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { leaf, .. }) => {
+                assert!(leaf);
             }
             _ => panic!("Expected Off command"),
         }

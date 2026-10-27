@@ -23724,6 +23724,481 @@ pub fn get_juicity_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_snell_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SNELL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SNELL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("snell").join("snell.conf"),
+            home.join(".config").join("snell").join("client.conf"),
+            home.join(".config").join("snell").join("config.conf"),
+            home.join(".snell").join("snell.conf"),
+            home.join(".snell").join("client.conf"),
+            home.join(".config").join("systemd").join("user").join("snell.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("snell-server.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/snell/snell.conf"),
+        PathBuf::from("/etc/snell/client.conf"),
+        PathBuf::from("/etc/snell/config.conf"),
+        PathBuf::from("/etc/snell.conf"),
+        PathBuf::from("/usr/local/etc/snell/snell.conf"),
+        PathBuf::from("/etc/default/snell"),
+        PathBuf::from("/etc/sysconfig/snell"),
+        PathBuf::from("/etc/systemd/system/snell.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/snell-server.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_snell_config_path() -> Option<PathBuf> {
+    let paths = get_snell_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_snell_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_snell_write_path() -> PathBuf {
+    if let Some(p) = get_snell_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SNELL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("snell");
+        if dir.is_dir() {
+            return dir.join("snell.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/snell");
+    if etc_dir.is_dir() {
+        return etc_dir.join("snell.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/snell.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("snell").join("snell.conf");
+    }
+    PathBuf::from("/etc/snell/snell.conf")
+}
+
+pub fn parse_snell_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "outbound_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "snell_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "snell_proxy"
+                        || k_low == "snell_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "snell_proxy"
+                || k_low == "snell_http_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_snell_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_snell_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_snell_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SNELL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SNELL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SNELL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SNELL_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_leaf_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("LEAF_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("LEAF_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("leaf").join("leaf.conf"),
+            home.join(".config").join("leaf").join("config.conf"),
+            home.join(".config").join("leaf").join("client.conf"),
+            home.join(".leaf").join("leaf.conf"),
+            home.join(".leaf").join("config.conf"),
+            home.join(".config").join("systemd").join("user").join("leaf.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("leaf-daemon.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/leaf/leaf.conf"),
+        PathBuf::from("/etc/leaf/config.conf"),
+        PathBuf::from("/etc/leaf/client.conf"),
+        PathBuf::from("/etc/leaf.conf"),
+        PathBuf::from("/usr/local/etc/leaf/leaf.conf"),
+        PathBuf::from("/etc/default/leaf"),
+        PathBuf::from("/etc/sysconfig/leaf"),
+        PathBuf::from("/etc/systemd/system/leaf.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/leaf-daemon.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_leaf_config_path() -> Option<PathBuf> {
+    let paths = get_leaf_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_leaf_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_leaf_write_path() -> PathBuf {
+    if let Some(p) = get_leaf_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("LEAF_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("leaf");
+        if dir.is_dir() {
+            return dir.join("leaf.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/leaf");
+    if etc_dir.is_dir() {
+        return etc_dir.join("leaf.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/leaf.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("leaf").join("leaf.conf");
+    }
+    PathBuf::from("/etc/leaf/leaf.conf")
+}
+
+pub fn parse_leaf_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "outbound_proxy",
+                "target_proxy",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+                "leaf_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "leaf_proxy"
+                        || k_low == "leaf_http_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let pair = if let Some((k, v)) = trimmed.split_once('=') {
+            Some((k, v))
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            Some((k, v))
+        } else {
+            None
+        };
+        if let Some((k, v)) = pair {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "proxy"
+                || k_low == "outbound_proxy"
+                || k_low == "target_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+                || k_low == "leaf_proxy"
+                || k_low == "leaf_http_proxy"
+                || k_low == "http"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_leaf_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_leaf_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_leaf_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("LEAF_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LEAF_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LEAF_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LEAF_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -29233,6 +29708,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Juicity Daemon Proxy",
             "~/.config/juicity/client.json & /etc/juicity/client.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Snell Daemon Proxy (/etc/snell/snell.conf / ~/.config/snell/snell.conf / /etc/systemd/system/snell.service.d/http-proxy.conf)
+    if let Some((sn_proxy, sn_path)) = get_snell_proxy() {
+        let ok = verify_proxy_url(&sn_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Snell daemon proxy `{}` in {} is dead! (snell-server/client upstream routing will fail)",
+                sn_proxy,
+                sn_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Snell Daemon Proxy",
+            format!("{}", sn_path.display()),
+            sn_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (snell fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Snell Daemon Proxy",
+            "~/.config/snell/snell.conf & /etc/snell/snell.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Leaf Daemon Proxy (/etc/leaf/leaf.conf / ~/.config/leaf/leaf.conf / /etc/systemd/system/leaf.service.d/http-proxy.conf)
+    if let Some((lf_proxy, lf_path)) = get_leaf_proxy() {
+        let ok = verify_proxy_url(&lf_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Leaf daemon proxy `{}` in {} is dead! (leaf upstream routing will fail)",
+                lf_proxy,
+                lf_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Leaf Daemon Proxy",
+            format!("{}", lf_path.display()),
+            lf_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (leaf fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Leaf Daemon Proxy",
+            "~/.config/leaf/leaf.conf & /etc/leaf/leaf.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -35190,5 +35729,96 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy=http://127.0.0.1:7890\n; juicity_proxy=http://127.0.0.1:7890\n";
         assert_eq!(parse_juicity_proxy(input_comment), None);
         assert_eq!(parse_juicity_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_snell_proxy() {
+        let sn_json = r#"{
+            "listen": "0.0.0.0:13254",
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_snell_proxy(sn_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sn_conf = r#"
+[snell-server]
+listen = 0.0.0.0:13254
+psk = secret
+proxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_snell_proxy(sn_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sn_env = r#"
+# Snell environment config
+SNELL_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_snell_proxy(sn_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_snell_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; snell_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_snell_proxy(input_comment), None);
+        assert_eq!(parse_snell_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_leaf_proxy() {
+        let lf_json = r#"{
+            "general": { "loglevel": "info" },
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_leaf_proxy(lf_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let lf_conf = r#"
+[general]
+loglevel = info
+
+[proxy]
+http = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_leaf_proxy(lf_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let lf_env = r#"
+# Leaf environment config
+LEAF_PROXY="http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_leaf_proxy(lf_env),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_leaf_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; leaf_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_leaf_proxy(input_comment), None);
+        assert_eq!(parse_leaf_proxy(""), None);
     }
 }
