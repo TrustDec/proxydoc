@@ -822,6 +822,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "ScyllaDB CDN",
         "https://www.scylladb.com",
     ),
+    (
+        "Apache Iceberg CDN",
+        "https://iceberg.apache.org",
+    ),
+    (
+        "Apache Arrow CDN",
+        "https://arrow.apache.org",
+    ),
+    (
+        "Apache Druid CDN",
+        "https://druid.apache.org",
+    ),
+    (
+        "Apache Superset CDN",
+        "https://superset.apache.org",
+    ),
+    (
+        "Trino CDN",
+        "https://trino.io",
+    ),
+    (
+        "DuckDB CDN",
+        "https://duckdb.org",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -1748,6 +1772,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "ScyllaDB CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Iceberg CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Arrow CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Druid CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Apache Superset CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Trino CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DuckDB CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

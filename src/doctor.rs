@@ -17327,6 +17327,417 @@ pub fn get_haproxy_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_nginx_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("NGINX_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("NGINX_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("nginx.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("nginx").join("nginx.conf"),
+            home.join(".nginx").join("nginx.conf"),
+            home.join(".config").join("systemd").join("user").join("nginx.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/nginx/nginx.conf"),
+        PathBuf::from("/etc/nginx/conf.d/proxy.conf"),
+        PathBuf::from("/etc/nginx/conf.d/default.conf"),
+        PathBuf::from("/etc/default/nginx"),
+        PathBuf::from("/etc/sysconfig/nginx"),
+        PathBuf::from("/etc/systemd/system/nginx.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/nginx/nginx.conf"),
+        PathBuf::from("/usr/local/nginx/conf/nginx.conf"),
+        PathBuf::from("C:\\nginx\\conf\\nginx.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_nginx_config_path() -> Option<PathBuf> {
+    let paths = get_nginx_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_nginx_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_nginx_write_path() -> PathBuf {
+    if let Some(p) = get_nginx_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("NGINX_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let conf_d = PathBuf::from("/etc/nginx/conf.d");
+    if conf_d.is_dir() {
+        return conf_d.join("proxy.conf");
+    }
+    let etc_nginx = PathBuf::from("/etc/nginx");
+    if etc_nginx.is_dir() {
+        return etc_nginx.join("nginx.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/nginx.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("nginx").join("nginx.conf");
+    }
+    PathBuf::from("/etc/nginx/conf.d/proxy.conf")
+}
+
+pub fn parse_nginx_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "nginx_http_proxy"
+                        || k_low == "nginx_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shell env assignment e.g. /etc/default/nginx
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_lowercase();
+            if k_low == "nginx_http_proxy"
+                || k_low == "nginx_https_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "all_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        // Nginx configuration directives:
+        // proxy_pass http://...; or http_proxy http://...; or set $http_proxy "http://...";
+        let clean_line = trimmed.trim_end_matches(';').trim();
+        let parts: Vec<&str> = clean_line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let directive = parts[0].to_lowercase();
+            if directive == "proxy_pass" || directive == "http_proxy" || directive == "proxy" {
+                let val = parts[1].trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty()
+                    && (val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                        || val.contains(':'))
+                {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+        if parts.len() >= 3 && parts[0].eq_ignore_ascii_case("set") && (parts[1].eq_ignore_ascii_case("$http_proxy") || parts[1].eq_ignore_ascii_case("$proxy")) {
+            let val = parts[2].trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty()
+                && (val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                    || val.contains(':'))
+            {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_nginx_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_nginx_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_nginx_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NGINX_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NGINX_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_kong_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("KONG_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("KONG_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("KONG_CONF_DIR") {
+        let p = PathBuf::from(dir.trim()).join("kong.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".kong").join("kong.conf"),
+            home.join(".config").join("kong").join("kong.conf"),
+            home.join(".config").join("systemd").join("user").join("kong.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/kong/kong.conf"),
+        PathBuf::from("/etc/kong/kong.conf.default"),
+        PathBuf::from("/etc/default/kong"),
+        PathBuf::from("/etc/sysconfig/kong"),
+        PathBuf::from("/etc/systemd/system/kong.service.d/http-proxy.conf"),
+        PathBuf::from("/usr/local/etc/kong/kong.conf"),
+        PathBuf::from("C:\\ProgramData\\Kong\\kong.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_kong_config_path() -> Option<PathBuf> {
+    let paths = get_kong_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_kong_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_kong_write_path() -> PathBuf {
+    if let Some(p) = get_kong_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("KONG_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    let etc_kong = PathBuf::from("/etc/kong");
+    if etc_kong.is_dir() {
+        return etc_kong.join("kong.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/kong.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".kong").join("kong.conf");
+    }
+    PathBuf::from("/etc/kong/kong.conf")
+}
+
+pub fn parse_kong_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+
+        // systemd Environment format
+        if trimmed.starts_with("Environment=") {
+            let env_part = trimmed.strip_prefix("Environment=").unwrap_or("").trim();
+            let unquoted = env_part.trim_matches('"').trim_matches('\'');
+            for item in unquoted.split_whitespace() {
+                if let Some((k, v)) = item.split_once('=') {
+                    let k_low = k.to_lowercase();
+                    if k_low == "kong_http_proxy"
+                        || k_low == "kong_https_proxy"
+                        || k_low == "http_proxy"
+                        || k_low == "https_proxy"
+                        || k_low == "upstream_proxy"
+                        || k_low == "all_proxy"
+                    {
+                        let val = v.trim_matches('"').trim_matches('\'').trim();
+                        if !val.is_empty() {
+                            return Some(if val.starts_with("http://")
+                                || val.starts_with("https://")
+                                || val.starts_with("socks")
+                            {
+                                val.to_string()
+                            } else {
+                                format!("http://{}", val)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Kong key = value or key: value format
+        let delimiter = if trimmed.contains('=') {
+            Some('=')
+        } else if trimmed.contains(':') {
+            Some(':')
+        } else {
+            None
+        };
+
+        if let Some(d) = delimiter {
+            if let Some((k, v)) = trimmed.split_once(d) {
+                let k_low = k.trim().to_lowercase();
+                if k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "upstream_proxy"
+                    || k_low == "kong_http_proxy"
+                    || k_low == "kong_https_proxy"
+                    || k_low == "proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty()
+                        && (val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                            || val.contains(':'))
+                    {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_kong_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_kong_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_kong_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("KONG_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KONG_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -21940,6 +22351,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "HAProxy Load Balancer",
             "/etc/haproxy/haproxy.cfg & ~/.config/haproxy/haproxy.cfg",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // NGINX Web Server & Reverse Proxy Daemon (/etc/nginx/nginx.conf / /etc/nginx/conf.d/proxy.conf / /etc/systemd/system/nginx.service.d/http-proxy.conf)
+    if let Some((ngx_proxy, ngx_path)) = get_nginx_proxy() {
+        let ok = verify_proxy_url(&ngx_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "NGINX web server daemon proxy `{}` in {} is dead! (NGINX upstream proxy_pass, OCSP fetching, and external modules will fail)",
+                ngx_proxy,
+                ngx_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "NGINX Web Server",
+            format!("{}", ngx_path.display()),
+            ngx_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (nginx fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "NGINX Web Server",
+            "/etc/nginx/nginx.conf & /etc/nginx/conf.d/proxy.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Kong API Gateway Daemon Proxy (/etc/kong/kong.conf / ~/.kong/kong.conf / /etc/systemd/system/kong.service.d/http-proxy.conf)
+    if let Some((kong_proxy, kong_path)) = get_kong_proxy() {
+        let ok = verify_proxy_url(&kong_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Kong API gateway daemon proxy `{}` in {} is dead! (Kong plugin installation, upstream service proxying, and control-plane sync will fail)",
+                kong_proxy,
+                kong_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Kong API Gateway",
+            format!("{}", kong_path.display()),
+            kong_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (kong fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Kong API Gateway",
+            "/etc/kong/kong.conf & ~/.kong/kong.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -26833,5 +27308,77 @@ Environment="HAPROXY_HTTP_PROXY=http://10.0.0.98:8080"
         let input_comment = "# http-proxy http://127.0.0.1:7890\n// http-proxy http://127.0.0.1:7890\n; http-proxy http://127.0.0.1:7890\n";
         assert_eq!(parse_haproxy_proxy(input_comment), None);
         assert_eq!(parse_haproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_nginx_proxy() {
+        let nginx_conf = r#"
+server {
+    listen 80;
+    location / {
+        proxy_pass http://127.0.0.1:7890;
+    }
+}
+"#;
+        assert_eq!(
+            parse_nginx_proxy(nginx_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="NGINX_HTTP_PROXY=http://10.0.0.101:8080"
+"#;
+        assert_eq!(
+            parse_nginx_proxy(dropin),
+            Some("http://10.0.0.101:8080".to_string())
+        );
+
+        let default_env = "HTTP_PROXY=\"http://10.0.0.102:8080\"\n";
+        assert_eq!(
+            parse_nginx_proxy(default_env),
+            Some("http://10.0.0.102:8080".to_string())
+        );
+
+        let set_line = "set $http_proxy \"http://10.0.0.103:8080\";\n";
+        assert_eq!(
+            parse_nginx_proxy(set_line),
+            Some("http://10.0.0.103:8080".to_string())
+        );
+
+        let input_comment = "# proxy_pass http://127.0.0.1:7890;\n// proxy_pass http://127.0.0.1:7890;\n; proxy_pass http://127.0.0.1:7890;\n";
+        assert_eq!(parse_nginx_proxy(input_comment), None);
+        assert_eq!(parse_nginx_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_kong_proxy() {
+        let kong_conf = r#"
+http_proxy = http://127.0.0.1:7890
+https_proxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_kong_proxy(kong_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="KONG_HTTP_PROXY=http://10.0.0.104:8080"
+"#;
+        assert_eq!(
+            parse_kong_proxy(dropin),
+            Some("http://10.0.0.104:8080".to_string())
+        );
+
+        let upstream_line = "upstream_proxy: http://10.0.0.105:8080\n";
+        assert_eq!(
+            parse_kong_proxy(upstream_line),
+            Some("http://10.0.0.105:8080".to_string())
+        );
+
+        let input_comment = "# http_proxy = http://127.0.0.1:7890\n; http_proxy = http://127.0.0.1:7890\n// http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(parse_kong_proxy(input_comment), None);
+        assert_eq!(parse_kong_proxy(""), None);
     }
 }
