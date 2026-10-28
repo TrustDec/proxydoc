@@ -653,7 +653,13 @@ enum Commands {
         /// Also configure OpenZiti zero-trust overlay daemon (/etc/ziti/config.json / ~/.config/ziti/config.json / /etc/systemd/system/ziti-edge-tunnel.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "openziti-daemon", visible_alias = "openziti-proxy", visible_alias = "ziti-tunnel", visible_alias = "ziti")]
         openziti: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, and openziti proxy
+        /// Also configure Firezone zero-trust mesh & WireGuard daemon (/etc/firezone/client.json / ~/.config/firezone/client.json / /etc/systemd/system/firezone-client.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "firezone-daemon", visible_alias = "firezone-proxy", visible_alias = "firezone-vpn", visible_alias = "firezone-client", visible_alias = "firezoned")]
+        firezone: bool,
+        /// Also configure Netmaker WireGuard mesh client daemon (/etc/netclient/netclient.yml / ~/.config/netclient/netclient.yml / /etc/systemd/system/netclient.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "netmaker-daemon", visible_alias = "netmaker-proxy", visible_alias = "netclient", visible_alias = "netmaker-vpn")]
+        netmaker: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, and netmaker proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1250,7 +1256,13 @@ enum Commands {
         /// Also unset OpenZiti zero-trust overlay daemon (/etc/ziti/config.json / ~/.config/ziti/config.json / /etc/systemd/system/ziti-edge-tunnel.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "openziti-daemon", visible_alias = "openziti-proxy", visible_alias = "ziti-tunnel", visible_alias = "ziti")]
         openziti: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, and openziti proxy
+        /// Also unset Firezone zero-trust mesh & WireGuard daemon (/etc/firezone/client.json / ~/.config/firezone/client.json / /etc/systemd/system/firezone-client.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "firezone-daemon", visible_alias = "firezone-proxy", visible_alias = "firezone-vpn", visible_alias = "firezone-client", visible_alias = "firezoned")]
+        firezone: bool,
+        /// Also unset Netmaker WireGuard mesh client daemon (/etc/netclient/netclient.yml / ~/.config/netclient/netclient.yml / /etc/systemd/system/netclient.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "netmaker-daemon", visible_alias = "netmaker-proxy", visible_alias = "netclient", visible_alias = "netmaker-vpn")]
+        netmaker: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, and netmaker proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1490,6 +1502,8 @@ async fn main() -> Result<()> {
             warp,
             amnezia,
             openziti,
+            firezone,
+            netmaker,
             all,
             shell,
         }) => {
@@ -1691,6 +1705,8 @@ async fn main() -> Result<()> {
                 warp,
                 amnezia,
                 openziti,
+                firezone,
+                netmaker,
                 all,
                 shell.as_deref(),
             )
@@ -1893,6 +1909,8 @@ async fn main() -> Result<()> {
             warp,
             amnezia,
             openziti,
+            firezone,
+            netmaker,
             all,
             shell,
         }) => {
@@ -2093,6 +2111,8 @@ async fn main() -> Result<()> {
                 warp,
                 amnezia,
                 openziti,
+                firezone,
+                netmaker,
                 all,
                 shell.as_deref(),
             )?;
@@ -7995,6 +8015,90 @@ mod tests {
         match cli.command {
             Some(Commands::Off { openziti, .. }) => {
                 assert!(openziti);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_firezone() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--firezone"]).unwrap();
+        match cli.command {
+            Some(Commands::On { firezone, .. }) => {
+                assert!(firezone);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--firezone-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { firezone, .. }) => {
+                assert!(firezone);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--firezone-client"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { firezone, .. }) => {
+                assert!(firezone);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--firezoned"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { firezone, .. }) => {
+                assert!(firezone);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_firezone() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--firezone"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { firezone, .. }) => {
+                assert!(firezone);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_netmaker() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--netmaker"]).unwrap();
+        match cli.command {
+            Some(Commands::On { netmaker, .. }) => {
+                assert!(netmaker);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--netmaker-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { netmaker, .. }) => {
+                assert!(netmaker);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--netclient"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { netmaker, .. }) => {
+                assert!(netmaker);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_netmaker() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--netmaker"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { netmaker, .. }) => {
+                assert!(netmaker);
             }
             _ => panic!("Expected Off command"),
         }

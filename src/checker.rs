@@ -1806,6 +1806,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "3FS AI CDN",
         "https://github.com/deepseek-ai/3FS",
     ),
+    (
+        "Firezone ZTNA CDN",
+        "https://www.firezone.dev",
+    ),
+    (
+        "Netmaker Mesh CDN",
+        "https://www.netmaker.io",
+    ),
+    (
+        "Deep-Searcher AI CDN",
+        "https://github.com/zilliztech/deep-searcher",
+    ),
+    (
+        "Open-Thoughts AI CDN",
+        "https://github.com/open-thoughts/open-thoughts",
+    ),
+    (
+        "Deep-Live-Cam AI CDN",
+        "https://github.com/hacksider/Deep-Live-Cam",
+    ),
+    (
+        "BitNet AI CDN",
+        "https://github.com/microsoft/BitNet",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3470,6 +3494,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "3FS AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Firezone ZTNA CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Netmaker Mesh CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Deep-Searcher AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-Thoughts AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Deep-Live-Cam AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "BitNet AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

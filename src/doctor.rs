@@ -37995,6 +37995,568 @@ pub fn get_openziti_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_firezone_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("FIREZONE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("FIREZONE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("FIREZONE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("client.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("firezone").join("client.json"),
+            home.join(".local").join("share").join("firezone").join("client.json"),
+            home.join(".firezone").join("client.json"),
+            home.join(".config").join("systemd").join("user").join("firezone-client.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/firezone/client.json"),
+        PathBuf::from("/var/lib/firezone/client.json"),
+        PathBuf::from("/etc/firezone/config.json"),
+        PathBuf::from("/usr/local/etc/firezone/client.json"),
+        PathBuf::from("/opt/homebrew/etc/firezone/client.json"),
+        PathBuf::from("/etc/default/firezone-client"),
+        PathBuf::from("/etc/sysconfig/firezone-client"),
+        PathBuf::from("/etc/systemd/system/firezone-client.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/firezoned.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_fz = PathBuf::from("/etc/firezone");
+    if etc_fz.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_fz) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_firezone_config_path() -> Option<PathBuf> {
+    let paths = get_firezone_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_firezone_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_firezone_write_path() -> PathBuf {
+    if let Some(p) = get_firezone_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("FIREZONE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("firezone");
+        if dir.is_dir() {
+            return dir.join("client.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/firezone");
+    if etc_dir.is_dir() {
+        return etc_dir.join("client.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/firezone-client.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("firezone").join("client.json");
+    }
+    PathBuf::from("/etc/firezone/client.json")
+}
+
+pub fn parse_firezone_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "firezone_proxy",
+                "firezoned_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "firezone_proxy"
+                    || k_low == "firezoned_proxy"
+                    || k_low == "firezone_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "firezone_proxy"
+                    || k_low == "firezoned_proxy"
+                    || k_low == "firezone_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("firezone_proxy=")
+            || clean.starts_with("firezone_proxy:")
+            || clean.starts_with("firezoned_proxy=")
+            || clean.starts_with("firezoned_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_firezone_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_firezone_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_firezone_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("FIREZONE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FIREZONE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("FIREZONE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FIREZONE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_netmaker_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("NETCLIENT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NETMAKER_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NETCLIENT_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("NETCLIENT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("netclient.yml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("netclient").join("netclient.yml"),
+            home.join(".config").join("netclient").join("config.json"),
+            home.join(".netclient").join("netclient.yml"),
+            home.join(".config").join("systemd").join("user").join("netclient.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/netclient/netclient.yml"),
+        PathBuf::from("/etc/netclient/config.json"),
+        PathBuf::from("/var/lib/netclient/netclient.yml"),
+        PathBuf::from("/usr/local/etc/netclient/netclient.yml"),
+        PathBuf::from("/opt/homebrew/etc/netclient/netclient.yml"),
+        PathBuf::from("/etc/default/netclient"),
+        PathBuf::from("/etc/sysconfig/netclient"),
+        PathBuf::from("/etc/systemd/system/netclient.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/netmaker.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_nc = PathBuf::from("/etc/netclient");
+    if etc_nc.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_nc) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yml" || ext == "yaml" || ext == "json" || ext == "conf") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_netmaker_config_path() -> Option<PathBuf> {
+    let paths = get_netmaker_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_netmaker_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_netmaker_write_path() -> PathBuf {
+    if let Some(p) = get_netmaker_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("NETCLIENT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("netclient");
+        if dir.is_dir() {
+            return dir.join("netclient.yml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/netclient");
+    if etc_dir.is_dir() {
+        return etc_dir.join("netclient.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/netclient.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("netclient").join("netclient.yml");
+    }
+    PathBuf::from("/etc/netclient/netclient.yml")
+}
+
+pub fn parse_netmaker_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "netmaker_proxy",
+                "netclient_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "netmaker_proxy"
+                    || k_low == "netclient_proxy"
+                    || k_low == "netclient_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "netmaker_proxy"
+                    || k_low == "netclient_proxy"
+                    || k_low == "netclient_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("netmaker_proxy=")
+            || clean.starts_with("netmaker_proxy:")
+            || clean.starts_with("netclient_proxy=")
+            || clean.starts_with("netclient_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_netmaker_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_netmaker_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_netmaker_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NETCLIENT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NETCLIENT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("NETMAKER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NETMAKER_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -45232,6 +45794,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "OpenZiti Daemon Proxy",
             "~/.config/ziti/config.json & /etc/ziti/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Firezone Zero-Trust Mesh & WireGuard Client Daemon (/etc/firezone/client.json / ~/.config/firezone/client.json / /etc/systemd/system/firezone-client.service.d/http-proxy.conf)
+    if let Some((firezone_proxy, firezone_path)) = get_firezone_proxy() {
+        let ok = verify_proxy_url(&firezone_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Firezone proxy `{}` in {} is dead! (Firezone zero-trust tunnel & WireGuard access will fail)",
+                firezone_proxy,
+                firezone_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Firezone Daemon Proxy",
+            format!("{}", firezone_path.display()),
+            firezone_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Firezone fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Firezone Daemon Proxy",
+            "~/.config/firezone/client.json & /etc/firezone/client.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Netmaker WireGuard Mesh Client Daemon (/etc/netclient/netclient.yml / ~/.config/netclient/netclient.yml / /etc/systemd/system/netclient.service.d/http-proxy.conf)
+    if let Some((netmaker_proxy, netmaker_path)) = get_netmaker_proxy() {
+        let ok = verify_proxy_url(&netmaker_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Netmaker proxy `{}` in {} is dead! (Netmaker WireGuard mesh & virtual networking will fail)",
+                netmaker_proxy,
+                netmaker_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Netmaker Daemon Proxy",
+            format!("{}", netmaker_path.display()),
+            netmaker_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Netmaker fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Netmaker Daemon Proxy",
+            "~/.config/netclient/netclient.yml & /etc/netclient/netclient.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -53464,5 +54090,57 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; openziti_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_openziti_proxy(input_comment), None);
         assert_eq!(parse_openziti_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_firezone_proxy() {
+        let firezone_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_firezone_proxy(firezone_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_firezone_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; firezone_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_firezone_proxy(input_comment), None);
+        assert_eq!(parse_firezone_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_netmaker_proxy() {
+        let netclient_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_netmaker_proxy(netclient_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_netmaker_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; netmaker_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_netmaker_proxy(input_comment), None);
+        assert_eq!(parse_netmaker_proxy(""), None);
     }
 }
