@@ -105,6 +105,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (7053, false, "pdnsd Proxy DNS Daemon with Permanent Caching (DNS)"),
     (5350, false, "MaraDNS / Deadwood Recursive DNS Cache Daemon (DNS)"),
     (4444, false, "i2pd Anonymous Network HTTP Proxy Daemon (HTTP)"),
+    (2023, false, "dae / daed eBPF Transparent Proxy & Routing Daemon (Dashboard/API)"),
+    (9001, false, "Yggdrasil Encrypted Mesh Routing Daemon (Admin API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

@@ -611,7 +611,13 @@ enum Commands {
         /// Also configure i2pd anonymous network HTTP & SOCKS proxy daemon (~/.config/i2pd/i2pd.conf / /etc/i2pd/i2pd.conf / /etc/systemd/system/i2pd.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "i2pd-daemon", visible_alias = "i2pd-proxy", visible_alias = "i2p", visible_alias = "i2p-daemon", visible_alias = "i2p-proxy")]
         i2pd: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, and i2pd proxy
+        /// Also configure dae eBPF transparent proxy & routing daemon (~/.config/dae/config.dae / /etc/dae/config.dae / /etc/systemd/system/dae.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dae-daemon", visible_alias = "dae-proxy", visible_alias = "daed", visible_alias = "daed-daemon", visible_alias = "daed-proxy")]
+        dae: bool,
+        /// Also configure Yggdrasil end-to-end encrypted IPv6 mesh routing daemon (~/.config/yggdrasil/yggdrasil.conf / /etc/yggdrasil.conf / /etc/systemd/system/yggdrasil.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "yggdrasil-daemon", visible_alias = "yggdrasil-proxy", visible_alias = "ygg", visible_alias = "ygg-daemon", visible_alias = "ygg-proxy")]
+        yggdrasil: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, and yggdrasil proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1166,7 +1172,13 @@ enum Commands {
         /// Also unset i2pd anonymous network HTTP & SOCKS proxy daemon (~/.config/i2pd/i2pd.conf / /etc/i2pd/i2pd.conf / /etc/systemd/system/i2pd.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "i2pd-daemon", visible_alias = "i2pd-proxy", visible_alias = "i2p", visible_alias = "i2p-daemon", visible_alias = "i2p-proxy")]
         i2pd: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, and pdnsd proxy
+        /// Also unset dae eBPF transparent proxy & routing daemon (~/.config/dae/config.dae / /etc/dae/config.dae / /etc/systemd/system/dae.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dae-daemon", visible_alias = "dae-proxy", visible_alias = "daed", visible_alias = "daed-daemon", visible_alias = "daed-proxy")]
+        dae: bool,
+        /// Also unset Yggdrasil end-to-end encrypted IPv6 mesh routing daemon (~/.config/yggdrasil/yggdrasil.conf / /etc/yggdrasil.conf / /etc/systemd/system/yggdrasil.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "yggdrasil-daemon", visible_alias = "yggdrasil-proxy", visible_alias = "ygg", visible_alias = "ygg-daemon", visible_alias = "ygg-proxy")]
+        yggdrasil: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, and yggdrasil proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1392,6 +1404,8 @@ async fn main() -> Result<()> {
             pdnsd,
             maradns,
             i2pd,
+            dae,
+            yggdrasil,
             all,
             shell,
         }) => {
@@ -1579,6 +1593,8 @@ async fn main() -> Result<()> {
                 pdnsd,
                 maradns,
                 i2pd,
+                dae,
+                yggdrasil,
                 all,
                 shell.as_deref(),
             )
@@ -1767,6 +1783,8 @@ async fn main() -> Result<()> {
             pdnsd,
             maradns,
             i2pd,
+            dae,
+            yggdrasil,
             all,
             shell,
         }) => {
@@ -1953,6 +1971,8 @@ async fn main() -> Result<()> {
                 pdnsd,
                 maradns,
                 i2pd,
+                dae,
+                yggdrasil,
                 all,
                 shell.as_deref(),
             )?;
@@ -7323,6 +7343,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { i2pd, .. }) => {
                 assert!(i2pd);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_dae() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--dae"]).unwrap();
+        match cli.command {
+            Some(Commands::On { dae, .. }) => {
+                assert!(dae);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--daed"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { dae, .. }) => {
+                assert!(dae);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--dae-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { dae, .. }) => {
+                assert!(dae);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_dae() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--dae"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { dae, .. }) => {
+                assert!(dae);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_yggdrasil() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--yggdrasil"]).unwrap();
+        match cli.command {
+            Some(Commands::On { yggdrasil, .. }) => {
+                assert!(yggdrasil);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--ygg"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { yggdrasil, .. }) => {
+                assert!(yggdrasil);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--yggdrasil-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { yggdrasil, .. }) => {
+                assert!(yggdrasil);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_yggdrasil() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--yggdrasil"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { yggdrasil, .. }) => {
+                assert!(yggdrasil);
             }
             _ => panic!("Expected Off command"),
         }

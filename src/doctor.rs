@@ -33690,6 +33690,680 @@ pub fn get_i2pd_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_dae_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DAE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DAE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DAED_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("dae").join("config.dae"),
+            home.join(".dae").join("config.dae"),
+            home.join(".config").join("daed").join("config.dae"),
+            home.join(".config").join("systemd").join("user").join("dae.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("daed.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/dae/config.dae"),
+        PathBuf::from("/etc/daed/config.dae"),
+        PathBuf::from("/usr/local/etc/dae/config.dae"),
+        PathBuf::from("/opt/homebrew/etc/dae/config.dae"),
+        PathBuf::from("/etc/default/dae"),
+        PathBuf::from("/etc/default/daed"),
+        PathBuf::from("/etc/sysconfig/dae"),
+        PathBuf::from("/etc/sysconfig/daed"),
+        PathBuf::from("/etc/systemd/system/dae.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/daed.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_dae_config_path() -> Option<PathBuf> {
+    let paths = get_dae_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_dae_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_dae_write_path() -> PathBuf {
+    if let Some(p) = get_dae_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DAE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("DAE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("dae");
+        if dir.is_dir() {
+            return dir.join("config.dae");
+        }
+        let dot_dir = home.join(".dae");
+        if dot_dir.is_dir() {
+            return dot_dir.join("config.dae");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/dae");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.dae");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/dae.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("dae").join("config.dae");
+    }
+    PathBuf::from("/etc/dae/config.dae")
+}
+
+pub fn parse_dae_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "dae_proxy",
+                "node",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    } else if let Some(arr) = v.as_array() {
+                        for item in arr {
+                            if let Some(s) = item.as_str() {
+                                let trim = s.trim();
+                                if trim.starts_with("http://")
+                                    || trim.starts_with("https://")
+                                    || trim.starts_with("socks")
+                                {
+                                    return Some(trim.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut in_node_block = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("node {") || lower == "node{" {
+            in_node_block = true;
+            continue;
+        }
+        if in_node_block && trimmed.contains('}') {
+            in_node_block = false;
+        }
+
+        if in_node_block {
+            let candidate = trimmed.trim_matches('\'').trim_matches('"').trim();
+            if candidate.starts_with("socks") || candidate.starts_with("http://") || candidate.starts_with("https://") {
+                return Some(candidate.to_string());
+            }
+        }
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dae_proxy"
+                    || k_low == "dae_http_proxy"
+                    || k_low == "daed_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dae_proxy"
+                    || k_low == "dae_http_proxy"
+                    || k_low == "daed_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("proxy ") || lower.starts_with("node ") {
+            let prefix_len = if lower.starts_with("proxy ") { "proxy ".len() } else { "node ".len() };
+            let val = trimmed[prefix_len..].trim().trim_start_matches('=').trim().trim_matches('\'').trim_matches('"').trim();
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:")
+            || clean.starts_with("http.proxy=")
+            || clean.starts_with("dae_proxy:")
+            || clean.starts_with("dae_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("http.proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("dae_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_matches('\'').trim_matches('"').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_matches('\'').trim_matches('"').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_matches('\'').trim_matches('"').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_dae_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_dae_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_dae_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DAE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DAE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DAE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DAE_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DAED_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DAED_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DAED_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DAED_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_yggdrasil_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("YGGDRASIL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("YGGDRASIL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("YGG_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("yggdrasil").join("yggdrasil.conf"),
+            home.join(".yggdrasil.conf"),
+            home.join(".config").join("yggdrasil.conf"),
+            home.join(".config").join("systemd").join("user").join("yggdrasil.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/yggdrasil.conf"),
+        PathBuf::from("/etc/yggdrasil/yggdrasil.conf"),
+        PathBuf::from("/usr/local/etc/yggdrasil.conf"),
+        PathBuf::from("/opt/homebrew/etc/yggdrasil.conf"),
+        PathBuf::from("/etc/default/yggdrasil"),
+        PathBuf::from("/etc/sysconfig/yggdrasil"),
+        PathBuf::from("/etc/systemd/system/yggdrasil.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_yggdrasil_config_path() -> Option<PathBuf> {
+    let paths = get_yggdrasil_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_yggdrasil_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_yggdrasil_write_path() -> PathBuf {
+    if let Some(p) = get_yggdrasil_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("YGGDRASIL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("YGGDRASIL_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("yggdrasil");
+        if dir.is_dir() {
+            return dir.join("yggdrasil.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/yggdrasil");
+    if etc_dir.is_dir() {
+        return etc_dir.join("yggdrasil.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/yggdrasil.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("yggdrasil").join("yggdrasil.conf");
+    }
+    PathBuf::from("/etc/yggdrasil.conf")
+}
+
+pub fn parse_yggdrasil_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "Proxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "yggdrasil_proxy",
+                "ygg_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "yggdrasil_proxy"
+                    || k_low == "yggdrasil_http_proxy"
+                    || k_low == "ygg_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "yggdrasil_proxy"
+                    || k_low == "yggdrasil_http_proxy"
+                    || k_low == "ygg_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("proxy ") {
+            let val = trimmed["proxy ".len()..].trim().trim_start_matches('=').trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:")
+            || clean.starts_with("http.proxy=")
+            || clean.starts_with("yggdrasil_proxy:")
+            || clean.starts_with("yggdrasil_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("http.proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("yggdrasil_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_yggdrasil_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_yggdrasil_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_yggdrasil_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("YGGDRASIL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:YGGDRASIL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("YGGDRASIL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:YGGDRASIL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("YGG_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:YGG_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("YGG_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:YGG_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -40479,6 +41153,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "i2pd Daemon Proxy",
             "~/.config/i2pd/i2pd.conf & /etc/i2pd/i2pd.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // dae eBPF Transparent Proxy & Routing Daemon (~/.config/dae/config.dae / /etc/dae/config.dae / /etc/systemd/system/dae.service.d/http-proxy.conf)
+    if let Some((dae_proxy, dae_path)) = get_dae_proxy() {
+        let ok = verify_proxy_url(&dae_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "dae proxy `{}` in {} is dead! (dae proxy routing will fail)",
+                dae_proxy,
+                dae_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "dae Daemon Proxy",
+            format!("{}", dae_path.display()),
+            dae_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (dae fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "dae Daemon Proxy",
+            "~/.config/dae/config.dae & /etc/dae/config.dae",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Yggdrasil End-to-End Encrypted Mesh Routing Daemon (~/.config/yggdrasil/yggdrasil.conf / /etc/yggdrasil.conf / /etc/systemd/system/yggdrasil.service.d/http-proxy.conf)
+    if let Some((ygg_proxy, ygg_path)) = get_yggdrasil_proxy() {
+        let ok = verify_proxy_url(&ygg_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Yggdrasil proxy `{}` in {} is dead! (Yggdrasil peer routing will fail)",
+                ygg_proxy,
+                ygg_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Yggdrasil Daemon Proxy",
+            format!("{}", ygg_path.display()),
+            ygg_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Yggdrasil fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Yggdrasil Daemon Proxy",
+            "~/.config/yggdrasil/yggdrasil.conf & /etc/yggdrasil.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -48258,5 +48996,86 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# outproxy = http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
         assert_eq!(parse_i2pd_proxy(input_comment), None);
         assert_eq!(parse_i2pd_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_dae_proxy() {
+        let dae_conf = r#"
+global {
+    wan_interface: auto
+    log_level: info
+}
+node {
+    'socks5://127.0.0.1:1080'
+}
+"#;
+        assert_eq!(
+            parse_dae_proxy(dae_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dae_colon = r#"
+proxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_dae_proxy(dae_colon),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dae_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_dae_proxy(dae_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_dae_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
+        assert_eq!(parse_dae_proxy(input_comment), None);
+        assert_eq!(parse_dae_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_yggdrasil_proxy() {
+        let ygg_conf = r#"
+{
+  "Proxy": "socks5://127.0.0.1:1080",
+  "Listen": []
+}
+"#;
+        assert_eq!(
+            parse_yggdrasil_proxy(ygg_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let ygg_colon = r#"
+Proxy: socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_yggdrasil_proxy(ygg_colon),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_yggdrasil_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# Proxy: socks5://127.0.0.1:1080\n; proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
+        assert_eq!(parse_yggdrasil_proxy(input_comment), None);
+        assert_eq!(parse_yggdrasil_proxy(""), None);
     }
 }

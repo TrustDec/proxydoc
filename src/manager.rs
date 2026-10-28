@@ -32333,6 +32333,414 @@ pub fn unset_i2pd_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_dae_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("http_proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dae_proxy"
+                    || k_low == "dae_http_proxy"
+                    || k_low == "daed_proxy"
+                    || k_low == "daed_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"DAE_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("dae_proxy=")
+            || lower.starts_with("daed_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:") || clean.starts_with("http.proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("dae_proxy:") || clean.starts_with("dae_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                if clean.starts_with("http_proxy:") || clean.starts_with("proxy:") || clean.starts_with("dae_proxy:") {
+                    lines.push(format!("http_proxy: \"{}\"", proxy_url));
+                } else {
+                    lines.push(format!("http_proxy = \"{}\"", proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let is_systemd = lines.iter().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+        if is_systemd {
+            let mut final_lines = Vec::new();
+            let mut inserted = false;
+            for l in lines {
+                final_lines.push(l.clone());
+                if !inserted && l.trim().eq_ignore_ascii_case("[Service]") {
+                    final_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    final_lines.push(format!("Environment=\"DAE_PROXY={}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push(format!("http_proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_dae_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["proxy", "http_proxy", "http-proxy", "https_proxy", "all_proxy", "dae_proxy", "daed_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dae_proxy"
+                    || k_low == "dae_http_proxy"
+                    || k_low == "daed_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("dae_proxy=")
+            || lower.starts_with("daed_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:") || clean.starts_with("http.proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("dae_proxy:") || clean.starts_with("dae_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_dae_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_dae_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_dae_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_dae_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_dae_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_dae_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_yggdrasil_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("Proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "yggdrasil_proxy"
+                    || k_low == "yggdrasil_http_proxy"
+                    || k_low == "ygg_proxy"
+                    || k_low == "ygg_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"YGGDRASIL_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("yggdrasil_proxy=")
+            || lower.starts_with("ygg_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:") || clean.starts_with("http.proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("yggdrasil_proxy:") || clean.starts_with("yggdrasil_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                if clean.starts_with("proxy:") || clean.starts_with("http_proxy:") || clean.starts_with("yggdrasil_proxy:") {
+                    lines.push(format!("Proxy: \"{}\"", proxy_url));
+                } else {
+                    lines.push(format!("Proxy = \"{}\"", proxy_url));
+                }
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let is_systemd = lines.iter().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+        if is_systemd {
+            let mut final_lines = Vec::new();
+            let mut inserted = false;
+            for l in lines {
+                final_lines.push(l.clone());
+                if !inserted && l.trim().eq_ignore_ascii_case("[Service]") {
+                    final_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    final_lines.push(format!("Environment=\"YGGDRASIL_PROXY={}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push(format!("Proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_yggdrasil_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in ["Proxy", "proxy", "http_proxy", "http-proxy", "https_proxy", "all_proxy", "yggdrasil_proxy", "ygg_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "yggdrasil_proxy"
+                    || k_low == "yggdrasil_http_proxy"
+                    || k_low == "ygg_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("yggdrasil_proxy=")
+            || lower.starts_with("ygg_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:") || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:") || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:") || clean.starts_with("http.proxy=")
+            || clean.starts_with("proxy:") || clean.starts_with("proxy=")
+            || clean.starts_with("yggdrasil_proxy:") || clean.starts_with("yggdrasil_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_yggdrasil_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_yggdrasil_write_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_yggdrasil_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_yggdrasil_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_yggdrasil_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_yggdrasil_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -32517,6 +32925,8 @@ pub async fn turn_on(
     pdnsd: bool,
     maradns: bool,
     i2pd: bool,
+    dae: bool,
+    yggdrasil: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -32700,6 +33110,8 @@ pub async fn turn_on(
     let set_pdnsd = pdnsd || all;
     let set_maradns = maradns || all;
     let set_i2pd = i2pd || all;
+    let set_dae = dae || all;
+    let set_yggdrasil = yggdrasil || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -35331,6 +35743,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_dae {
+        match set_dae_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ dae daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update dae daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_yggdrasil {
+        match set_yggdrasil_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Yggdrasil daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Yggdrasil daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -35528,6 +35970,8 @@ pub fn turn_off(
     pdnsd: bool,
     maradns: bool,
     i2pd: bool,
+    dae: bool,
+    yggdrasil: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -35711,6 +36155,8 @@ pub fn turn_off(
     let unset_pdnsd = pdnsd || all;
     let unset_maradns = maradns || all;
     let unset_i2pd = i2pd || all;
+    let unset_dae = dae || all;
+    let unset_yggdrasil = yggdrasil || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -37236,6 +37682,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ i2pd daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ i2pd proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset i2pd daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_dae {
+        match unset_dae_proxy() {
+            Ok(true) => eprintln!("{}", "✔ dae daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ dae proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset dae daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_yggdrasil {
+        match unset_yggdrasil_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Yggdrasil daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Yggdrasil proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Yggdrasil daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -41766,5 +42228,57 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("I2PD_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_dae_proxy() {
+        let dae_initial = "http_proxy: \"http://127.0.0.1:7890\"\n";
+        let dae_updated = apply_dae_proxy(dae_initial, "socks5://10.0.0.128:1080");
+        assert!(dae_updated.contains("http_proxy: \"socks5://10.0.0.128:1080\""));
+        let (dae_cleaned, dae_removed) = remove_dae_proxy(&dae_updated);
+        assert!(dae_removed);
+        assert!(!dae_cleaned.contains("http_proxy"));
+
+        let conf_initial = "http_proxy = \"http://127.0.0.1:7890\"\n";
+        let conf_updated = apply_dae_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_dae_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("http_proxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_dae_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"DAE_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_dae_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("DAE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_yggdrasil_proxy() {
+        let ygg_initial = "Proxy: \"http://127.0.0.1:7890\"\n";
+        let ygg_updated = apply_yggdrasil_proxy(ygg_initial, "socks5://10.0.0.128:1080");
+        assert!(ygg_updated.contains("Proxy: \"socks5://10.0.0.128:1080\""));
+        let (ygg_cleaned, ygg_removed) = remove_yggdrasil_proxy(&ygg_updated);
+        assert!(ygg_removed);
+        assert!(!ygg_cleaned.contains("Proxy"));
+
+        let conf_initial = "Proxy = \"http://127.0.0.1:7890\"\n";
+        let conf_updated = apply_yggdrasil_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("Proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_yggdrasil_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("Proxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_yggdrasil_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"YGGDRASIL_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_yggdrasil_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("YGGDRASIL_PROXY="));
     }
 }
