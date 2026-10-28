@@ -117,6 +117,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (9087, false, "Headscale Tailscale Coordination & Relay Daemon (Metrics/Control)"),
     (33073, false, "NetBird Zero Trust Mesh VPN Management Daemon (API/gRPC)"),
     (40000, true, "Cloudflare WARP Client Local Proxy Daemon (SOCKS5/HTTP)"),
+    (8765, false, "Amnezia VPN Client & Service Daemon (API/IPC)"),
+    (10080, false, "OpenZiti Zero Trust Edge Tunnel & Overlay Daemon (Control/IPC)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

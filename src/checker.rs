@@ -1782,6 +1782,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "NanoFlow AI CDN",
         "https://github.com/infinigence/NanoFlow",
     ),
+    (
+        "Amnezia VPN CDN",
+        "https://amnezia.org",
+    ),
+    (
+        "OpenZiti Mesh CDN",
+        "https://openziti.io",
+    ),
+    (
+        "DeepGEMM AI CDN",
+        "https://github.com/deepseek-ai/DeepGEMM",
+    ),
+    (
+        "DualPipe AI CDN",
+        "https://github.com/deepseek-ai/DualPipe",
+    ),
+    (
+        "EPLB AI CDN",
+        "https://github.com/deepseek-ai/eplb",
+    ),
+    (
+        "3FS AI CDN",
+        "https://github.com/deepseek-ai/3FS",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3428,6 +3452,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "NanoFlow AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Amnezia VPN CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenZiti Mesh CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepGEMM AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DualPipe AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "EPLB AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "3FS AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

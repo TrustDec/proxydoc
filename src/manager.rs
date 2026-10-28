@@ -34947,6 +34947,433 @@ pub fn unset_warp_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_amnezia_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("httpProxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("amnezia_proxy = {}", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "amnezia_proxy"
+                    || k_low == "amnezia_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"AMNEZIA_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("amnezia_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("amnezia_proxy=")
+            || clean.starts_with("amnezia_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let is_systemd = lines.iter().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+        if is_systemd {
+            let mut final_lines = Vec::new();
+            let mut inserted = false;
+            for l in lines {
+                final_lines.push(l.clone());
+                if !inserted && l.trim().eq_ignore_ascii_case("[Service]") {
+                    final_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    final_lines.push(format!("Environment=\"AMNEZIA_PROXY={}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push(directive);
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_amnezia_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "amnezia_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "amnezia_proxy"
+                    || k_low == "amnezia_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("amnezia_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("amnezia_proxy=")
+            || clean.starts_with("amnezia_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_amnezia_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_amnezia_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_amnezia_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_amnezia_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_amnezia_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_amnezia_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_openziti_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy = {}", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openziti_proxy"
+                    || k_low == "ziti_proxy"
+                    || k_low == "ziti_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"OPENZITI_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("openziti_proxy=")
+            || lower.starts_with("ziti_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("openziti_proxy=")
+            || clean.starts_with("openziti_proxy:")
+            || clean.starts_with("ziti_proxy=")
+            || clean.starts_with("ziti_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let is_systemd = lines.iter().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+        if is_systemd {
+            let mut final_lines = Vec::new();
+            let mut inserted = false;
+            for l in lines {
+                final_lines.push(l.clone());
+                if !inserted && l.trim().eq_ignore_ascii_case("[Service]") {
+                    final_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    final_lines.push(format!("Environment=\"OPENZITI_PROXY={}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push(directive);
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_openziti_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "openziti_proxy",
+                "ziti_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openziti_proxy"
+                    || k_low == "ziti_proxy"
+                    || k_low == "ziti_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("openziti_proxy=")
+            || lower.starts_with("ziti_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("openziti_proxy=")
+            || clean.starts_with("openziti_proxy:")
+            || clean.starts_with("ziti_proxy=")
+            || clean.starts_with("ziti_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_openziti_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_openziti_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_openziti_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_openziti_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_openziti_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_openziti_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -35143,6 +35570,8 @@ pub async fn turn_on(
     headscale: bool,
     netbird: bool,
     warp: bool,
+    amnezia: bool,
+    openziti: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -35338,6 +35767,8 @@ pub async fn turn_on(
     let set_headscale = headscale || all;
     let set_netbird = netbird || all;
     let set_warp = warp || all;
+    let set_amnezia = amnezia || all;
+    let set_openziti = openziti || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -38149,6 +38580,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_amnezia {
+        match set_amnezia_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Amnezia VPN daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Amnezia VPN daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_openziti {
+        match set_openziti_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ OpenZiti daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update OpenZiti daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -38358,6 +38819,8 @@ pub fn turn_off(
     headscale: bool,
     netbird: bool,
     warp: bool,
+    amnezia: bool,
+    openziti: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -38553,6 +39016,8 @@ pub fn turn_off(
     let unset_headscale = headscale || all;
     let unset_netbird = netbird || all;
     let unset_warp = warp || all;
+    let unset_amnezia = amnezia || all;
+    let unset_openziti = openziti || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -40174,6 +40639,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Cloudflare WARP daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Cloudflare WARP proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Cloudflare WARP daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_amnezia {
+        match unset_amnezia_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Amnezia VPN daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Amnezia VPN proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Amnezia VPN daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_openziti {
+        match unset_openziti_proxy() {
+            Ok(true) => eprintln!("{}", "✔ OpenZiti daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ OpenZiti proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset OpenZiti daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -44946,5 +45427,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("WARP_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_amnezia_proxy() {
+        let amnezia_initial = "{\n  \"description\": \"AmneziaVPN config\"\n}\n";
+        let amnezia_updated = apply_amnezia_proxy(amnezia_initial, "http://10.0.0.128:7890");
+        assert!(amnezia_updated.contains("\"httpProxy\": \"http://10.0.0.128:7890\""));
+        let (amnezia_cleaned, amnezia_removed) = remove_amnezia_proxy(&amnezia_updated);
+        assert!(amnezia_removed);
+        assert!(!amnezia_cleaned.contains("httpProxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_amnezia_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"AMNEZIA_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_amnezia_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("AMNEZIA_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_openziti_proxy() {
+        let ziti_initial = "{\n  \"service\": \"ziti-edge-tunnel\"\n}\n";
+        let ziti_updated = apply_openziti_proxy(ziti_initial, "http://10.0.0.128:7890");
+        assert!(ziti_updated.contains("\"proxy\": \"http://10.0.0.128:7890\""));
+        let (ziti_cleaned, ziti_removed) = remove_openziti_proxy(&ziti_updated);
+        assert!(ziti_removed);
+        assert!(!ziti_cleaned.contains("\"proxy\":"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_openziti_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"OPENZITI_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_openziti_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("OPENZITI_PROXY="));
     }
 }

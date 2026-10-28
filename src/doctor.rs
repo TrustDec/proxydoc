@@ -37442,6 +37442,559 @@ pub fn get_warp_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_amnezia_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("AMNEZIA_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("AMNEZIA_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("AMNEZIA_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("AmneziaVPN").join("AmneziaVPN.json"),
+            home.join(".local").join("share").join("AmneziaVPN").join("AmneziaVPN.json"),
+            home.join(".amnezia").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("amnezia-vpn.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/amnezia/amneziavpn/config.json"),
+        PathBuf::from("/var/lib/amnezia/config.json"),
+        PathBuf::from("/usr/local/etc/amnezia/config.json"),
+        PathBuf::from("/opt/homebrew/etc/amnezia/config.json"),
+        PathBuf::from("/etc/default/amnezia-vpn"),
+        PathBuf::from("/etc/sysconfig/amnezia-vpn"),
+        PathBuf::from("/etc/systemd/system/amnezia-vpn.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_amnezia = PathBuf::from("/etc/amnezia");
+    if etc_amnezia.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_amnezia) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_amnezia_config_path() -> Option<PathBuf> {
+    let paths = get_amnezia_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_amnezia_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_amnezia_write_path() -> PathBuf {
+    if let Some(p) = get_amnezia_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("AMNEZIA_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("AmneziaVPN");
+        if dir.is_dir() {
+            return dir.join("AmneziaVPN.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/amnezia/amneziavpn");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/amnezia-vpn.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("AmneziaVPN").join("AmneziaVPN.json");
+    }
+    PathBuf::from("/etc/amnezia/amneziavpn/config.json")
+}
+
+pub fn parse_amnezia_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "amnezia_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "amnezia_proxy"
+                    || k_low == "amnezia_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "amnezia_proxy"
+                    || k_low == "amnezia_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("amnezia_proxy=")
+            || clean.starts_with("amnezia_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_amnezia_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_amnezia_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_amnezia_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("AMNEZIA_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AMNEZIA_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("AMNEZIA_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AMNEZIA_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_openziti_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ZITI_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("OPENZITI_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("ZITI_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("ZITI_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".ziti").join("config.json"),
+            home.join(".config").join("ziti").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("ziti-edge-tunnel.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/ziti/config.json"),
+        PathBuf::from("/var/lib/ziti/config.json"),
+        PathBuf::from("/etc/ziti-edge-tunnel/config.json"),
+        PathBuf::from("/usr/local/etc/ziti/config.json"),
+        PathBuf::from("/opt/homebrew/etc/ziti/config.json"),
+        PathBuf::from("/etc/default/ziti-edge-tunnel"),
+        PathBuf::from("/etc/sysconfig/ziti-edge-tunnel"),
+        PathBuf::from("/etc/systemd/system/ziti-edge-tunnel.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_ziti = PathBuf::from("/etc/ziti");
+    if etc_ziti.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_ziti) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_openziti_config_path() -> Option<PathBuf> {
+    let paths = get_openziti_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_openziti_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_openziti_write_path() -> PathBuf {
+    if let Some(p) = get_openziti_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ZITI_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("ziti");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/ziti");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/ziti-edge-tunnel.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("ziti").join("config.json");
+    }
+    PathBuf::from("/etc/ziti/config.json")
+}
+
+pub fn parse_openziti_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "openziti_proxy",
+                "ziti_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openziti_proxy"
+                    || k_low == "ziti_proxy"
+                    || k_low == "ziti_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openziti_proxy"
+                    || k_low == "ziti_proxy"
+                    || k_low == "ziti_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("openziti_proxy=")
+            || clean.starts_with("openziti_proxy:")
+            || clean.starts_with("ziti_proxy=")
+            || clean.starts_with("ziti_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_openziti_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_openziti_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_openziti_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ZITI_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ZITI_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("OPENZITI_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OPENZITI_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -44615,6 +45168,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Cloudflare WARP Daemon Proxy",
             "~/.local/share/warp/settings.json & /etc/cloudflare-warp/settings.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Amnezia VPN Daemon (/etc/amnezia/amneziavpn/config.json / ~/.config/AmneziaVPN/AmneziaVPN.json / /etc/systemd/system/amnezia-vpn.service.d/http-proxy.conf)
+    if let Some((amnezia_proxy, amnezia_path)) = get_amnezia_proxy() {
+        let ok = verify_proxy_url(&amnezia_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Amnezia VPN proxy `{}` in {} is dead! (AmneziaWG/VPN tunnel & censorship bypass will fail)",
+                amnezia_proxy,
+                amnezia_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Amnezia VPN Daemon Proxy",
+            format!("{}", amnezia_path.display()),
+            amnezia_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Amnezia VPN fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Amnezia VPN Daemon Proxy",
+            "~/.config/AmneziaVPN/AmneziaVPN.json & /etc/amnezia/amneziavpn/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // OpenZiti Zero-Trust Overlay Daemon (/etc/ziti/config.json / ~/.config/ziti/config.json / /etc/systemd/system/ziti-edge-tunnel.service.d/http-proxy.conf)
+    if let Some((openziti_proxy, openziti_path)) = get_openziti_proxy() {
+        let ok = verify_proxy_url(&openziti_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "OpenZiti proxy `{}` in {} is dead! (OpenZiti edge tunnel & zero-trust overlay will fail)",
+                openziti_proxy,
+                openziti_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "OpenZiti Daemon Proxy",
+            format!("{}", openziti_path.display()),
+            openziti_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (OpenZiti fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "OpenZiti Daemon Proxy",
+            "~/.config/ziti/config.json & /etc/ziti/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -52795,5 +53412,57 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; warp_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_warp_proxy(input_comment), None);
         assert_eq!(parse_warp_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_amnezia_proxy() {
+        let amnezia_json = r#"
+{
+  "httpProxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_amnezia_proxy(amnezia_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_amnezia_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = http://127.0.0.1:7890\n; amnezia_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_amnezia_proxy(input_comment), None);
+        assert_eq!(parse_amnezia_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_openziti_proxy() {
+        let ziti_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_openziti_proxy(ziti_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_openziti_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; openziti_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_openziti_proxy(input_comment), None);
+        assert_eq!(parse_openziti_proxy(""), None);
     }
 }
