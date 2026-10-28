@@ -30,6 +30,7 @@ use crate::doctor::{
     get_kresd_proxy, get_pdns_proxy,
     get_dnsdist_proxy, get_bind_proxy,
     get_nextdns_proxy, get_pdnsd_proxy,
+    get_maradns_proxy, get_i2pd_proxy,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bazel_proxy, unset_bun_proxy,
@@ -56,6 +57,7 @@ use crate::manager::{
     unset_kresd_proxy, unset_pdns_proxy,
     unset_dnsdist_proxy, unset_bind_proxy,
     unset_nextdns_proxy, unset_pdnsd_proxy,
+    unset_maradns_proxy, unset_i2pd_proxy,
 };
 use crate::scanner;
 
@@ -5032,7 +5034,7 @@ pub async fn run() -> Result<()> {
     if let Some((pdnsd_proxy, pdnsd_path)) = get_pdnsd_proxy() {
         if !verify_proxy_url(&pdnsd_proxy).await {
             println!(
-                "  [182/187] Found dead pdnsd proxy (`{}` in {}), cleaning with backup...",
+                "  [182/189] Found dead pdnsd proxy (`{}` in {}), cleaning with backup...",
                 pdnsd_proxy.yellow(),
                 pdnsd_path.display()
             );
@@ -5049,13 +5051,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [182/187] pdnsd proxy: {}", "Reachable".green());
+            println!("  [182/189] pdnsd proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [182/187] pdnsd proxy: {}", "Clean or not set".dimmed());
+        println!("  [182/189] pdnsd proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 183. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 183. Clean dead MaraDNS / Deadwood recursive DNS cache daemon in config / systemd
+    if let Some((maradns_proxy, maradns_path)) = get_maradns_proxy() {
+        if !verify_proxy_url(&maradns_proxy).await {
+            println!(
+                "  [183/189] Found dead MaraDNS / Deadwood proxy (`{}` in {}), cleaning with backup...",
+                maradns_proxy.yellow(),
+                maradns_path.display()
+            );
+            if maradns_path.exists() {
+                let backup = maradns_path.with_extension("bak");
+                let _ = std::fs::copy(&maradns_path, &backup);
+            }
+            if let Ok(true) = unset_maradns_proxy() {
+                println!(
+                    "  {} Cleared broken MaraDNS / Deadwood proxy in {} (backup saved)",
+                    "✔".green(),
+                    maradns_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [183/189] MaraDNS / Deadwood proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [183/189] MaraDNS / Deadwood proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 184. Clean dead i2pd anonymous network HTTP & SOCKS proxy daemon in config / systemd
+    if let Some((i2pd_proxy, i2pd_path)) = get_i2pd_proxy() {
+        if !verify_proxy_url(&i2pd_proxy).await {
+            println!(
+                "  [184/189] Found dead i2pd proxy (`{}` in {}), cleaning with backup...",
+                i2pd_proxy.yellow(),
+                i2pd_path.display()
+            );
+            if i2pd_path.exists() {
+                let backup = i2pd_path.with_extension("bak");
+                let _ = std::fs::copy(&i2pd_path, &backup);
+            }
+            if let Ok(true) = unset_i2pd_proxy() {
+                println!(
+                    "  {} Cleared broken i2pd proxy in {} (backup saved)",
+                    "✔".green(),
+                    i2pd_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [184/189] i2pd proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [184/189] i2pd proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 185. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -5069,7 +5125,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [183/187] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [185/189] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -5086,17 +5142,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [183/187] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [185/189] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [183/187] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [185/189] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [183/187] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [185/189] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 184. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 186. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -5110,7 +5166,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [184/187] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [186/189] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -5128,17 +5184,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [184/187] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [186/189] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [184/187] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [186/189] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [184/187] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [186/189] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 185. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 187. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -5152,7 +5208,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [185/187] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [187/189] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -5170,17 +5226,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [185/187] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [187/189] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [185/187] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [187/189] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [185/187] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [187/189] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 186. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 188. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -5199,7 +5255,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [186/187] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [188/189] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -5227,12 +5283,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [186/187] No active local proxy client found. Ensure your proxy software is open."
+            "  [188/189] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 187. Flush local DNS cache
-    println!("  [187/187] Flushing local DNS cache to fix resolution stalls...");
+    // 189. Flush local DNS cache
+    println!("  [189/189] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

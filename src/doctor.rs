@@ -33025,6 +33025,671 @@ pub fn get_pdnsd_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_maradns_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MARADNS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MARADNS_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DEADWOOD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DEADWOOD_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("maradns").join("mararc"),
+            home.join(".mararc"),
+            home.join(".config").join("deadwood").join("dwood3rc"),
+            home.join(".dwood3rc"),
+            home.join(".config").join("maradns.conf"),
+            home.join(".config").join("systemd").join("user").join("maradns.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("deadwood.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/mararc"),
+        PathBuf::from("/etc/maradns/mararc"),
+        PathBuf::from("/etc/dwood3rc"),
+        PathBuf::from("/etc/deadwood/dwood3rc"),
+        PathBuf::from("/usr/local/etc/mararc"),
+        PathBuf::from("/usr/local/etc/dwood3rc"),
+        PathBuf::from("/opt/homebrew/etc/mararc"),
+        PathBuf::from("/etc/default/maradns"),
+        PathBuf::from("/etc/default/deadwood"),
+        PathBuf::from("/etc/sysconfig/maradns"),
+        PathBuf::from("/etc/sysconfig/deadwood"),
+        PathBuf::from("/etc/systemd/system/maradns.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/deadwood.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_maradns_config_path() -> Option<PathBuf> {
+    let paths = get_maradns_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_maradns_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_maradns_write_path() -> PathBuf {
+    if let Some(p) = get_maradns_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MARADNS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("MARADNS_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("DEADWOOD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("maradns");
+        if dir.is_dir() {
+            return dir.join("mararc");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/maradns");
+    if etc_dir.is_dir() {
+        return etc_dir.join("mararc");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/maradns.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".mararc");
+    }
+    PathBuf::from("/etc/mararc")
+}
+
+pub fn parse_maradns_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "maradns_proxy",
+                "deadwood_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "maradns_proxy"
+                    || k_low == "maradns_http_proxy"
+                    || k_low == "deadwood_proxy"
+                    || k_low == "deadwood_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "maradns_proxy"
+                    || k_low == "maradns_http_proxy"
+                    || k_low == "deadwood_proxy"
+                    || k_low == "deadwood_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("proxy ") {
+            let val = trimmed["proxy ".len()..].trim().trim_start_matches('=').trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("maradns_proxy:")
+            || clean.starts_with("maradns_proxy=")
+            || clean.starts_with("deadwood_proxy:")
+            || clean.starts_with("deadwood_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("maradns_proxy=")
+                || clean.starts_with("deadwood_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_maradns_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_maradns_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_maradns_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MARADNS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MARADNS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MARADNS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MARADNS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEADWOOD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEADWOOD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEADWOOD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEADWOOD_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_i2pd_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("I2PD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("I2PD_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("I2P_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("i2pd").join("i2pd.conf"),
+            home.join(".i2pd").join("i2pd.conf"),
+            home.join(".config").join("i2p").join("i2pd.conf"),
+            home.join(".config").join("systemd").join("user").join("i2pd.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/i2pd/i2pd.conf"),
+        PathBuf::from("/etc/i2pd.conf"),
+        PathBuf::from("/usr/local/etc/i2pd/i2pd.conf"),
+        PathBuf::from("/opt/homebrew/etc/i2pd/i2pd.conf"),
+        PathBuf::from("/var/lib/i2pd/i2pd.conf"),
+        PathBuf::from("/etc/default/i2pd"),
+        PathBuf::from("/etc/sysconfig/i2pd"),
+        PathBuf::from("/etc/systemd/system/i2pd.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_i2pd_config_path() -> Option<PathBuf> {
+    let paths = get_i2pd_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_i2pd_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_i2pd_write_path() -> PathBuf {
+    if let Some(p) = get_i2pd_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("I2PD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("I2PD_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("i2pd");
+        if dir.is_dir() {
+            return dir.join("i2pd.conf");
+        }
+        let dot_dir = home.join(".i2pd");
+        if dot_dir.is_dir() {
+            return dot_dir.join("i2pd.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/i2pd");
+    if etc_dir.is_dir() {
+        return etc_dir.join("i2pd.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/i2pd.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("i2pd").join("i2pd.conf");
+    }
+    PathBuf::from("/etc/i2pd/i2pd.conf")
+}
+
+pub fn parse_i2pd_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "i2pd_proxy",
+                "outproxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "i2pd_proxy"
+                    || k_low == "i2pd_http_proxy"
+                    || k_low == "i2p_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "i2pd_proxy"
+                    || k_low == "i2pd_http_proxy"
+                    || k_low == "i2p_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("proxy ") || lower.starts_with("outproxy ") {
+            let prefix_len = if lower.starts_with("proxy ") { "proxy ".len() } else { "outproxy ".len() };
+            let val = trimmed[prefix_len..].trim().trim_start_matches('=').trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("outproxy:")
+            || clean.starts_with("outproxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:")
+            || clean.starts_with("http.proxy=")
+            || clean.starts_with("i2pd_proxy:")
+            || clean.starts_with("i2pd_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("http.proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("outproxy=")
+                || clean.starts_with("i2pd_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_i2pd_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_i2pd_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_i2pd_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("I2PD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:I2PD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("I2PD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:I2PD_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("I2P_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:I2P_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("I2P_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:I2P_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -39750,6 +40415,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "pdnsd Daemon Proxy",
             "~/.config/pdnsd/pdnsd.conf & /etc/pdnsd.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // MaraDNS / Deadwood Recursive DNS Cache Daemon (~/.mararc / /etc/mararc / ~/.dwood3rc / /etc/dwood3rc / /etc/systemd/system/maradns.service.d/http-proxy.conf)
+    if let Some((maradns_proxy, maradns_path)) = get_maradns_proxy() {
+        let ok = verify_proxy_url(&maradns_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "MaraDNS / Deadwood proxy `{}` in {} is dead! (MaraDNS DNS resolution will fail)",
+                maradns_proxy,
+                maradns_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "MaraDNS Daemon Proxy",
+            format!("{}", maradns_path.display()),
+            maradns_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (MaraDNS fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "MaraDNS Daemon Proxy",
+            "~/.mararc & /etc/mararc",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // i2pd Anonymous Network HTTP & SOCKS Proxy Daemon (~/.config/i2pd/i2pd.conf / /etc/i2pd/i2pd.conf / /etc/systemd/system/i2pd.service.d/http-proxy.conf)
+    if let Some((i2pd_proxy, i2pd_path)) = get_i2pd_proxy() {
+        let ok = verify_proxy_url(&i2pd_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "i2pd proxy `{}` in {} is dead! (i2pd proxy routing will fail)",
+                i2pd_proxy,
+                i2pd_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "i2pd Daemon Proxy",
+            format!("{}", i2pd_path.display()),
+            i2pd_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (i2pd fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "i2pd Daemon Proxy",
+            "~/.config/i2pd/i2pd.conf & /etc/i2pd/i2pd.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -47446,5 +48175,88 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "// http_proxy = http://127.0.0.1:7890\n# proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
         assert_eq!(parse_pdnsd_proxy(input_comment), None);
         assert_eq!(parse_pdnsd_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_maradns_proxy() {
+        let maradns_conf = r#"
+# MaraDNS / Deadwood configuration
+upstream_servers = {}
+http_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_maradns_proxy(maradns_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let maradns_colon = r#"
+proxy: socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_maradns_proxy(maradns_colon),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let maradns_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_maradns_proxy(maradns_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_maradns_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
+        assert_eq!(parse_maradns_proxy(input_comment), None);
+        assert_eq!(parse_maradns_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_i2pd_proxy() {
+        let i2pd_conf = r#"
+## i2pd configuration file
+outproxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_i2pd_proxy(i2pd_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let i2pd_colon = r#"
+proxy: socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_i2pd_proxy(i2pd_colon),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let i2pd_json = r#"{
+            "proxy": "http://127.0.0.1:7890"
+        }"#;
+        assert_eq!(
+            parse_i2pd_proxy(i2pd_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_i2pd_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# outproxy = http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
+        assert_eq!(parse_i2pd_proxy(input_comment), None);
+        assert_eq!(parse_i2pd_proxy(""), None);
     }
 }
