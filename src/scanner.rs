@@ -111,6 +111,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (655, false, "tinc Mesh VPN Daemon (Control & Peering)"),
     (1194, false, "OpenVPN Secure Tunneling Daemon (Management/Tunnel)"),
     (5555, false, "SoftEther Multi-Protocol VPN Daemon (Control/Tunnel)"),
+    (4443, false, "OpenConnect SSL VPN Client Daemon (Local Management / Tunnel)"),
+    (3228, false, "strongSwan IPsec IKEv2 Daemon (VICI Management Socket / Daemon)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

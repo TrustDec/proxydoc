@@ -35643,6 +35643,637 @@ pub fn get_softether_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_openconnect_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("OPENCONNECT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("OPENCONNECT_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("OPENCONNECT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("openconnect.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("openconnect").join("openconnect.conf"),
+            home.join(".openconnect").join("openconnect.conf"),
+            home.join(".openconnect").join("config"),
+            home.join(".config").join("systemd").join("user").join("openconnect.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/openconnect/openconnect.conf"),
+        PathBuf::from("/etc/openconnect/config"),
+        PathBuf::from("/usr/local/etc/openconnect/openconnect.conf"),
+        PathBuf::from("/opt/homebrew/etc/openconnect/openconnect.conf"),
+        PathBuf::from("/etc/default/openconnect"),
+        PathBuf::from("/etc/sysconfig/openconnect"),
+        PathBuf::from("/etc/systemd/system/openconnect.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/openconnect@.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_openconnect = PathBuf::from("/etc/openconnect");
+    if etc_openconnect.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_openconnect) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext == "conf" && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_openconnect_config_path() -> Option<PathBuf> {
+    let paths = get_openconnect_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_openconnect_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_openconnect_write_path() -> PathBuf {
+    if let Some(p) = get_openconnect_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("OPENCONNECT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("OPENCONNECT_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("openconnect");
+        if dir.is_dir() {
+            return dir.join("openconnect.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/openconnect");
+    if etc_dir.is_dir() {
+        return etc_dir.join("openconnect.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/openconnect.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("openconnect").join("openconnect.conf");
+    }
+    PathBuf::from("/etc/openconnect/openconnect.conf")
+}
+
+pub fn parse_openconnect_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "openconnect_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("proxy ") || lower.starts_with("--proxy ") {
+            let prefix = if lower.starts_with("--proxy ") { "--proxy " } else { "proxy " };
+            let val = trimmed[prefix.len()..].trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        if lower.starts_with("http-proxy ") || lower.starts_with("--http-proxy ") {
+            let prefix = if lower.starts_with("--http-proxy ") { "--http-proxy " } else { "http-proxy " };
+            let val = trimmed[prefix.len()..].trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        if lower.starts_with("socks-proxy ") || lower.starts_with("--socks-proxy ") {
+            let prefix = if lower.starts_with("--socks-proxy ") { "--socks-proxy " } else { "socks-proxy " };
+            let val = trimmed[prefix.len()..].trim().trim_matches('"').trim_matches('\'').trim();
+            if !val.is_empty() {
+                return Some(if val.starts_with("socks") {
+                    val.to_string()
+                } else {
+                    format!("socks5://{}", val)
+                });
+            }
+        }
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openconnect_proxy"
+                    || k_low == "openconnect_http_proxy"
+                    || k_low == "anyconnect_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openconnect_proxy"
+                    || k_low == "openconnect_http_proxy"
+                    || k_low == "anyconnect_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("openconnect_proxy=")
+            || clean.starts_with("openconnect_proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("proxy=")
+                || clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("openconnect_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_openconnect_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_openconnect_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_openconnect_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("OPENCONNECT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OPENCONNECT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("OPENCONNECT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OPENCONNECT_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ANYCONNECT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ANYCONNECT_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_strongswan_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("STRONGSWAN_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("STRONGSWAN_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("IPSEC_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("strongswan").join("strongswan.conf"),
+            home.join(".strongswan").join("strongswan.conf"),
+            home.join(".config").join("systemd").join("user").join("strongswan.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/strongswan.conf"),
+        PathBuf::from("/etc/strongswan/strongswan.conf"),
+        PathBuf::from("/usr/local/etc/strongswan.conf"),
+        PathBuf::from("/opt/homebrew/etc/strongswan.conf"),
+        PathBuf::from("/etc/strongswan.d/charon/curl.conf"),
+        PathBuf::from("/etc/ipsec.conf"),
+        PathBuf::from("/etc/default/strongswan"),
+        PathBuf::from("/etc/sysconfig/strongswan"),
+        PathBuf::from("/etc/systemd/system/strongswan.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/strongswan-starter.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/ipsec.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_strongswan_config_path() -> Option<PathBuf> {
+    let paths = get_strongswan_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_strongswan_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_strongswan_write_path() -> PathBuf {
+    if let Some(p) = get_strongswan_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("STRONGSWAN_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("STRONGSWAN_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("strongswan");
+        if dir.is_dir() {
+            return dir.join("strongswan.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/strongswan");
+    if etc_dir.is_dir() {
+        return etc_dir.join("strongswan.conf");
+    }
+    let etc_file = PathBuf::from("/etc/strongswan.conf");
+    if etc_file.exists() {
+        return etc_file;
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/strongswan.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("strongswan").join("strongswan.conf");
+    }
+    PathBuf::from("/etc/strongswan.conf")
+}
+
+pub fn parse_strongswan_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "strongswan_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "strongswan_proxy"
+                    || k_low == "strongswan_http_proxy"
+                    || k_low == "ipsec_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "strongswan_proxy"
+                    || k_low == "strongswan_http_proxy"
+                    || k_low == "ipsec_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.contains(".http_proxy=")
+            || clean.contains(".http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("strongswan_proxy=")
+            || clean.starts_with("strongswan_proxy:")
+            || clean.starts_with("ipsec_proxy=")
+            || clean.starts_with("proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_strongswan_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_strongswan_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_strongswan_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("STRONGSWAN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:STRONGSWAN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("STRONGSWAN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:STRONGSWAN_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("IPSEC_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:IPSEC_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -42624,6 +43255,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "SoftEther Daemon Proxy",
             "/usr/local/vpnclient/vpn_client.config & /etc/softether/vpnclient.config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // OpenConnect SSL VPN Client Daemon (~/.config/openconnect/openconnect.conf / /etc/openconnect/openconnect.conf / /etc/systemd/system/openconnect.service.d/http-proxy.conf)
+    if let Some((openconnect_proxy, openconnect_path)) = get_openconnect_proxy() {
+        let ok = verify_proxy_url(&openconnect_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "OpenConnect proxy `{}` in {} is dead! (OpenConnect VPN client connections will fail)",
+                openconnect_proxy,
+                openconnect_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "OpenConnect Daemon Proxy",
+            format!("{}", openconnect_path.display()),
+            openconnect_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (OpenConnect fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "OpenConnect Daemon Proxy",
+            "~/.config/openconnect/openconnect.conf & /etc/openconnect/openconnect.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // strongSwan IPsec IKEv2 Daemon (~/.config/strongswan/strongswan.conf / /etc/strongswan.conf / /etc/systemd/system/strongswan.service.d/http-proxy.conf)
+    if let Some((strongswan_proxy, strongswan_path)) = get_strongswan_proxy() {
+        let ok = verify_proxy_url(&strongswan_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "strongSwan proxy `{}` in {} is dead! (strongSwan IKEv2 IPsec connections will fail)",
+                strongswan_proxy,
+                strongswan_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "strongSwan Daemon Proxy",
+            format!("{}", strongswan_path.display()),
+            strongswan_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (strongSwan fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "strongSwan Daemon Proxy",
+            "~/.config/strongswan/strongswan.conf & /etc/strongswan.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -50632,5 +51327,67 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# Proxy = http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_softether_proxy(input_comment), None);
         assert_eq!(parse_softether_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_openconnect_proxy() {
+        let oc_proxy = r#"
+proxy http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_openconnect_proxy(oc_proxy),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let oc_socks = r#"
+socks-proxy socks5://127.0.0.1:1080
+"#;
+        assert_eq!(
+            parse_openconnect_proxy(oc_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_openconnect_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy http://127.0.0.1:7890\n; socks-proxy socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_openconnect_proxy(input_comment), None);
+        assert_eq!(parse_openconnect_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_strongswan_proxy() {
+        let ss_conf = r#"
+charon {
+    plugins {
+        curl {
+            http_proxy = http://127.0.0.1:7890
+        }
+    }
+}
+"#;
+        assert_eq!(
+            parse_strongswan_proxy(ss_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_strongswan_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = http://127.0.0.1:7890\n; strongswan_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_strongswan_proxy(input_comment), None);
+        assert_eq!(parse_strongswan_proxy(""), None);
     }
 }

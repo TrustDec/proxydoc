@@ -1710,6 +1710,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "FinRobot AI CDN",
         "https://github.com/AI4Finance-Foundation/FinRobot",
     ),
+    (
+        "OpenConnect Proxy CDN",
+        "https://www.infradead.org/openconnect/",
+    ),
+    (
+        "strongSwan VPN CDN",
+        "https://www.strongswan.org",
+    ),
+    (
+        "MinerU AI CDN",
+        "https://github.com/opendatalab/MinerU",
+    ),
+    (
+        "Pydantic-AI CDN",
+        "https://github.com/pydantic/pydantic-ai",
+    ),
+    (
+        "KTransformers AI CDN",
+        "https://github.com/kvcache-ai/ktransformers",
+    ),
+    (
+        "FlashAttention AI CDN",
+        "https://github.com/Dao-AILab/flash-attention",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3302,6 +3326,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "FinRobot AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenConnect Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "strongSwan VPN CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MinerU AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pydantic-AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "KTransformers AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FlashAttention AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

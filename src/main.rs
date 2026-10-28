@@ -629,7 +629,13 @@ enum Commands {
         /// Also configure SoftEther multi-protocol VPN daemon (/usr/local/vpnclient/vpn_client.config / /etc/softether/vpnclient.config / ~/.config/softether/vpnclient.config / /etc/systemd/system/vpnclient.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "softether-daemon", visible_alias = "softether-proxy", visible_alias = "vpnclient", visible_alias = "vpnclient-daemon")]
         softether: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, and softether proxy
+        /// Also configure OpenConnect SSL VPN client daemon (/etc/openconnect/openconnect.conf / ~/.config/openconnect/openconnect.conf / /etc/systemd/system/openconnect.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "openconnect-daemon", visible_alias = "openconnect-proxy", visible_alias = "anyconnect", visible_alias = "anyconnect-proxy")]
+        openconnect: bool,
+        /// Also configure strongSwan IPsec IKEv2 daemon (/etc/strongswan.conf / ~/.config/strongswan/strongswan.conf / /etc/ipsec.conf / /etc/systemd/system/strongswan.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "strongswan-daemon", visible_alias = "strongswan-proxy", visible_alias = "ipsec", visible_alias = "ipsec-daemon", visible_alias = "charon")]
+        strongswan: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, and strongswan proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1202,7 +1208,13 @@ enum Commands {
         /// Also unset SoftEther multi-protocol VPN daemon (/usr/local/vpnclient/vpn_client.config / /etc/softether/vpnclient.config / ~/.config/softether/vpnclient.config / /etc/systemd/system/vpnclient.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "softether-daemon", visible_alias = "softether-proxy", visible_alias = "vpnclient", visible_alias = "vpnclient-daemon")]
         softether: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, and softether proxy
+        /// Also unset OpenConnect SSL VPN client daemon (/etc/openconnect/openconnect.conf / ~/.config/openconnect/openconnect.conf / /etc/systemd/system/openconnect.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "openconnect-daemon", visible_alias = "openconnect-proxy", visible_alias = "anyconnect", visible_alias = "anyconnect-proxy")]
+        openconnect: bool,
+        /// Also unset strongSwan IPsec IKEv2 daemon (/etc/strongswan.conf / ~/.config/strongswan/strongswan.conf / /etc/ipsec.conf / /etc/systemd/system/strongswan.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "strongswan-daemon", visible_alias = "strongswan-proxy", visible_alias = "ipsec", visible_alias = "ipsec-daemon", visible_alias = "charon")]
+        strongswan: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, and strongswan proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1434,6 +1446,8 @@ async fn main() -> Result<()> {
             tinc,
             openvpn,
             softether,
+            openconnect,
+            strongswan,
             all,
             shell,
         }) => {
@@ -1627,6 +1641,8 @@ async fn main() -> Result<()> {
                 tinc,
                 openvpn,
                 softether,
+                openconnect,
+                strongswan,
                 all,
                 shell.as_deref(),
             )
@@ -1821,6 +1837,8 @@ async fn main() -> Result<()> {
             tinc,
             openvpn,
             softether,
+            openconnect,
+            strongswan,
             all,
             shell,
         }) => {
@@ -2013,6 +2031,8 @@ async fn main() -> Result<()> {
                 tinc,
                 openvpn,
                 softether,
+                openconnect,
+                strongswan,
                 all,
                 shell.as_deref(),
             )?;
@@ -7611,6 +7631,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { softether, .. }) => {
                 assert!(softether);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_openconnect() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--openconnect"]).unwrap();
+        match cli.command {
+            Some(Commands::On { openconnect, .. }) => {
+                assert!(openconnect);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--anyconnect"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { openconnect, .. }) => {
+                assert!(openconnect);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--openconnect-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { openconnect, .. }) => {
+                assert!(openconnect);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_openconnect() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--openconnect"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { openconnect, .. }) => {
+                assert!(openconnect);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_strongswan() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--strongswan"]).unwrap();
+        match cli.command {
+            Some(Commands::On { strongswan, .. }) => {
+                assert!(strongswan);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--ipsec"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { strongswan, .. }) => {
+                assert!(strongswan);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--charon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { strongswan, .. }) => {
+                assert!(strongswan);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_strongswan() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--strongswan"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { strongswan, .. }) => {
+                assert!(strongswan);
             }
             _ => panic!("Expected Off command"),
         }
