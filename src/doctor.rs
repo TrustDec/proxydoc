@@ -36274,6 +36274,633 @@ pub fn get_strongswan_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_wireguard_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("WIREGUARD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("WIREGUARD_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("WG_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("WG_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("WIREGUARD_DIR") {
+        let p = PathBuf::from(dir.trim()).join("wg0.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("wireguard").join("wg0.conf"),
+            home.join(".config").join("wireguard").join("wireguard.conf"),
+            home.join(".wireguard").join("wg0.conf"),
+            home.join(".wireguard").join("wireguard.conf"),
+            home.join(".config").join("systemd").join("user").join("wg-quick@.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("wireguard.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/wireguard/wg0.conf"),
+        PathBuf::from("/etc/wireguard/wireguard.conf"),
+        PathBuf::from("/usr/local/etc/wireguard/wg0.conf"),
+        PathBuf::from("/opt/homebrew/etc/wireguard/wg0.conf"),
+        PathBuf::from("/etc/default/wireguard"),
+        PathBuf::from("/etc/sysconfig/wireguard"),
+        PathBuf::from("/etc/systemd/system/wg-quick@.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/wg-quick@wg0.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/wireguard.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_wg = PathBuf::from("/etc/wireguard");
+    if etc_wg.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_wg) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext == "conf" && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_wireguard_config_path() -> Option<PathBuf> {
+    let paths = get_wireguard_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_wireguard_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_wireguard_write_path() -> PathBuf {
+    if let Some(p) = get_wireguard_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("WIREGUARD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("WG_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("wireguard");
+        if dir.is_dir() {
+            return dir.join("wg0.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/wireguard");
+    if etc_dir.is_dir() {
+        return etc_dir.join("wg0.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/wg-quick@.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("wireguard").join("wg0.conf");
+    }
+    PathBuf::from("/etc/wireguard/wg0.conf")
+}
+
+pub fn parse_wireguard_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "wireguard_proxy",
+                "wg_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "wireguard_proxy"
+                    || k_low == "wg_proxy"
+                    || k_low == "wireguard_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("postup") || lower.starts_with("predown") {
+            if let Some((_, hook)) = trimmed.split_once('=') {
+                for part in hook.split(';') {
+                    let p_trim = part.trim();
+                    let p_low = p_trim.to_ascii_lowercase();
+                    let clean = p_low.strip_prefix("export ").unwrap_or(&p_low).trim();
+                    if clean.starts_with("http_proxy=")
+                        || clean.starts_with("https_proxy=")
+                        || clean.starts_with("all_proxy=")
+                        || clean.starts_with("wireguard_proxy=")
+                        || clean.starts_with("wg_proxy=")
+                    {
+                        if let Some((_, raw_val)) = p_trim.split_once('=') {
+                            let val = raw_val.trim().trim_matches('"').trim_matches('\'');
+                            if !val.is_empty() {
+                                return Some(if val.starts_with("http://")
+                                    || val.starts_with("https://")
+                                    || val.starts_with("socks")
+                                {
+                                    val.to_string()
+                                } else {
+                                    format!("http://{}", val)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "wireguard_proxy"
+                    || k_low == "wg_proxy"
+                    || k_low == "wireguard_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("wireguard_proxy=")
+            || clean.starts_with("wireguard_proxy:")
+            || clean.starts_with("wg_proxy=")
+            || clean.starts_with("wg_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_wireguard_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_wireguard_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_wireguard_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("WIREGUARD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WIREGUARD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("WIREGUARD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WIREGUARD_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("WG_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WG_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_headscale_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("HEADSCALE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("HEADSCALE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("HEADSCALE_DIR") {
+        let p1 = PathBuf::from(dir.trim()).join("config.yaml");
+        if p1.exists() && !paths.contains(&p1) {
+            paths.push(p1);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.yml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("headscale").join("config.yaml"),
+            home.join(".config").join("headscale").join("config.yml"),
+            home.join(".headscale").join("config.yaml"),
+            home.join(".headscale").join("config.yml"),
+            home.join(".config").join("systemd").join("user").join("headscale.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/headscale/config.yaml"),
+        PathBuf::from("/etc/headscale/config.yml"),
+        PathBuf::from("/usr/local/etc/headscale/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/headscale/config.yaml"),
+        PathBuf::from("/etc/default/headscale"),
+        PathBuf::from("/etc/sysconfig/headscale"),
+        PathBuf::from("/etc/systemd/system/headscale.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_hs = PathBuf::from("/etc/headscale");
+    if etc_hs.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_hs) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yaml" || ext == "yml") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_headscale_config_path() -> Option<PathBuf> {
+    let paths = get_headscale_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_headscale_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_headscale_write_path() -> PathBuf {
+    if let Some(p) = get_headscale_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("HEADSCALE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("HEADSCALE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("headscale");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/headscale");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/headscale.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("headscale").join("config.yaml");
+    }
+    PathBuf::from("/etc/headscale/config.yaml")
+}
+
+pub fn parse_headscale_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "headscale_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "headscale_proxy"
+                    || k_low == "headscale_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "headscale_proxy"
+                    || k_low == "headscale_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("headscale_proxy=")
+            || clean.starts_with("headscale_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_headscale_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_headscale_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_headscale_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("HEADSCALE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HEADSCALE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HEADSCALE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HEADSCALE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -43319,6 +43946,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "strongSwan Daemon Proxy",
             "~/.config/strongswan/strongswan.conf & /etc/strongswan.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // WireGuard Secure VPN Tunnel Daemon (~/.config/wireguard/wg0.conf / /etc/wireguard/wg0.conf / /etc/systemd/system/wg-quick@.service.d/http-proxy.conf)
+    if let Some((wireguard_proxy, wireguard_path)) = get_wireguard_proxy() {
+        let ok = verify_proxy_url(&wireguard_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "WireGuard proxy `{}` in {} is dead! (WireGuard tunnel connections will fail)",
+                wireguard_proxy,
+                wireguard_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "WireGuard Daemon Proxy",
+            format!("{}", wireguard_path.display()),
+            wireguard_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (WireGuard fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "WireGuard Daemon Proxy",
+            "~/.config/wireguard/wg0.conf & /etc/wireguard/wg0.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Headscale Tailscale Control Server & Relay Daemon (~/.config/headscale/config.yaml / /etc/headscale/config.yaml / /etc/systemd/system/headscale.service.d/http-proxy.conf)
+    if let Some((headscale_proxy, headscale_path)) = get_headscale_proxy() {
+        let ok = verify_proxy_url(&headscale_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Headscale proxy `{}` in {} is dead! (Headscale control server & DERP connections will fail)",
+                headscale_proxy,
+                headscale_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Headscale Daemon Proxy",
+            format!("{}", headscale_path.display()),
+            headscale_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Headscale fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Headscale Daemon Proxy",
+            "~/.config/headscale/config.yaml & /etc/headscale/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -51389,5 +52080,63 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http_proxy = http://127.0.0.1:7890\n; strongswan_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_strongswan_proxy(input_comment), None);
         assert_eq!(parse_strongswan_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_wireguard_proxy() {
+        let wg_conf = r#"
+[Interface]
+PrivateKey = aaaaaa=
+Address = 10.0.0.2/24
+PostUp = export HTTP_PROXY=http://127.0.0.1:7890; export HTTPS_PROXY=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_wireguard_proxy(wg_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_wireguard_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let wg_direct = "wireguard_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(
+            parse_wireguard_proxy(wg_direct),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let input_comment = "# wireguard_proxy = http://127.0.0.1:7890\n; HTTP_PROXY=socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_wireguard_proxy(input_comment), None);
+        assert_eq!(parse_wireguard_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_headscale_proxy() {
+        let hs_yaml = r#"
+server_url: http://127.0.0.1:8080
+http_proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_headscale_proxy(hs_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_headscale_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy: http://127.0.0.1:7890\n; headscale_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_headscale_proxy(input_comment), None);
+        assert_eq!(parse_headscale_proxy(""), None);
     }
 }

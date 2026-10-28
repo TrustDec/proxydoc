@@ -1734,6 +1734,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "FlashAttention AI CDN",
         "https://github.com/Dao-AILab/flash-attention",
     ),
+    (
+        "WireGuard VPN CDN",
+        "https://www.wireguard.com",
+    ),
+    (
+        "Headscale Mesh CDN",
+        "https://headscale.net",
+    ),
+    (
+        "Cherry Studio AI CDN",
+        "https://github.com/Kangfenfei/cherry-studio",
+    ),
+    (
+        "Kotaemon RAG AI CDN",
+        "https://github.com/Cinnamon/kotaemon",
+    ),
+    (
+        "Marker PDF AI CDN",
+        "https://github.com/VikParuchuri/marker",
+    ),
+    (
+        "PDFMathTranslate AI CDN",
+        "https://github.com/Byaidu/PDFMathTranslate",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3344,6 +3368,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "FlashAttention AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "WireGuard VPN CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Headscale Mesh CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Cherry Studio AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Kotaemon RAG AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Marker PDF AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "PDFMathTranslate AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
