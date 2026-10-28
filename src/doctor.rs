@@ -34364,6 +34364,627 @@ pub fn get_yggdrasil_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_cjdns_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CJDNS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("CJDROUTE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("CJDNS_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("cjdns").join("cjdroute.conf"),
+            home.join(".cjdroute.conf"),
+            home.join(".config").join("cjdroute.conf"),
+            home.join(".config").join("systemd").join("user").join("cjdns.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("cjdroute.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/cjdroute.conf"),
+        PathBuf::from("/etc/cjdns/cjdroute.conf"),
+        PathBuf::from("/etc/cjdns.conf"),
+        PathBuf::from("/usr/local/etc/cjdroute.conf"),
+        PathBuf::from("/opt/homebrew/etc/cjdroute.conf"),
+        PathBuf::from("/etc/default/cjdns"),
+        PathBuf::from("/etc/sysconfig/cjdns"),
+        PathBuf::from("/etc/systemd/system/cjdns.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/cjdroute.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_cjdns_config_path() -> Option<PathBuf> {
+    let paths = get_cjdns_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_cjdns_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_cjdns_write_path() -> PathBuf {
+    if let Some(p) = get_cjdns_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CJDNS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("CJDROUTE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("cjdns");
+        if dir.is_dir() {
+            return dir.join("cjdroute.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/cjdns");
+    if etc_dir.is_dir() {
+        return etc_dir.join("cjdroute.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/cjdns.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("cjdns").join("cjdroute.conf");
+    }
+    PathBuf::from("/etc/cjdroute.conf")
+}
+
+pub fn parse_cjdns_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "cjdns_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cjdns_proxy"
+                    || k_low == "cjdns_http_proxy"
+                    || k_low == "cjdroute_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cjdns_proxy"
+                    || k_low == "cjdns_http_proxy"
+                    || k_low == "cjdroute_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("httpproxy:")
+            || clean.starts_with("httpproxy=")
+            || clean.starts_with("socksproxy:")
+            || clean.starts_with("socksproxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:")
+            || clean.starts_with("http.proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("cjdns_proxy:")
+            || clean.starts_with("cjdns_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("http.proxy=")
+                || clean.starts_with("httpproxy=")
+                || clean.starts_with("socksproxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("cjdns_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_cjdns_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_cjdns_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_cjdns_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CJDNS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CJDNS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CJDNS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CJDNS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CJDROUTE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CJDROUTE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CJDROUTE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CJDROUTE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_tinc_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TINC_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TINC_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TINC_DIR") {
+        let p = PathBuf::from(dir.trim()).join("tinc.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("tinc").join("tinc.conf"),
+            home.join(".tinc").join("tinc.conf"),
+            home.join(".config").join("systemd").join("user").join("tinc.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("tinc@.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tinc/tinc.conf"),
+        PathBuf::from("/usr/local/etc/tinc/tinc.conf"),
+        PathBuf::from("/opt/homebrew/etc/tinc/tinc.conf"),
+        PathBuf::from("/etc/default/tinc"),
+        PathBuf::from("/etc/sysconfig/tinc"),
+        PathBuf::from("/etc/systemd/system/tinc.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/tinc@.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_tinc = PathBuf::from("/etc/tinc");
+    if etc_tinc.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_tinc) {
+            for entry in entries.flatten() {
+                let sub_conf = entry.path().join("tinc.conf");
+                if sub_conf.exists() && !paths.contains(&sub_conf) {
+                    paths.push(sub_conf);
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_tinc_config_path() -> Option<PathBuf> {
+    let paths = get_tinc_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tinc_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tinc_write_path() -> PathBuf {
+    if let Some(p) = get_tinc_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TINC_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TINC_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("tinc");
+        if dir.is_dir() {
+            return dir.join("tinc.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/tinc");
+    if etc_dir.is_dir() {
+        return etc_dir.join("tinc.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tinc.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("tinc").join("tinc.conf");
+    }
+    PathBuf::from("/etc/tinc/tinc.conf")
+}
+
+pub fn parse_tinc_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "Proxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "tinc_proxy",
+                "socks5",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tinc_proxy"
+                    || k_low == "tinc_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tinc_proxy"
+                    || k_low == "tinc_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("proxy ") || lower.starts_with("proxy=") {
+            let val_str = if lower.starts_with("proxy=") {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim()
+            } else {
+                trimmed["proxy ".len()..].trim().trim_start_matches('=').trim()
+            };
+            let val_str = val_str.trim_matches('"').trim_matches('\'').trim();
+            if !val_str.is_empty() {
+                let parts: Vec<&str> = val_str.split_whitespace().collect();
+                if parts.len() >= 3 && (parts[0].eq_ignore_ascii_case("socks5") || parts[0].eq_ignore_ascii_case("socks4") || parts[0].eq_ignore_ascii_case("http")) {
+                    return Some(format!("{}://{}:{}", parts[0].to_ascii_lowercase(), parts[1], parts[2]));
+                } else if parts.len() == 2 && (parts[0].eq_ignore_ascii_case("socks5") || parts[0].eq_ignore_ascii_case("socks4") || parts[0].eq_ignore_ascii_case("http")) {
+                    return Some(format!("{}://{}", parts[0].to_ascii_lowercase(), parts[1]));
+                } else if val_str.starts_with("http://") || val_str.starts_with("https://") || val_str.starts_with("socks") {
+                    return Some(val_str.to_string());
+                } else {
+                    return Some(format!("http://{}", val_str));
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:")
+            || clean.starts_with("http.proxy=")
+            || clean.starts_with("tinc_proxy:")
+            || clean.starts_with("tinc_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("http.proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("tinc_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                let parts: Vec<&str> = val_part.split_whitespace().collect();
+                if parts.len() >= 3 && (parts[0].eq_ignore_ascii_case("socks5") || parts[0].eq_ignore_ascii_case("socks4") || parts[0].eq_ignore_ascii_case("http")) {
+                    return Some(format!("{}://{}:{}", parts[0].to_ascii_lowercase(), parts[1], parts[2]));
+                } else if parts.len() == 2 && (parts[0].eq_ignore_ascii_case("socks5") || parts[0].eq_ignore_ascii_case("socks4") || parts[0].eq_ignore_ascii_case("http")) {
+                    return Some(format!("{}://{}", parts[0].to_ascii_lowercase(), parts[1]));
+                } else if val_part.starts_with("http://") || val_part.starts_with("https://") || val_part.starts_with("socks") {
+                    return Some(val_part.to_string());
+                } else {
+                    return Some(format!("http://{}", val_part));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_tinc_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tinc_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tinc_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TINC_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TINC_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TINC_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TINC_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -41217,6 +41838,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Yggdrasil Daemon Proxy",
             "~/.config/yggdrasil/yggdrasil.conf & /etc/yggdrasil.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // cjdns Encrypted Mesh Routing Daemon (~/.config/cjdns/cjdroute.conf / /etc/cjdroute.conf / /etc/systemd/system/cjdns.service.d/http-proxy.conf)
+    if let Some((cjdns_proxy, cjdns_path)) = get_cjdns_proxy() {
+        let ok = verify_proxy_url(&cjdns_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "cjdns proxy `{}` in {} is dead! (cjdroute mesh routing will fail)",
+                cjdns_proxy,
+                cjdns_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "cjdns Daemon Proxy",
+            format!("{}", cjdns_path.display()),
+            cjdns_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (cjdns fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "cjdns Daemon Proxy",
+            "~/.config/cjdns/cjdroute.conf & /etc/cjdroute.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // tinc Mesh VPN Daemon (~/.config/tinc/tinc.conf / /etc/tinc/tinc.conf / /etc/systemd/system/tinc.service.d/http-proxy.conf)
+    if let Some((tinc_proxy, tinc_path)) = get_tinc_proxy() {
+        let ok = verify_proxy_url(&tinc_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "tinc proxy `{}` in {} is dead! (tinc VPN tunnel connections will fail)",
+                tinc_proxy,
+                tinc_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "tinc Daemon Proxy",
+            format!("{}", tinc_path.display()),
+            tinc_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tinc fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "tinc Daemon Proxy",
+            "~/.config/tinc/tinc.conf & /etc/tinc/tinc.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -49077,5 +49762,74 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# Proxy: socks5://127.0.0.1:1080\n; proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
         assert_eq!(parse_yggdrasil_proxy(input_comment), None);
         assert_eq!(parse_yggdrasil_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_cjdns_proxy() {
+        let cjdns_conf = r#"
+{
+  "httpProxy": "socks5://127.0.0.1:1080",
+  "security": []
+}
+"#;
+        assert_eq!(
+            parse_cjdns_proxy(cjdns_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let cjdns_colon = r#"
+httpProxy: http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_cjdns_proxy(cjdns_colon),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_cjdns_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# httpProxy: socks5://127.0.0.1:1080\n; proxy = socks5://127.0.0.1:1080\n/* http_proxy: http://127.0.0.1:7890 */\n";
+        assert_eq!(parse_cjdns_proxy(input_comment), None);
+        assert_eq!(parse_cjdns_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tinc_proxy() {
+        let tinc_conf = r#"
+Name = mynode
+Mode = switch
+Proxy = socks5 127.0.0.1 1080
+"#;
+        assert_eq!(
+            parse_tinc_proxy(tinc_conf),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let tinc_http = r#"
+Proxy = http 127.0.0.1 8080
+"#;
+        assert_eq!(
+            parse_tinc_proxy(tinc_http),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tinc_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# Proxy = socks5 127.0.0.1 1080\n; Proxy = http 127.0.0.1 8080\n/* http_proxy = http://127.0.0.1:7890 */\n";
+        assert_eq!(parse_tinc_proxy(input_comment), None);
+        assert_eq!(parse_tinc_proxy(""), None);
     }
 }

@@ -617,7 +617,13 @@ enum Commands {
         /// Also configure Yggdrasil end-to-end encrypted IPv6 mesh routing daemon (~/.config/yggdrasil/yggdrasil.conf / /etc/yggdrasil.conf / /etc/systemd/system/yggdrasil.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "yggdrasil-daemon", visible_alias = "yggdrasil-proxy", visible_alias = "ygg", visible_alias = "ygg-daemon", visible_alias = "ygg-proxy")]
         yggdrasil: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, and yggdrasil proxy
+        /// Also configure cjdns encrypted IPv6 mesh routing daemon (~/.config/cjdns/cjdroute.conf / /etc/cjdroute.conf / /etc/systemd/system/cjdns.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cjdns-daemon", visible_alias = "cjdns-proxy", visible_alias = "cjdroute", visible_alias = "cjdroute-daemon")]
+        cjdns: bool,
+        /// Also configure tinc mesh VPN daemon (~/.config/tinc/tinc.conf / /etc/tinc/tinc.conf / /etc/systemd/system/tinc.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tinc-daemon", visible_alias = "tinc-proxy", visible_alias = "tinc-vpn")]
+        tinc: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, and tinc proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1178,7 +1184,13 @@ enum Commands {
         /// Also unset Yggdrasil end-to-end encrypted IPv6 mesh routing daemon (~/.config/yggdrasil/yggdrasil.conf / /etc/yggdrasil.conf / /etc/systemd/system/yggdrasil.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "yggdrasil-daemon", visible_alias = "yggdrasil-proxy", visible_alias = "ygg", visible_alias = "ygg-daemon", visible_alias = "ygg-proxy")]
         yggdrasil: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, and yggdrasil proxy
+        /// Also unset cjdns encrypted IPv6 mesh routing daemon (~/.config/cjdns/cjdroute.conf / /etc/cjdroute.conf / /etc/systemd/system/cjdns.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cjdns-daemon", visible_alias = "cjdns-proxy", visible_alias = "cjdroute", visible_alias = "cjdroute-daemon")]
+        cjdns: bool,
+        /// Also unset tinc mesh VPN daemon (~/.config/tinc/tinc.conf / /etc/tinc/tinc.conf / /etc/systemd/system/tinc.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "tinc-daemon", visible_alias = "tinc-proxy", visible_alias = "tinc-vpn")]
+        tinc: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, and tinc proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1406,6 +1418,8 @@ async fn main() -> Result<()> {
             i2pd,
             dae,
             yggdrasil,
+            cjdns,
+            tinc,
             all,
             shell,
         }) => {
@@ -1595,6 +1609,8 @@ async fn main() -> Result<()> {
                 i2pd,
                 dae,
                 yggdrasil,
+                cjdns,
+                tinc,
                 all,
                 shell.as_deref(),
             )
@@ -1785,6 +1801,8 @@ async fn main() -> Result<()> {
             i2pd,
             dae,
             yggdrasil,
+            cjdns,
+            tinc,
             all,
             shell,
         }) => {
@@ -1973,6 +1991,8 @@ async fn main() -> Result<()> {
                 i2pd,
                 dae,
                 yggdrasil,
+                cjdns,
+                tinc,
                 all,
                 shell.as_deref(),
             )?;
@@ -7419,6 +7439,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { yggdrasil, .. }) => {
                 assert!(yggdrasil);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_cjdns() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--cjdns"]).unwrap();
+        match cli.command {
+            Some(Commands::On { cjdns, .. }) => {
+                assert!(cjdns);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--cjdroute"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { cjdns, .. }) => {
+                assert!(cjdns);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--cjdns-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { cjdns, .. }) => {
+                assert!(cjdns);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_cjdns() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--cjdns"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { cjdns, .. }) => {
+                assert!(cjdns);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_tinc() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--tinc"]).unwrap();
+        match cli.command {
+            Some(Commands::On { tinc, .. }) => {
+                assert!(tinc);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--tinc-vpn"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { tinc, .. }) => {
+                assert!(tinc);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--tinc-daemon"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { tinc, .. }) => {
+                assert!(tinc);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_tinc() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--tinc"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { tinc, .. }) => {
+                assert!(tinc);
             }
             _ => panic!("Expected Off command"),
         }
