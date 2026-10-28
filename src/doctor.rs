@@ -38557,6 +38557,568 @@ pub fn get_netmaker_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_pritunl_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PRITUNL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PRITUNL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PRITUNL_DIR") {
+        let p = PathBuf::from(dir.trim()).join("pritunl.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("pritunl").join("pritunl.conf"),
+            home.join(".config").join("pritunl").join("pritunl.json"),
+            home.join(".pritunl").join("pritunl.conf"),
+            home.join("Library").join("Application Support").join("pritunl").join("pritunl.conf"),
+            home.join(".config").join("systemd").join("user").join("pritunl-client.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/pritunl/pritunl.conf"),
+        PathBuf::from("/etc/pritunl/pritunl.json"),
+        PathBuf::from("/var/lib/pritunl/pritunl.conf"),
+        PathBuf::from("/usr/local/etc/pritunl/pritunl.conf"),
+        PathBuf::from("/opt/homebrew/etc/pritunl/pritunl.conf"),
+        PathBuf::from("/etc/default/pritunl-client"),
+        PathBuf::from("/etc/sysconfig/pritunl-client"),
+        PathBuf::from("/etc/systemd/system/pritunl-client.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/pritunl.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_pr = PathBuf::from("/etc/pritunl");
+    if etc_pr.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_pr) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_pritunl_config_path() -> Option<PathBuf> {
+    let paths = get_pritunl_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_pritunl_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_pritunl_write_path() -> PathBuf {
+    if let Some(p) = get_pritunl_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PRITUNL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("pritunl");
+        if dir.is_dir() {
+            return dir.join("pritunl.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/pritunl");
+    if etc_dir.is_dir() {
+        return etc_dir.join("pritunl.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/pritunl-client.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("pritunl").join("pritunl.conf");
+    }
+    PathBuf::from("/etc/pritunl/pritunl.conf")
+}
+
+pub fn parse_pritunl_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "pritunl_proxy",
+                "pritunl_client_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pritunl_proxy"
+                    || k_low == "pritunl_client_proxy"
+                    || k_low == "pritunl_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pritunl_proxy"
+                    || k_low == "pritunl_client_proxy"
+                    || k_low == "pritunl_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("pritunl_proxy=")
+            || clean.starts_with("pritunl_proxy:")
+            || clean.starts_with("pritunl_client_proxy=")
+            || clean.starts_with("pritunl_client_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_pritunl_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pritunl_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pritunl_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PRITUNL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PRITUNL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PRITUNL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PRITUNL_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_twingate_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TWINGATE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TWINGATE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TWINGATE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("connector.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("twingate").join("client.conf"),
+            home.join(".config").join("twingate").join("connector.conf"),
+            home.join(".twingate").join("client.conf"),
+            home.join(".config").join("systemd").join("user").join("twingate-connector.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/twingate/connector.conf"),
+        PathBuf::from("/etc/twingate/client.conf"),
+        PathBuf::from("/etc/twingate/connector.json"),
+        PathBuf::from("/var/lib/twingate/connector.conf"),
+        PathBuf::from("/usr/local/etc/twingate/connector.conf"),
+        PathBuf::from("/opt/homebrew/etc/twingate/connector.conf"),
+        PathBuf::from("/etc/default/twingate-connector"),
+        PathBuf::from("/etc/sysconfig/twingate-connector"),
+        PathBuf::from("/etc/systemd/system/twingate-connector.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/twingate-client.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_tw = PathBuf::from("/etc/twingate");
+    if etc_tw.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_tw) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_twingate_config_path() -> Option<PathBuf> {
+    let paths = get_twingate_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_twingate_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_twingate_write_path() -> PathBuf {
+    if let Some(p) = get_twingate_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TWINGATE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("twingate");
+        if dir.is_dir() {
+            return dir.join("connector.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/twingate");
+    if etc_dir.is_dir() {
+        return etc_dir.join("connector.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/twingate-connector.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("twingate").join("connector.conf");
+    }
+    PathBuf::from("/etc/twingate/connector.conf")
+}
+
+pub fn parse_twingate_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "twingate_proxy",
+                "twingate_connector_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "twingate_proxy"
+                    || k_low == "twingate_connector_proxy"
+                    || k_low == "twingate_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "twingate_proxy"
+                    || k_low == "twingate_connector_proxy"
+                    || k_low == "twingate_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("twingate_proxy=")
+            || clean.starts_with("twingate_proxy:")
+            || clean.starts_with("twingate_connector_proxy=")
+            || clean.starts_with("twingate_connector_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_twingate_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_twingate_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_twingate_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TWINGATE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TWINGATE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TWINGATE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TWINGATE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -45858,6 +46420,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Netmaker Daemon Proxy",
             "~/.config/netclient/netclient.yml & /etc/netclient/netclient.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Pritunl Zero Trust & Enterprise OpenVPN / WireGuard Client Daemon (/etc/pritunl/pritunl.conf / ~/.config/pritunl/pritunl.conf / /etc/systemd/system/pritunl-client.service.d/http-proxy.conf)
+    if let Some((pritunl_proxy, pritunl_path)) = get_pritunl_proxy() {
+        let ok = verify_proxy_url(&pritunl_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Pritunl proxy `{}` in {} is dead! (Pritunl VPN connection & enterprise mesh access will fail)",
+                pritunl_proxy,
+                pritunl_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Pritunl Daemon Proxy",
+            format!("{}", pritunl_path.display()),
+            pritunl_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Pritunl fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Pritunl Daemon Proxy",
+            "~/.config/pritunl/pritunl.conf & /etc/pritunl/pritunl.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Twingate Zero Trust Network Access Client & Connector Daemon (/etc/twingate/connector.conf / ~/.config/twingate/client.conf / /etc/systemd/system/twingate-connector.service.d/http-proxy.conf)
+    if let Some((twingate_proxy, twingate_path)) = get_twingate_proxy() {
+        let ok = verify_proxy_url(&twingate_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Twingate proxy `{}` in {} is dead! (Twingate zero trust connector & secure resource access will fail)",
+                twingate_proxy,
+                twingate_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Twingate Daemon Proxy",
+            format!("{}", twingate_path.display()),
+            twingate_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Twingate fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Twingate Daemon Proxy",
+            "~/.config/twingate/client.conf & /etc/twingate/connector.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -54142,5 +54768,57 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; netmaker_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_netmaker_proxy(input_comment), None);
         assert_eq!(parse_netmaker_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pritunl_proxy() {
+        let pritunl_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_pritunl_proxy(pritunl_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pritunl_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; pritunl_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_pritunl_proxy(input_comment), None);
+        assert_eq!(parse_pritunl_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_twingate_proxy() {
+        let twingate_json = r#"
+{
+  "proxy_url": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_twingate_proxy(twingate_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_twingate_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; twingate_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_twingate_proxy(input_comment), None);
+        assert_eq!(parse_twingate_proxy(""), None);
     }
 }

@@ -1830,6 +1830,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "BitNet AI CDN",
         "https://github.com/microsoft/BitNet",
     ),
+    (
+        "Pritunl VPN CDN",
+        "https://pritunl.com",
+    ),
+    (
+        "Twingate ZTNA CDN",
+        "https://www.twingate.com",
+    ),
+    (
+        "YuE AI CDN",
+        "https://github.com/multimodal-art-projection/YuE",
+    ),
+    (
+        "Surya AI CDN",
+        "https://github.com/VikParuchuri/surya",
+    ),
+    (
+        "Step-Audio AI CDN",
+        "https://github.com/stepfun-ai/Step-Audio",
+    ),
+    (
+        "Skywork AI CDN",
+        "https://github.com/SkyworkAI/Skywork-Reward",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3512,6 +3536,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "BitNet AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pritunl VPN CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Twingate ZTNA CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "YuE AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Surya AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Step-Audio AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Skywork AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

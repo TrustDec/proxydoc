@@ -121,6 +121,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (10080, false, "OpenZiti Zero Trust Edge Tunnel & Overlay Daemon (Control/IPC)"),
     (50123, false, "Firezone Zero Trust Mesh & WireGuard Daemon (Control/IPC)"),
     (50051, false, "Netmaker WireGuard Mesh Daemon (gRPC/Control)"),
+    (9770, false, "Pritunl Enterprise VPN Client Daemon (API/IPC)"),
+    (30334, false, "Twingate Zero Trust Connector & Client Daemon (Metrics/IPC)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
