@@ -641,7 +641,13 @@ enum Commands {
         /// Also configure Headscale Tailscale control server daemon (/etc/headscale/config.yaml / ~/.config/headscale/config.yaml / /etc/systemd/system/headscale.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "headscale-daemon", visible_alias = "headscale-proxy", visible_alias = "headscale-server")]
         headscale: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, and headscale proxy
+        /// Also configure NetBird zero-trust mesh VPN daemon (/etc/netbird/config.json / ~/.config/netbird/config.json / /etc/systemd/system/netbird.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "netbird-daemon", visible_alias = "netbird-proxy", visible_alias = "netbird-vpn")]
+        netbird: bool,
+        /// Also configure Cloudflare WARP client daemon (/etc/cloudflare-warp/settings.json / ~/.local/share/warp/settings.json / /etc/systemd/system/warp-svc.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "warp-daemon", visible_alias = "warp-proxy", visible_alias = "warp-cli", visible_alias = "warp-svc", visible_alias = "cloudflare-warp")]
+        warp: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, and warp proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1226,7 +1232,13 @@ enum Commands {
         /// Also unset Headscale Tailscale control server daemon (/etc/headscale/config.yaml / ~/.config/headscale/config.yaml / /etc/systemd/system/headscale.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "headscale-daemon", visible_alias = "headscale-proxy", visible_alias = "headscale-server")]
         headscale: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, and headscale proxy
+        /// Also unset NetBird zero-trust mesh VPN daemon (/etc/netbird/config.json / ~/.config/netbird/config.json / /etc/systemd/system/netbird.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "netbird-daemon", visible_alias = "netbird-proxy", visible_alias = "netbird-vpn")]
+        netbird: bool,
+        /// Also unset Cloudflare WARP client daemon (/etc/cloudflare-warp/settings.json / ~/.local/share/warp/settings.json / /etc/systemd/system/warp-svc.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "warp-daemon", visible_alias = "warp-proxy", visible_alias = "warp-cli", visible_alias = "warp-svc", visible_alias = "cloudflare-warp")]
+        warp: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, and warp proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1462,6 +1474,8 @@ async fn main() -> Result<()> {
             strongswan,
             wireguard,
             headscale,
+            netbird,
+            warp,
             all,
             shell,
         }) => {
@@ -1659,6 +1673,8 @@ async fn main() -> Result<()> {
                 strongswan,
                 wireguard,
                 headscale,
+                netbird,
+                warp,
                 all,
                 shell.as_deref(),
             )
@@ -1857,6 +1873,8 @@ async fn main() -> Result<()> {
             strongswan,
             wireguard,
             headscale,
+            netbird,
+            warp,
             all,
             shell,
         }) => {
@@ -2053,6 +2071,8 @@ async fn main() -> Result<()> {
                 strongswan,
                 wireguard,
                 headscale,
+                netbird,
+                warp,
                 all,
                 shell.as_deref(),
             )?;
@@ -7803,6 +7823,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { headscale, .. }) => {
                 assert!(headscale);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_netbird() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--netbird"]).unwrap();
+        match cli.command {
+            Some(Commands::On { netbird, .. }) => {
+                assert!(netbird);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--netbird-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { netbird, .. }) => {
+                assert!(netbird);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--netbird-vpn"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { netbird, .. }) => {
+                assert!(netbird);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_netbird() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--netbird"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { netbird, .. }) => {
+                assert!(netbird);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_warp() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--warp"]).unwrap();
+        match cli.command {
+            Some(Commands::On { warp, .. }) => {
+                assert!(warp);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--warp-cli"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { warp, .. }) => {
+                assert!(warp);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--cloudflare-warp"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { warp, .. }) => {
+                assert!(warp);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_warp() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--warp"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { warp, .. }) => {
+                assert!(warp);
             }
             _ => panic!("Expected Off command"),
         }

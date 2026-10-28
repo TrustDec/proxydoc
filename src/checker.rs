@@ -1758,6 +1758,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "PDFMathTranslate AI CDN",
         "https://github.com/Byaidu/PDFMathTranslate",
     ),
+    (
+        "NetBird Mesh CDN",
+        "https://netbird.io",
+    ),
+    (
+        "Cloudflare WARP CDN",
+        "https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/",
+    ),
+    (
+        "DeepScaler AI CDN",
+        "https://github.com/agentica-project/deepscaler",
+    ),
+    (
+        "Podcastfy AI CDN",
+        "https://github.com/souzatharsis/podcastfy",
+    ),
+    (
+        "OpenCompass AI CDN",
+        "https://github.com/open-compass/opencompass",
+    ),
+    (
+        "NanoFlow AI CDN",
+        "https://github.com/infinigence/NanoFlow",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3386,6 +3410,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "PDFMathTranslate AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "NetBird Mesh CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Cloudflare WARP CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepScaler AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Podcastfy AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenCompass AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "NanoFlow AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

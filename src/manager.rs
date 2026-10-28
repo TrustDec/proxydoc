@@ -34529,6 +34529,424 @@ pub fn unset_headscale_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_netbird_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("httpProxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("netbird_proxy = {}", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "netbird_proxy"
+                    || k_low == "netbird_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"NETBIRD_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("netbird_proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("netbird_proxy=")
+            || clean.starts_with("netbird_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let is_systemd = lines.iter().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+        if is_systemd {
+            let mut final_lines = Vec::new();
+            let mut inserted = false;
+            for l in lines {
+                final_lines.push(l.clone());
+                if !inserted && l.trim().eq_ignore_ascii_case("[Service]") {
+                    final_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    final_lines.push(format!("Environment=\"NETBIRD_PROXY={}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push(directive);
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_netbird_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "netbird_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "netbird_proxy"
+                    || k_low == "netbird_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("netbird_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("netbird_proxy=")
+            || clean.starts_with("netbird_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_netbird_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_netbird_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_netbird_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_netbird_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_netbird_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_netbird_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_warp_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy = {}", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "warp_proxy"
+                    || k_low == "warp_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"WARP_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("warp_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("warp_proxy=")
+            || clean.starts_with("warp_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let is_systemd = lines.iter().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+        if is_systemd {
+            let mut final_lines = Vec::new();
+            let mut inserted = false;
+            for l in lines {
+                final_lines.push(l.clone());
+                if !inserted && l.trim().eq_ignore_ascii_case("[Service]") {
+                    final_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    final_lines.push(format!("Environment=\"WARP_PROXY={}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push(directive);
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_warp_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "warp_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "warp_proxy"
+                    || k_low == "warp_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("warp_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("warp_proxy=")
+            || clean.starts_with("warp_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:"))
+            && !clean.starts_with("proxy_url")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_warp_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_warp_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_warp_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_warp_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_warp_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_warp_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -34723,6 +35141,8 @@ pub async fn turn_on(
     strongswan: bool,
     wireguard: bool,
     headscale: bool,
+    netbird: bool,
+    warp: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -34916,6 +35336,8 @@ pub async fn turn_on(
     let set_strongswan = strongswan || all;
     let set_wireguard = wireguard || all;
     let set_headscale = headscale || all;
+    let set_netbird = netbird || all;
+    let set_warp = warp || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -37697,6 +38119,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_netbird {
+        match set_netbird_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ NetBird daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update NetBird daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_warp {
+        match set_warp_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Cloudflare WARP daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Cloudflare WARP daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -37904,6 +38356,8 @@ pub fn turn_off(
     strongswan: bool,
     wireguard: bool,
     headscale: bool,
+    netbird: bool,
+    warp: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -38097,6 +38551,8 @@ pub fn turn_off(
     let unset_strongswan = strongswan || all;
     let unset_wireguard = wireguard || all;
     let unset_headscale = headscale || all;
+    let unset_netbird = netbird || all;
+    let unset_warp = warp || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -39702,6 +40158,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Headscale daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Headscale proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Headscale daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_netbird {
+        match unset_netbird_proxy() {
+            Ok(true) => eprintln!("{}", "✔ NetBird daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ NetBird proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset NetBird daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_warp {
+        match unset_warp_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Cloudflare WARP daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Cloudflare WARP proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Cloudflare WARP daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -44436,5 +44908,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("HEADSCALE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_netbird_proxy() {
+        let nb_initial = "{\n  \"adminURL\": \"https://api.netbird.io:443\"\n}\n";
+        let nb_updated = apply_netbird_proxy(nb_initial, "http://10.0.0.128:7890");
+        assert!(nb_updated.contains("\"httpProxy\": \"http://10.0.0.128:7890\""));
+        let (nb_cleaned, nb_removed) = remove_netbird_proxy(&nb_updated);
+        assert!(nb_removed);
+        assert!(!nb_cleaned.contains("httpProxy"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_netbird_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"NETBIRD_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_netbird_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("NETBIRD_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_warp_proxy() {
+        let warp_initial = "{\n  \"organization\": \"cloudflare\"\n}\n";
+        let warp_updated = apply_warp_proxy(warp_initial, "http://10.0.0.128:7890");
+        assert!(warp_updated.contains("\"proxy\": \"http://10.0.0.128:7890\""));
+        let (warp_cleaned, warp_removed) = remove_warp_proxy(&warp_updated);
+        assert!(warp_removed);
+        assert!(!warp_cleaned.contains("\"proxy\":"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_warp_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"WARP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_warp_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("WARP_PROXY="));
     }
 }
