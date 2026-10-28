@@ -1686,6 +1686,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Swarm AI CDN",
         "https://github.com/openai/swarm",
     ),
+    (
+        "OpenVPN Proxy CDN",
+        "https://openvpn.net",
+    ),
+    (
+        "SoftEther Proxy CDN",
+        "https://www.softether.org",
+    ),
+    (
+        "SmolVLM AI CDN",
+        "https://github.com/huggingface/smolvlm",
+    ),
+    (
+        "Agent-Zero AI CDN",
+        "https://github.com/frdel/agent-zero",
+    ),
+    (
+        "TinyZero AI CDN",
+        "https://github.com/Jiayi-Pan/TinyZero",
+    ),
+    (
+        "FinRobot AI CDN",
+        "https://github.com/AI4Finance-Foundation/FinRobot",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3260,6 +3284,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Swarm AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenVPN Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SoftEther Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SmolVLM AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Agent-Zero AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "TinyZero AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FinRobot AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

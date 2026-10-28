@@ -34985,6 +34985,664 @@ pub fn get_tinc_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_openvpn_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("OPENVPN_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("OPENVPN_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("OPENVPN_DIR") {
+        let p = PathBuf::from(dir.trim()).join("openvpn.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("openvpn").join("client.conf"),
+            home.join(".config").join("openvpn").join("openvpn.conf"),
+            home.join(".openvpn").join("client.conf"),
+            home.join(".openvpn").join("openvpn.conf"),
+            home.join(".config").join("systemd").join("user").join("openvpn.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("openvpn-client@.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/openvpn/client.conf"),
+        PathBuf::from("/etc/openvpn/openvpn.conf"),
+        PathBuf::from("/etc/openvpn/client/client.conf"),
+        PathBuf::from("/usr/local/etc/openvpn/client.conf"),
+        PathBuf::from("/opt/homebrew/etc/openvpn/client.conf"),
+        PathBuf::from("/etc/default/openvpn"),
+        PathBuf::from("/etc/sysconfig/openvpn"),
+        PathBuf::from("/etc/systemd/system/openvpn.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/openvpn@.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/openvpn-client@.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_openvpn = PathBuf::from("/etc/openvpn");
+    if etc_openvpn.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_openvpn) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "ovpn") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_openvpn_config_path() -> Option<PathBuf> {
+    let paths = get_openvpn_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_openvpn_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_openvpn_write_path() -> PathBuf {
+    if let Some(p) = get_openvpn_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("OPENVPN_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("OPENVPN_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("openvpn");
+        if dir.is_dir() {
+            return dir.join("client.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/openvpn");
+    if etc_dir.is_dir() {
+        return etc_dir.join("client.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/openvpn.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("openvpn").join("client.conf");
+    }
+    PathBuf::from("/etc/openvpn/client.conf")
+}
+
+pub fn parse_openvpn_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "openvpn_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("http-proxy ") {
+            let rest = trimmed["http-proxy ".len()..].trim();
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if parts.len() >= 2 {
+                return Some(format!("http://{}:{}", parts[0], parts[1]));
+            } else if !parts.is_empty() {
+                let p = parts[0].trim_matches('"').trim_matches('\'');
+                if p.starts_with("http://") || p.starts_with("https://") {
+                    return Some(p.to_string());
+                } else {
+                    return Some(format!("http://{}", p));
+                }
+            }
+        }
+
+        if lower.starts_with("socks-proxy ") {
+            let rest = trimmed["socks-proxy ".len()..].trim();
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if parts.len() >= 2 {
+                return Some(format!("socks5://{}:{}", parts[0], parts[1]));
+            } else if !parts.is_empty() {
+                let p = parts[0].trim_matches('"').trim_matches('\'');
+                if p.starts_with("socks") {
+                    return Some(p.to_string());
+                } else {
+                    return Some(format!("socks5://{}", p));
+                }
+            }
+        }
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openvpn_proxy"
+                    || k_low == "openvpn_http_proxy"
+                    || k_low == "ovpn_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openvpn_proxy"
+                    || k_low == "openvpn_http_proxy"
+                    || k_low == "ovpn_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("socks-proxy:")
+            || clean.starts_with("socks-proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("openvpn_proxy:")
+            || clean.starts_with("openvpn_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("socks-proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("openvpn_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                let parts: Vec<&str> = val_part.split_whitespace().collect();
+                if parts.len() >= 2 && !val_part.starts_with("http://") && !val_part.starts_with("https://") && !val_part.starts_with("socks") {
+                    return Some(format!("http://{}:{}", parts[0], parts[1]));
+                } else if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    return Some(val_part.to_string());
+                } else {
+                    return Some(format!("http://{}", val_part));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_openvpn_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_openvpn_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_openvpn_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("OPENVPN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OPENVPN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("OPENVPN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OPENVPN_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_softether_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SOFTETHER_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("VPNCLIENT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SOFTETHER_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("softether").join("vpnclient.config"),
+            home.join(".softether").join("vpn_client.config"),
+            home.join(".config").join("systemd").join("user").join("vpnclient.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("softether-vpnclient.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/usr/local/vpnclient/vpn_client.config"),
+        PathBuf::from("/etc/softether/vpnclient.config"),
+        PathBuf::from("/etc/softether/vpn_client.config"),
+        PathBuf::from("/usr/local/etc/softether/vpnclient.config"),
+        PathBuf::from("/opt/homebrew/etc/softether/vpnclient.config"),
+        PathBuf::from("/etc/default/vpnclient"),
+        PathBuf::from("/etc/sysconfig/vpnclient"),
+        PathBuf::from("/etc/systemd/system/vpnclient.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/softether-vpnclient.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    paths
+}
+
+pub fn get_softether_config_path() -> Option<PathBuf> {
+    let paths = get_softether_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_softether_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_softether_write_path() -> PathBuf {
+    if let Some(p) = get_softether_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SOFTETHER_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("VPNCLIENT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("softether");
+        if dir.is_dir() {
+            return dir.join("vpnclient.config");
+        }
+    }
+    let vpnclient_dir = PathBuf::from("/usr/local/vpnclient");
+    if vpnclient_dir.is_dir() {
+        return vpnclient_dir.join("vpn_client.config");
+    }
+    let etc_dir = PathBuf::from("/etc/softether");
+    if etc_dir.is_dir() {
+        return etc_dir.join("vpnclient.config");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/vpnclient.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("softether").join("vpnclient.config");
+    }
+    PathBuf::from("/usr/local/vpnclient/vpn_client.config")
+}
+
+pub fn parse_softether_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "softether_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut current_proxy_host: Option<String> = None;
+    let mut current_proxy_port: Option<u16> = None;
+    let mut current_proxy_type: Option<u32> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("string hostname ") {
+            let host = trimmed["string hostname ".len()..].trim().trim_matches('"').trim_matches('\'').trim();
+            if !host.is_empty() {
+                current_proxy_host = Some(host.to_string());
+            }
+        }
+        if lower.starts_with("uint port ") {
+            let port_str = trimmed["uint port ".len()..].trim();
+            if let Ok(p) = port_str.parse::<u16>() {
+                current_proxy_port = Some(p);
+            }
+        }
+        if lower.starts_with("uint type ") {
+            let type_str = trimmed["uint type ".len()..].trim();
+            if let Ok(t) = type_str.parse::<u32>() {
+                current_proxy_type = Some(t);
+            }
+        }
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "softether_proxy"
+                    || k_low == "softether_http_proxy"
+                    || k_low == "vpnclient_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let exp_part = trimmed["export ".len()..].trim();
+            if let Some((k, v)) = exp_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "softether_proxy"
+                    || k_low == "softether_http_proxy"
+                    || k_low == "vpnclient_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if (clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http.proxy:")
+            || clean.starts_with("http.proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("softether_proxy:")
+            || clean.starts_with("softether_proxy=")
+            || clean.starts_with("vpnclient_proxy:")
+            || clean.starts_with("vpnclient_proxy="))
+            && !clean.starts_with("proxy_url")
+        {
+            let val_part = if clean.starts_with("http_proxy=")
+                || clean.starts_with("http-proxy=")
+                || clean.starts_with("http.proxy=")
+                || clean.starts_with("proxy=")
+                || clean.starts_with("softether_proxy=")
+                || clean.starts_with("vpnclient_proxy=")
+            {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once('=') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    if let (Some(host), Some(port)) = (current_proxy_host, current_proxy_port) {
+        if current_proxy_type == Some(3) {
+            return Some(format!("socks5://{}:{}", host, port));
+        } else {
+            return Some(format!("http://{}:{}", host, port));
+        }
+    }
+
+    None
+}
+
+pub fn get_softether_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_softether_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_softether_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SOFTETHER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SOFTETHER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SOFTETHER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SOFTETHER_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VPNCLIENT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VPNCLIENT_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -41902,6 +42560,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "tinc Daemon Proxy",
             "~/.config/tinc/tinc.conf & /etc/tinc/tinc.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // OpenVPN Secure Tunneling Daemon (~/.config/openvpn/client.conf / /etc/openvpn/client.conf / /etc/systemd/system/openvpn.service.d/http-proxy.conf)
+    if let Some((openvpn_proxy, openvpn_path)) = get_openvpn_proxy() {
+        let ok = verify_proxy_url(&openvpn_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "OpenVPN proxy `{}` in {} is dead! (OpenVPN tunnel connections will fail)",
+                openvpn_proxy,
+                openvpn_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "OpenVPN Daemon Proxy",
+            format!("{}", openvpn_path.display()),
+            openvpn_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (OpenVPN fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "OpenVPN Daemon Proxy",
+            "~/.config/openvpn/client.conf & /etc/openvpn/client.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // SoftEther Multi-Protocol VPN Daemon (/usr/local/vpnclient/vpn_client.config / /etc/softether/vpnclient.config / /etc/systemd/system/vpnclient.service.d/http-proxy.conf)
+    if let Some((softether_proxy, softether_path)) = get_softether_proxy() {
+        let ok = verify_proxy_url(&softether_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "SoftEther proxy `{}` in {} is dead! (SoftEther VPN client connections will fail)",
+                softether_proxy,
+                softether_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "SoftEther Daemon Proxy",
+            format!("{}", softether_path.display()),
+            softether_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (SoftEther fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "SoftEther Daemon Proxy",
+            "/usr/local/vpnclient/vpn_client.config & /etc/softether/vpnclient.config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -49831,5 +50553,84 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# Proxy = socks5 127.0.0.1 1080\n; Proxy = http 127.0.0.1 8080\n/* http_proxy = http://127.0.0.1:7890 */\n";
         assert_eq!(parse_tinc_proxy(input_comment), None);
         assert_eq!(parse_tinc_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_openvpn_proxy() {
+        let ovpn_http = r#"
+client
+dev tun
+proto udp
+http-proxy 127.0.0.1 8080
+"#;
+        assert_eq!(
+            parse_openvpn_proxy(ovpn_http),
+            Some("http://127.0.0.1:8080".to_string())
+        );
+
+        let ovpn_socks = r#"
+client
+dev tun
+socks-proxy 127.0.0.1 1080
+"#;
+        assert_eq!(
+            parse_openvpn_proxy(ovpn_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_openvpn_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http-proxy 127.0.0.1 8080\n; socks-proxy 127.0.0.1 1080\n/* http_proxy = http://127.0.0.1:7890 */\n";
+        assert_eq!(parse_openvpn_proxy(input_comment), None);
+        assert_eq!(parse_openvpn_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_softether_proxy() {
+        let se_conf = r#"
+declare Proxy
+{
+    uint Type 2
+    string HostName 127.0.0.1
+    uint Port 7890
+}
+"#;
+        assert_eq!(
+            parse_softether_proxy(se_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let se_socks = r#"
+declare Proxy
+{
+    uint Type 3
+    string HostName 127.0.0.1
+    uint Port 1080
+}
+"#;
+        assert_eq!(
+            parse_softether_proxy(se_socks),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_softether_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# Proxy = http://127.0.0.1:7890\n; proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_softether_proxy(input_comment), None);
+        assert_eq!(parse_softether_proxy(""), None);
     }
 }

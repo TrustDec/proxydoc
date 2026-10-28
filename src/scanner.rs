@@ -109,6 +109,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (9001, false, "Yggdrasil Encrypted Mesh Routing Daemon (Admin API)"),
     (11234, false, "cjdns Encrypted Mesh Routing Daemon (Admin API)"),
     (655, false, "tinc Mesh VPN Daemon (Control & Peering)"),
+    (1194, false, "OpenVPN Secure Tunneling Daemon (Management/Tunnel)"),
+    (5555, false, "SoftEther Multi-Protocol VPN Daemon (Control/Tunnel)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
