@@ -1854,6 +1854,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Skywork AI CDN",
         "https://github.com/SkyworkAI/Skywork-Reward",
     ),
+    (
+        "EasyTier Mesh CDN",
+        "https://github.com/EasyTier/EasyTier",
+    ),
+    (
+        "Teleport ZTNA CDN",
+        "https://goteleport.com",
+    ),
+    (
+        "Smolagents AI CDN",
+        "https://github.com/huggingface/smolagents",
+    ),
+    (
+        "Open-R1 AI CDN",
+        "https://github.com/huggingface/open-r1",
+    ),
+    (
+        "Kokoro AI CDN",
+        "https://github.com/hexgrad/kokoro",
+    ),
+    (
+        "Qwen-Agent AI CDN",
+        "https://github.com/QwenLM/Qwen-Agent",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3554,6 +3578,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Skywork AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "EasyTier Mesh CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Teleport ZTNA CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Smolagents AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-R1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Kokoro AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen-Agent AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

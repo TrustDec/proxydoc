@@ -39119,6 +39119,562 @@ pub fn get_twingate_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_easytier_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("EASYTIER_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("EASYTIER_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("EASYTIER_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("easytier").join("config.toml"),
+            home.join(".config").join("easytier").join("easytier.toml"),
+            home.join(".config").join("easytier").join("easytier.yaml"),
+            home.join(".easytier").join("config.toml"),
+            home.join(".config").join("systemd").join("user").join("easytier.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/easytier/config.toml"),
+        PathBuf::from("/etc/easytier/easytier.toml"),
+        PathBuf::from("/etc/easytier/easytier.yaml"),
+        PathBuf::from("/var/lib/easytier/config.toml"),
+        PathBuf::from("/usr/local/etc/easytier/config.toml"),
+        PathBuf::from("/opt/homebrew/etc/easytier/config.toml"),
+        PathBuf::from("/etc/default/easytier"),
+        PathBuf::from("/etc/sysconfig/easytier"),
+        PathBuf::from("/etc/systemd/system/easytier.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_et = PathBuf::from("/etc/easytier");
+    if etc_et.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_et) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "toml" || ext == "yaml" || ext == "conf" || ext == "json") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_easytier_config_path() -> Option<PathBuf> {
+    let paths = get_easytier_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_easytier_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_easytier_write_path() -> PathBuf {
+    if let Some(p) = get_easytier_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("EASYTIER_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("easytier");
+        if dir.is_dir() {
+            return dir.join("config.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/easytier");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/easytier.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("easytier").join("config.toml");
+    }
+    PathBuf::from("/etc/easytier/config.toml")
+}
+
+pub fn parse_easytier_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "easytier_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "easytier_proxy"
+                    || k_low == "easytier_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "easytier_proxy"
+                    || k_low == "easytier_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("easytier_proxy=")
+            || clean.starts_with("easytier_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("socks5_proxy=")
+            || clean.starts_with("socks5_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_easytier_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_easytier_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_easytier_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("EASYTIER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:EASYTIER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("EASYTIER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:EASYTIER_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_teleport_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TELEPORT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TELEPORT_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TELEPORT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("teleport.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("teleport").join("teleport.yaml"),
+            home.join(".tsh").join("teleport.yaml"),
+            home.join(".teleport").join("teleport.yaml"),
+            home.join(".config").join("systemd").join("user").join("teleport.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/teleport.yaml"),
+        PathBuf::from("/etc/teleport/teleport.yaml"),
+        PathBuf::from("/var/lib/teleport/teleport.yaml"),
+        PathBuf::from("/usr/local/etc/teleport.yaml"),
+        PathBuf::from("/opt/homebrew/etc/teleport.yaml"),
+        PathBuf::from("/etc/default/teleport"),
+        PathBuf::from("/etc/sysconfig/teleport"),
+        PathBuf::from("/etc/systemd/system/teleport.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_tp = PathBuf::from("/etc/teleport");
+    if etc_tp.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_tp) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_teleport_config_path() -> Option<PathBuf> {
+    let paths = get_teleport_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_teleport_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_teleport_write_path() -> PathBuf {
+    if let Some(p) = get_teleport_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TELEPORT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("teleport");
+        if dir.is_dir() {
+            return dir.join("teleport.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/teleport");
+    if etc_dir.is_dir() {
+        return etc_dir.join("teleport.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/teleport.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("teleport").join("teleport.yaml");
+    }
+    PathBuf::from("/etc/teleport.yaml")
+}
+
+pub fn parse_teleport_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "httpProxy",
+                "socksProxy",
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "all_proxy",
+                "teleport_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "teleport_proxy"
+                    || k_low == "teleport_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "teleport_proxy"
+                    || k_low == "teleport_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("teleport_proxy=")
+            || clean.starts_with("teleport_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_teleport_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_teleport_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_teleport_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TELEPORT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TELEPORT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TELEPORT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TELEPORT_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -46484,6 +47040,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Twingate Daemon Proxy",
             "~/.config/twingate/client.conf & /etc/twingate/connector.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // EasyTier Decentralized Mesh VPN Daemon (/etc/easytier/config.toml / ~/.config/easytier/config.toml / /etc/systemd/system/easytier.service.d/http-proxy.conf)
+    if let Some((easytier_proxy, easytier_path)) = get_easytier_proxy() {
+        let ok = verify_proxy_url(&easytier_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "EasyTier proxy `{}` in {} is dead! (EasyTier mesh routing & peer connections will fail)",
+                easytier_proxy,
+                easytier_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "EasyTier Daemon Proxy",
+            format!("{}", easytier_path.display()),
+            easytier_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (EasyTier fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "EasyTier Daemon Proxy",
+            "~/.config/easytier/config.toml & /etc/easytier/config.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Teleport Access & Zero Trust Proxy Daemon (/etc/teleport.yaml / ~/.config/teleport/teleport.yaml / /etc/systemd/system/teleport.service.d/http-proxy.conf)
+    if let Some((teleport_proxy, teleport_path)) = get_teleport_proxy() {
+        let ok = verify_proxy_url(&teleport_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Teleport proxy `{}` in {} is dead! (Teleport cluster authentication & zero trust access will fail)",
+                teleport_proxy,
+                teleport_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Teleport Daemon Proxy",
+            format!("{}", teleport_path.display()),
+            teleport_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Teleport fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Teleport Daemon Proxy",
+            "~/.config/teleport/teleport.yaml & /etc/teleport.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -54820,5 +55440,55 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; twingate_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_twingate_proxy(input_comment), None);
         assert_eq!(parse_twingate_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_easytier_proxy() {
+        let easytier_toml = r#"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_easytier_proxy(easytier_toml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_easytier_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; easytier_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_easytier_proxy(input_comment), None);
+        assert_eq!(parse_easytier_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_teleport_proxy() {
+        let teleport_yaml = r#"
+teleport:
+  proxy_service:
+    proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_teleport_proxy(teleport_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_teleport_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; teleport_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_teleport_proxy(input_comment), None);
+        assert_eq!(parse_teleport_proxy(""), None);
     }
 }
