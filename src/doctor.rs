@@ -39675,6 +39675,562 @@ pub fn get_teleport_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_pomerium_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("POMERIUM_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("POMERIUM_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("POMERIUM_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("pomerium").join("config.yaml"),
+            home.join(".config").join("pomerium").join("config.yml"),
+            home.join(".pomerium").join("config.yaml"),
+            home.join(".pomerium").join("config.yml"),
+            home.join(".config").join("systemd").join("user").join("pomerium.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/pomerium/config.yaml"),
+        PathBuf::from("/etc/pomerium/config.yml"),
+        PathBuf::from("/etc/pomerium.yaml"),
+        PathBuf::from("/etc/pomerium.yml"),
+        PathBuf::from("/var/lib/pomerium/config.yaml"),
+        PathBuf::from("/usr/local/etc/pomerium/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/pomerium/config.yaml"),
+        PathBuf::from("/etc/default/pomerium"),
+        PathBuf::from("/etc/sysconfig/pomerium"),
+        PathBuf::from("/etc/systemd/system/pomerium.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_pm = PathBuf::from("/etc/pomerium");
+    if etc_pm.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_pm) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_pomerium_config_path() -> Option<PathBuf> {
+    let paths = get_pomerium_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_pomerium_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_pomerium_write_path() -> PathBuf {
+    if let Some(p) = get_pomerium_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("POMERIUM_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("pomerium");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/pomerium");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/pomerium.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("pomerium").join("config.yaml");
+    }
+    PathBuf::from("/etc/pomerium/config.yaml")
+}
+
+pub fn parse_pomerium_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "pomerium_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pomerium_proxy"
+                    || k_low == "pomerium_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pomerium_proxy"
+                    || k_low == "pomerium_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("pomerium_proxy=")
+            || clean.starts_with("pomerium_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_pomerium_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pomerium_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pomerium_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("POMERIUM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:POMERIUM_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("POMERIUM_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:POMERIUM_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_innernet_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("INNERNET_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("INNERNET_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("INNERNET_DIR") {
+        let p = PathBuf::from(dir.trim()).join("innernet-server.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("innernet").join("innernet.conf"),
+            home.join(".innernet").join("innernet.conf"),
+            home.join(".config").join("systemd").join("user").join("innernet-server.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("innernet.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/innernet/innernet-server.conf"),
+        PathBuf::from("/etc/innernet/innernet.conf"),
+        PathBuf::from("/var/lib/innernet/innernet.conf"),
+        PathBuf::from("/usr/local/etc/innernet/innernet.conf"),
+        PathBuf::from("/opt/homebrew/etc/innernet/innernet.conf"),
+        PathBuf::from("/etc/default/innernet"),
+        PathBuf::from("/etc/sysconfig/innernet"),
+        PathBuf::from("/etc/systemd/system/innernet-server.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/innernet.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_in = PathBuf::from("/etc/innernet");
+    if etc_in.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_in) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "toml" || ext == "yaml" || ext == "json") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_innernet_config_path() -> Option<PathBuf> {
+    let paths = get_innernet_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_innernet_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_innernet_write_path() -> PathBuf {
+    if let Some(p) = get_innernet_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("INNERNET_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("innernet");
+        if dir.is_dir() {
+            return dir.join("innernet.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/innernet");
+    if etc_dir.is_dir() {
+        return etc_dir.join("innernet-server.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/innernet-server.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("innernet").join("innernet.conf");
+    }
+    PathBuf::from("/etc/innernet/innernet-server.conf")
+}
+
+pub fn parse_innernet_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "innernet_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "innernet_proxy"
+                    || k_low == "innernet_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "innernet_proxy"
+                    || k_low == "innernet_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("innernet_proxy=")
+            || clean.starts_with("innernet_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_innernet_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_innernet_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_innernet_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("INNERNET_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:INNERNET_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("INNERNET_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:INNERNET_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -47104,6 +47660,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Teleport Daemon Proxy",
             "~/.config/teleport/teleport.yaml & /etc/teleport.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Pomerium Identity-Aware & Zero Trust Access Proxy Daemon (/etc/pomerium/config.yaml / ~/.config/pomerium/config.yaml / /etc/systemd/system/pomerium.service.d/http-proxy.conf)
+    if let Some((pomerium_proxy, pomerium_path)) = get_pomerium_proxy() {
+        let ok = verify_proxy_url(&pomerium_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Pomerium proxy `{}` in {} is dead! (Pomerium identity-aware access and upstream proxies will fail)",
+                pomerium_proxy,
+                pomerium_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Pomerium Daemon Proxy",
+            format!("{}", pomerium_path.display()),
+            pomerium_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Pomerium fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Pomerium Daemon Proxy",
+            "~/.config/pomerium/config.yaml & /etc/pomerium/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Innernet Mesh VPN & WireGuard Overlay Daemon (/etc/innernet/innernet-server.conf / ~/.config/innernet/innernet.conf / /etc/systemd/system/innernet-server.service.d/http-proxy.conf)
+    if let Some((innernet_proxy, innernet_path)) = get_innernet_proxy() {
+        let ok = verify_proxy_url(&innernet_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Innernet proxy `{}` in {} is dead! (Innernet mesh network coordination and WireGuard tunnels will fail)",
+                innernet_proxy,
+                innernet_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Innernet Daemon Proxy",
+            format!("{}", innernet_path.display()),
+            innernet_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Innernet fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Innernet Daemon Proxy",
+            "~/.config/innernet/innernet.conf & /etc/innernet/innernet-server.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -55490,5 +56110,53 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; teleport_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_teleport_proxy(input_comment), None);
         assert_eq!(parse_teleport_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pomerium_proxy() {
+        let pomerium_yaml = r#"
+http_proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pomerium_proxy(pomerium_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pomerium_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; pomerium_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_pomerium_proxy(input_comment), None);
+        assert_eq!(parse_pomerium_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_innernet_proxy() {
+        let innernet_conf = r#"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_innernet_proxy(innernet_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_innernet_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; innernet_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_innernet_proxy(input_comment), None);
+        assert_eq!(parse_innernet_proxy(""), None);
     }
 }

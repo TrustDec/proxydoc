@@ -1878,6 +1878,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Qwen-Agent AI CDN",
         "https://github.com/QwenLM/Qwen-Agent",
     ),
+    (
+        "Pomerium ZTNA CDN",
+        "https://www.pomerium.com",
+    ),
+    (
+        "Innernet Mesh CDN",
+        "https://github.com/tonari/innernet",
+    ),
+    (
+        "Composio AI CDN",
+        "https://github.com/ComposioHQ/composio",
+    ),
+    (
+        "Mini-Omni2 AI CDN",
+        "https://github.com/gpt-omni/mini-omni2",
+    ),
+    (
+        "InternLM AI CDN",
+        "https://github.com/InternLM/InternLM",
+    ),
+    (
+        "OpenCodeInterpreter AI CDN",
+        "https://github.com/OpenCodeInterpreter/OpenCodeInterpreter",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3596,6 +3620,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Qwen-Agent AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pomerium ZTNA CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Innernet Mesh CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Composio AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Mini-Omni2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InternLM AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenCodeInterpreter AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

@@ -671,7 +671,13 @@ enum Commands {
         /// Also configure Teleport access & zero-trust proxy daemon (/etc/teleport.yaml / ~/.config/teleport/teleport.yaml / /etc/systemd/system/teleport.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "teleport-daemon", visible_alias = "teleport-proxy", visible_alias = "teleport-client", visible_alias = "teleport-access")]
         teleport: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, and teleport proxy
+        /// Also configure Pomerium access & zero-trust proxy daemon (/etc/pomerium/config.yaml / ~/.config/pomerium/config.yaml / /etc/systemd/system/pomerium.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "pomerium-daemon", visible_alias = "pomerium-proxy", visible_alias = "pomerium-access", visible_alias = "pomerium-ztna")]
+        pomerium: bool,
+        /// Also configure Innernet decentralized mesh VPN daemon (/etc/innernet/innernet-server.conf / ~/.config/innernet/innernet.conf / /etc/systemd/system/innernet-server.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "innernet-daemon", visible_alias = "innernet-proxy", visible_alias = "innernet-vpn", visible_alias = "innernet-mesh")]
+        innernet: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, and innernet proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1286,7 +1292,13 @@ enum Commands {
         /// Also unset Teleport access & zero-trust proxy daemon (/etc/teleport.yaml / ~/.config/teleport/teleport.yaml / /etc/systemd/system/teleport.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "teleport-daemon", visible_alias = "teleport-proxy", visible_alias = "teleport-client", visible_alias = "teleport-access")]
         teleport: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, and teleport proxy
+        /// Also unset Pomerium access & zero-trust proxy daemon (/etc/pomerium/config.yaml / ~/.config/pomerium/config.yaml / /etc/systemd/system/pomerium.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "pomerium-daemon", visible_alias = "pomerium-proxy", visible_alias = "pomerium-access", visible_alias = "pomerium-ztna")]
+        pomerium: bool,
+        /// Also unset Innernet decentralized mesh VPN daemon (/etc/innernet/innernet-server.conf / ~/.config/innernet/innernet.conf / /etc/systemd/system/innernet-server.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "innernet-daemon", visible_alias = "innernet-proxy", visible_alias = "innernet-vpn", visible_alias = "innernet-mesh")]
+        innernet: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, and innernet proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1532,6 +1544,8 @@ async fn main() -> Result<()> {
             twingate,
             easytier,
             teleport,
+            pomerium,
+            innernet,
             all,
             shell,
         }) => {
@@ -1739,6 +1753,8 @@ async fn main() -> Result<()> {
                 twingate,
                 easytier,
                 teleport,
+                pomerium,
+                innernet,
                 all,
                 shell.as_deref(),
             )
@@ -1947,6 +1963,8 @@ async fn main() -> Result<()> {
             twingate,
             easytier,
             teleport,
+            pomerium,
+            innernet,
             all,
             shell,
         }) => {
@@ -2153,6 +2171,8 @@ async fn main() -> Result<()> {
                 twingate,
                 easytier,
                 teleport,
+                pomerium,
+                innernet,
                 all,
                 shell.as_deref(),
             )?;
@@ -8291,6 +8311,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { teleport, .. }) => {
                 assert!(teleport);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_pomerium() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--pomerium"]).unwrap();
+        match cli.command {
+            Some(Commands::On { pomerium, .. }) => {
+                assert!(pomerium);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--pomerium-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { pomerium, .. }) => {
+                assert!(pomerium);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--pomerium-ztna"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { pomerium, .. }) => {
+                assert!(pomerium);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_pomerium() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--pomerium"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { pomerium, .. }) => {
+                assert!(pomerium);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_innernet() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--innernet"]).unwrap();
+        match cli.command {
+            Some(Commands::On { innernet, .. }) => {
+                assert!(innernet);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--innernet-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { innernet, .. }) => {
+                assert!(innernet);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--innernet-mesh"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { innernet, .. }) => {
+                assert!(innernet);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_innernet() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--innernet"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { innernet, .. }) => {
+                assert!(innernet);
             }
             _ => panic!("Expected Off command"),
         }

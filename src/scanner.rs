@@ -125,6 +125,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (30334, false, "Twingate Zero Trust Connector & Client Daemon (Metrics/IPC)"),
     (11010, false, "EasyTier Decentralized Mesh VPN Daemon (RPC/CLI)"),
     (3080, false, "Teleport Access & Zero Trust Proxy Daemon (Web/Auth)"),
+    (5443, false, "Pomerium Identity-Aware & Zero Trust Access Proxy Daemon (HTTPS/Auth)"),
+    (42230, false, "Innernet Mesh VPN & WireGuard Overlay Daemon (Control/Tunnel)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
