@@ -677,7 +677,13 @@ enum Commands {
         /// Also configure Innernet decentralized mesh VPN daemon (/etc/innernet/innernet-server.conf / ~/.config/innernet/innernet.conf / /etc/systemd/system/innernet-server.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "innernet-daemon", visible_alias = "innernet-proxy", visible_alias = "innernet-vpn", visible_alias = "innernet-mesh")]
         innernet: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, and innernet proxy
+        /// Also configure Defguard enterprise WireGuard 2FA & SSO VPN gateway daemon (/etc/defguard/client.toml / ~/.config/defguard/client.toml / /etc/systemd/system/defguard-client.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "defguard-daemon", visible_alias = "defguard-proxy", visible_alias = "defguard-vpn", visible_alias = "defguard-client")]
+        defguard: bool,
+        /// Also configure Inlets cloud-native tunnel & reverse proxy daemon (/etc/inlets/inlets.conf / ~/.config/inlets/config.yaml / /etc/systemd/system/inlets-pro.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "inlets-tunnel", visible_alias = "inlets-proxy", visible_alias = "inlets-daemon", visible_alias = "inlets-pro")]
+        inlets: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, and inlets proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1298,7 +1304,13 @@ enum Commands {
         /// Also unset Innernet decentralized mesh VPN daemon (/etc/innernet/innernet-server.conf / ~/.config/innernet/innernet.conf / /etc/systemd/system/innernet-server.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "innernet-daemon", visible_alias = "innernet-proxy", visible_alias = "innernet-vpn", visible_alias = "innernet-mesh")]
         innernet: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, and innernet proxy
+        /// Also unset Defguard enterprise WireGuard 2FA & SSO VPN gateway daemon (/etc/defguard/client.toml / ~/.config/defguard/client.toml / /etc/systemd/system/defguard-client.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "defguard-daemon", visible_alias = "defguard-proxy", visible_alias = "defguard-vpn", visible_alias = "defguard-client")]
+        defguard: bool,
+        /// Also unset Inlets cloud-native tunnel & reverse proxy daemon (/etc/inlets/inlets.conf / ~/.config/inlets/config.yaml / /etc/systemd/system/inlets-pro.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "inlets-tunnel", visible_alias = "inlets-proxy", visible_alias = "inlets-daemon", visible_alias = "inlets-pro")]
+        inlets: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, and inlets proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1546,6 +1558,8 @@ async fn main() -> Result<()> {
             teleport,
             pomerium,
             innernet,
+            defguard,
+            inlets,
             all,
             shell,
         }) => {
@@ -1755,6 +1769,8 @@ async fn main() -> Result<()> {
                 teleport,
                 pomerium,
                 innernet,
+                defguard,
+                inlets,
                 all,
                 shell.as_deref(),
             )
@@ -1965,6 +1981,8 @@ async fn main() -> Result<()> {
             teleport,
             pomerium,
             innernet,
+            defguard,
+            inlets,
             all,
             shell,
         }) => {
@@ -2173,6 +2191,8 @@ async fn main() -> Result<()> {
                 teleport,
                 pomerium,
                 innernet,
+                defguard,
+                inlets,
                 all,
                 shell.as_deref(),
             )?;
@@ -8387,6 +8407,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { innernet, .. }) => {
                 assert!(innernet);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_defguard() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--defguard"]).unwrap();
+        match cli.command {
+            Some(Commands::On { defguard, .. }) => {
+                assert!(defguard);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--defguard-daemon"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { defguard, .. }) => {
+                assert!(defguard);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--defguard-vpn"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { defguard, .. }) => {
+                assert!(defguard);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_defguard() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--defguard"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { defguard, .. }) => {
+                assert!(defguard);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_inlets() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--inlets"]).unwrap();
+        match cli.command {
+            Some(Commands::On { inlets, .. }) => {
+                assert!(inlets);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--inlets-tunnel"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { inlets, .. }) => {
+                assert!(inlets);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--inlets-pro"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { inlets, .. }) => {
+                assert!(inlets);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_inlets() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--inlets"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { inlets, .. }) => {
+                assert!(inlets);
             }
             _ => panic!("Expected Off command"),
         }

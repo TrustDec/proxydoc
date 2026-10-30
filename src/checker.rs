@@ -1902,6 +1902,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "OpenCodeInterpreter AI CDN",
         "https://github.com/OpenCodeInterpreter/OpenCodeInterpreter",
     ),
+    (
+        "Defguard VPN CDN",
+        "https://defguard.net",
+    ),
+    (
+        "Inlets Tunnel CDN",
+        "https://inlets.dev",
+    ),
+    (
+        "OpenCoder AI CDN",
+        "https://github.com/OpenCoder-llm/OpenCoder-llm",
+    ),
+    (
+        "Hunyuan3D AI CDN",
+        "https://github.com/Tencent/Hunyuan3D-2",
+    ),
+    (
+        "SmolVLM2 AI CDN",
+        "https://github.com/huggingface/smolvlm",
+    ),
+    (
+        "Codestral AI CDN",
+        "https://mistral.ai/news/codestral/",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3638,6 +3662,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "OpenCodeInterpreter AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Defguard VPN CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Inlets Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenCoder AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Hunyuan3D AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SmolVLM2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Codestral AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

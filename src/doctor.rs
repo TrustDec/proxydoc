@@ -40231,6 +40231,569 @@ pub fn get_innernet_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_defguard_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DEFGUARD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DEFGUARD_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEFGUARD_DIR") {
+        let p = PathBuf::from(dir.trim()).join("client.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("defguard").join("client.toml"),
+            home.join(".config").join("defguard").join("config.toml"),
+            home.join(".defguard").join("client.toml"),
+            home.join(".defguard").join("config.toml"),
+            home.join(".config").join("systemd").join("user").join("defguard-client.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("defguard.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/defguard/client.toml"),
+        PathBuf::from("/etc/defguard/config.toml"),
+        PathBuf::from("/etc/defguard/gateway.toml"),
+        PathBuf::from("/var/lib/defguard/client.toml"),
+        PathBuf::from("/usr/local/etc/defguard/client.toml"),
+        PathBuf::from("/opt/homebrew/etc/defguard/client.toml"),
+        PathBuf::from("/etc/default/defguard"),
+        PathBuf::from("/etc/sysconfig/defguard"),
+        PathBuf::from("/etc/systemd/system/defguard-client.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/defguard.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_dg = PathBuf::from("/etc/defguard");
+    if etc_dg.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_dg) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "toml" || ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_defguard_config_path() -> Option<PathBuf> {
+    let paths = get_defguard_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_defguard_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_defguard_write_path() -> PathBuf {
+    if let Some(p) = get_defguard_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DEFGUARD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("defguard");
+        if dir.is_dir() {
+            return dir.join("client.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/defguard");
+    if etc_dir.is_dir() {
+        return etc_dir.join("client.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/defguard-client.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("defguard").join("client.toml");
+    }
+    PathBuf::from("/etc/defguard/client.toml")
+}
+
+pub fn parse_defguard_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "defguard_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "defguard_proxy"
+                    || k_low == "defguard_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "defguard_proxy"
+                    || k_low == "defguard_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("defguard_proxy=")
+            || clean.starts_with("defguard_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_defguard_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_defguard_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_defguard_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DEFGUARD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEFGUARD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEFGUARD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEFGUARD_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_inlets_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("INLETS_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("INLETS_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("INLETS_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("inlets").join("config.yaml"),
+            home.join(".config").join("inlets").join("config.json"),
+            home.join(".inlets").join("config.yaml"),
+            home.join(".inlets").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("inlets-pro.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("inlets.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/inlets/inlets.conf"),
+        PathBuf::from("/etc/inlets/inlets-pro.conf"),
+        PathBuf::from("/etc/inlets/config.yaml"),
+        PathBuf::from("/etc/inlets/config.json"),
+        PathBuf::from("/var/lib/inlets/config.yaml"),
+        PathBuf::from("/usr/local/etc/inlets/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/inlets/config.yaml"),
+        PathBuf::from("/etc/default/inlets"),
+        PathBuf::from("/etc/default/inlets-pro"),
+        PathBuf::from("/etc/sysconfig/inlets"),
+        PathBuf::from("/etc/sysconfig/inlets-pro"),
+        PathBuf::from("/etc/systemd/system/inlets-pro.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/inlets.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_in = PathBuf::from("/etc/inlets");
+    if etc_in.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_in) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_inlets_config_path() -> Option<PathBuf> {
+    let paths = get_inlets_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_inlets_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_inlets_write_path() -> PathBuf {
+    if let Some(p) = get_inlets_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("INLETS_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("inlets");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/inlets");
+    if etc_dir.is_dir() {
+        return etc_dir.join("inlets.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/inlets-pro.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("inlets").join("config.yaml");
+    }
+    PathBuf::from("/etc/inlets/inlets.conf")
+}
+
+pub fn parse_inlets_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "inlets_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "inlets_proxy"
+                    || k_low == "inlets_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "inlets_proxy"
+                    || k_low == "inlets_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("inlets_proxy=")
+            || clean.starts_with("inlets_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_inlets_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_inlets_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_inlets_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("INLETS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:INLETS_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("INLETS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:INLETS_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -47724,6 +48287,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Innernet Daemon Proxy",
             "~/.config/innernet/innernet.conf & /etc/innernet/innernet-server.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Defguard Enterprise WireGuard 2FA & SSO VPN Gateway Daemon (/etc/defguard/client.toml / ~/.config/defguard/client.toml / /etc/systemd/system/defguard-client.service.d/http-proxy.conf)
+    if let Some((defguard_proxy, defguard_path)) = get_defguard_proxy() {
+        let ok = verify_proxy_url(&defguard_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Defguard proxy `{}` in {} is dead! (Defguard WireGuard enterprise gateway & 2FA tunnels will fail)",
+                defguard_proxy,
+                defguard_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Defguard Daemon Proxy",
+            format!("{}", defguard_path.display()),
+            defguard_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Defguard fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Defguard Daemon Proxy",
+            "~/.config/defguard/client.toml & /etc/defguard/client.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Inlets Cloud-Native Tunnel & Reverse Proxy Daemon (/etc/inlets/inlets.conf / ~/.config/inlets/config.yaml / /etc/systemd/system/inlets-pro.service.d/http-proxy.conf)
+    if let Some((inlets_proxy, inlets_path)) = get_inlets_proxy() {
+        let ok = verify_proxy_url(&inlets_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Inlets proxy `{}` in {} is dead! (Inlets tunnel and reverse proxy egress will fail)",
+                inlets_proxy,
+                inlets_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Inlets Daemon Proxy",
+            format!("{}", inlets_path.display()),
+            inlets_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Inlets fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Inlets Daemon Proxy",
+            "~/.config/inlets/config.yaml & /etc/inlets/inlets.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -56158,5 +56785,53 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; innernet_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_innernet_proxy(input_comment), None);
         assert_eq!(parse_innernet_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_defguard_proxy() {
+        let defguard_conf = r#"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_defguard_proxy(defguard_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_defguard_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; defguard_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_defguard_proxy(input_comment), None);
+        assert_eq!(parse_defguard_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_inlets_proxy() {
+        let inlets_conf = r#"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_inlets_proxy(inlets_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_inlets_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; inlets_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_inlets_proxy(input_comment), None);
+        assert_eq!(parse_inlets_proxy(""), None);
     }
 }

@@ -127,6 +127,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (3080, false, "Teleport Access & Zero Trust Proxy Daemon (Web/Auth)"),
     (5443, false, "Pomerium Identity-Aware & Zero Trust Access Proxy Daemon (HTTPS/Auth)"),
     (42230, false, "Innernet Mesh VPN & WireGuard Overlay Daemon (Control/Tunnel)"),
+    (50055, false, "Defguard Enterprise WireGuard Gateway & 2FA Daemon (gRPC/Web)"),
+    (8090, false, "Inlets Cloud-Native Tunnel & Reverse Proxy Daemon (Control/Tunnel)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

@@ -37171,6 +37171,476 @@ pub fn unset_innernet_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_defguard_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy = \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "defguard_proxy"
+                    || k_low == "defguard_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"DEFGUARD_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("defguard_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("defguard_proxy=")
+            || clean.starts_with("defguard_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let is_systemd = lines.iter().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+        if is_systemd {
+            let mut final_lines = Vec::new();
+            let mut inserted = false;
+            for l in lines {
+                final_lines.push(l.clone());
+                if !inserted && l.trim().eq_ignore_ascii_case("[Service]") {
+                    final_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    final_lines.push(format!("Environment=\"DEFGUARD_PROXY={}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push(directive);
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_defguard_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "defguard_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "defguard_proxy"
+                    || k_low == "defguard_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "defguard_proxy"
+                    || k_low == "defguard_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("defguard_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("defguard_proxy=")
+            || clean.starts_with("defguard_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_defguard_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_defguard_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_defguard_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_defguard_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_defguard_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_defguard_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_inlets_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy: \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "inlets_proxy"
+                    || k_low == "inlets_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"INLETS_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("inlets_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("inlets_proxy=")
+            || clean.starts_with("inlets_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        let is_systemd = lines.iter().any(|l| l.trim().eq_ignore_ascii_case("[Service]"));
+        if is_systemd {
+            let mut final_lines = Vec::new();
+            let mut inserted = false;
+            for l in lines {
+                final_lines.push(l.clone());
+                if !inserted && l.trim().eq_ignore_ascii_case("[Service]") {
+                    final_lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    final_lines.push(format!("Environment=\"INLETS_PROXY={}\"", proxy_url));
+                    inserted = true;
+                }
+            }
+            return final_lines.join("\n") + "\n";
+        } else {
+            lines.push(directive);
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_inlets_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "inlets_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "inlets_proxy"
+                    || k_low == "inlets_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "inlets_proxy"
+                    || k_low == "inlets_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("inlets_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("inlets_proxy=")
+            || clean.starts_with("inlets_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_inlets_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_inlets_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_inlets_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_inlets_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_inlets_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_inlets_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -37377,6 +37847,8 @@ pub async fn turn_on(
     teleport: bool,
     pomerium: bool,
     innernet: bool,
+    defguard: bool,
+    inlets: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -37582,6 +38054,8 @@ pub async fn turn_on(
     let set_teleport = teleport || all;
     let set_pomerium = pomerium || all;
     let set_innernet = innernet || all;
+    let set_defguard = defguard || all;
+    let set_inlets = inlets || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -40543,6 +41017,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_defguard {
+        match set_defguard_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Defguard daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Defguard daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_inlets {
+        match set_inlets_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Inlets daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Inlets daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -40762,6 +41266,8 @@ pub fn turn_off(
     teleport: bool,
     pomerium: bool,
     innernet: bool,
+    defguard: bool,
+    inlets: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -40967,6 +41473,8 @@ pub fn turn_off(
     let unset_teleport = teleport || all;
     let unset_pomerium = pomerium || all;
     let unset_innernet = innernet || all;
+    let unset_defguard = defguard || all;
+    let unset_inlets = inlets || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -42668,6 +43176,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Innernet daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Innernet proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Innernet daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_defguard {
+        match unset_defguard_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Defguard daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Defguard proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Defguard daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_inlets {
+        match unset_inlets_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Inlets daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Inlets proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Inlets daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -47630,5 +48154,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("INNERNET_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_defguard_proxy() {
+        let dg_initial = "{\n  \"service\": \"defguard\"\n}\n";
+        let dg_updated = apply_defguard_proxy(dg_initial, "http://10.0.0.128:7890");
+        assert!(dg_updated.contains("\"proxy\": \"http://10.0.0.128:7890\""));
+        let (dg_cleaned, dg_removed) = remove_defguard_proxy(&dg_updated);
+        assert!(dg_removed);
+        assert!(!dg_cleaned.contains("\"proxy\":"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_defguard_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"DEFGUARD_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_defguard_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("DEFGUARD_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_inlets_proxy() {
+        let in_initial = "{\n  \"service\": \"inlets\"\n}\n";
+        let in_updated = apply_inlets_proxy(in_initial, "http://10.0.0.128:7890");
+        assert!(in_updated.contains("\"proxy\": \"http://10.0.0.128:7890\""));
+        let (in_cleaned, in_removed) = remove_inlets_proxy(&in_updated);
+        assert!(in_removed);
+        assert!(!in_cleaned.contains("\"proxy\":"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_inlets_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"INLETS_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_inlets_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("INLETS_PROXY="));
     }
 }
