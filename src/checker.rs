@@ -2550,6 +2550,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Llama-3.3-70B AI CDN",
         "https://github.com/meta-llama/llama-models",
     ),
+    (
+        "mise Dev CDN",
+        "https://github.com/jdx/mise",
+    ),
+    (
+        "pixi Dev CDN",
+        "https://github.com/prefix-dev/pixi",
+    ),
+    (
+        "OpenThoughts AI CDN",
+        "https://github.com/open-thoughts/open-thoughts",
+    ),
+    (
+        "Qwen2.5-1M AI CDN",
+        "https://github.com/QwenLM/Qwen2.5-1M",
+    ),
+    (
+        "Hermes-3 AI CDN",
+        "https://github.com/NousResearch/Hermes-3",
+    ),
+    (
+        "Fish-Speech-1.5 AI CDN",
+        "https://github.com/fishaudio/fish-speech",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4772,6 +4796,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Llama-3.3-70B AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "mise Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "pixi Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OpenThoughts AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen2.5-1M AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Hermes-3 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fish-Speech-1.5 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

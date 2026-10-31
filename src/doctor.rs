@@ -57195,6 +57195,646 @@ pub fn get_devcontainer_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_mise_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MISE_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MISE_SETTINGS_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("MISE_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("MISE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("MISE_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from(".mise.toml"),
+        PathBuf::from("mise.toml"),
+        PathBuf::from(".mise.local.toml"),
+        PathBuf::from("mise.local.toml"),
+        PathBuf::from(".config/mise.toml"),
+        PathBuf::from(".tool-versions"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("mise").join("config.toml"),
+            home.join(".config").join("mise").join("settings.toml"),
+            home.join(".local").join("share").join("mise").join("config.toml"),
+            home.join(".mise.toml"),
+            home.join(".config").join("systemd").join("user").join("mise.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/mise/config.toml"),
+        PathBuf::from("/etc/mise/settings.toml"),
+        PathBuf::from("/etc/mise.toml"),
+        PathBuf::from("/usr/local/etc/mise/config.toml"),
+        PathBuf::from("/opt/homebrew/etc/mise/config.toml"),
+        PathBuf::from("/etc/default/mise"),
+        PathBuf::from("/etc/sysconfig/mise"),
+        PathBuf::from("/etc/systemd/system/mise.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_mise = PathBuf::from("/etc/mise");
+    if etc_mise.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_mise) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "toml" || ext == "yaml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_mise_config_path() -> Option<PathBuf> {
+    let paths = get_mise_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_mise_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_mise_write_path() -> PathBuf {
+    if let Some(p) = get_mise_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MISE_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("mise");
+        if dir.is_dir() {
+            return dir.join("config.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/mise");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/mise.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("mise").join("config.toml");
+    }
+    PathBuf::from("/etc/mise/config.toml")
+}
+
+pub fn parse_mise_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "mise_proxy"
+                    || k_low == "mise_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export mise_proxy=")
+            || lower.starts_with("export mise_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("mise_proxy=")
+            || lower.starts_with("mise_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("mise_proxy =")
+            || clean.starts_with("mise_proxy=")
+            || clean.starts_with("mise_http_proxy =")
+            || clean.starts_with("mise_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("mise_proxy:")
+            || clean.starts_with("mise_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_mise_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_mise_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_mise_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MISE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MISE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MISE_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MISE_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MISE_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MISE_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MISE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MISE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_pixi_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PIXI_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PIXI_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PIXI_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PIXI_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PIXI_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("pixi.toml"),
+        PathBuf::from(".pixi/config.toml"),
+        PathBuf::from("pyproject.toml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("pixi").join("config.toml"),
+            home.join(".pixi").join("config.toml"),
+            home.join(".config").join("systemd").join("user").join("pixi.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/pixi/config.toml"),
+        PathBuf::from("/etc/pixi.toml"),
+        PathBuf::from("/usr/local/etc/pixi/config.toml"),
+        PathBuf::from("/opt/homebrew/etc/pixi/config.toml"),
+        PathBuf::from("/etc/default/pixi"),
+        PathBuf::from("/etc/sysconfig/pixi"),
+        PathBuf::from("/etc/systemd/system/pixi.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_pixi = PathBuf::from("/etc/pixi");
+    if etc_pixi.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_pixi) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "toml" || ext == "yaml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_pixi_config_path() -> Option<PathBuf> {
+    let paths = get_pixi_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_pixi_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pixi_write_path() -> PathBuf {
+    if let Some(p) = get_pixi_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PIXI_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("pixi");
+        if dir.is_dir() {
+            return dir.join("config.toml");
+        }
+        let dir2 = home.join(".pixi");
+        if dir2.is_dir() {
+            return dir2.join("config.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/pixi");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/pixi.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("pixi").join("config.toml");
+    }
+    PathBuf::from("/etc/pixi/config.toml")
+}
+
+pub fn parse_pixi_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pixi_proxy"
+                    || k_low == "pixi_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export pixi_proxy=")
+            || lower.starts_with("export pixi_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("pixi_proxy=")
+            || lower.starts_with("pixi_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("pixi_proxy =")
+            || clean.starts_with("pixi_proxy=")
+            || clean.starts_with("pixi_http_proxy =")
+            || clean.starts_with("pixi_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("pixi_proxy:")
+            || clean.starts_with("pixi_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pixi_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pixi_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pixi_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PIXI_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PIXI_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PIXI_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PIXI_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PIXI_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PIXI_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PIXI_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PIXI_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -66416,6 +67056,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Dev Container Proxy",
             "~/.devcontainer/config.json & /etc/devcontainer/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Mise-en-place Polyglot Dev Environment Manager & Shims Daemon (~/.config/mise/config.toml / /etc/mise/config.toml / /etc/systemd/system/mise.service.d/http-proxy.conf)
+    if let Some((mise_proxy, mise_path)) = get_mise_proxy() {
+        let ok = verify_proxy_url(&mise_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Mise proxy `{}` in {} is dead! (Mise polyglot tool version & dev environment proxy will fail)",
+                mise_proxy,
+                mise_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Mise Dev Proxy",
+            format!("{}", mise_path.display()),
+            mise_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Mise fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Mise Dev Proxy",
+            "~/.config/mise/config.toml & /etc/mise/config.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Pixi Fast Conda Dev Environment & Package Manager Daemon (~/.config/pixi/config.toml / /etc/pixi/config.toml / /etc/systemd/system/pixi.service.d/http-proxy.conf)
+    if let Some((pixi_proxy, pixi_path)) = get_pixi_proxy() {
+        let ok = verify_proxy_url(&pixi_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Pixi proxy `{}` in {} is dead! (Pixi conda dev environment & package manager proxy will fail)",
+                pixi_proxy,
+                pixi_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Pixi Dev Proxy",
+            format!("{}", pixi_path.display()),
+            pixi_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Pixi fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Pixi Dev Proxy",
+            "~/.config/pixi/config.toml & /etc/pixi/config.toml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -76618,5 +77322,73 @@ Environment="DEVCONTAINER_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; devcontainer_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_devcontainer_proxy(input_comment), None);
         assert_eq!(parse_devcontainer_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_mise_proxy() {
+        let toml_settings = r#"
+[settings]
+http_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mise_proxy(toml_settings),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let toml_env = r#"
+[env]
+HTTP_PROXY = "http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_mise_proxy(toml_env),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="MISE_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mise_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n; mise_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_mise_proxy(input_comment), None);
+        assert_eq!(parse_mise_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pixi_proxy() {
+        let toml_network = r#"
+[network]
+http_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pixi_proxy(toml_network),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let toml_proxy = r#"
+[proxy]
+http_proxy = "http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_pixi_proxy(toml_proxy),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="PIXI_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pixi_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n; pixi_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_pixi_proxy(input_comment), None);
+        assert_eq!(parse_pixi_proxy(""), None);
     }
 }

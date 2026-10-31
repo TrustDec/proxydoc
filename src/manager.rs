@@ -49361,6 +49361,408 @@ pub fn unset_devcontainer_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_mise_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "mise_proxy"
+                    || k_low == "mise_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"MISE_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export mise_proxy=")
+            || lower.starts_with("export mise_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("mise_proxy=")
+            || lower.starts_with("mise_http_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export MISE_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "mise_proxy"
+                || k_trim == "mise_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"MISE_HTTP_PROXY={}\"", proxy_url));
+        } else if content.contains("[settings]") {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        } else {
+            lines.push("[settings]".to_string());
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_mise_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "mise_proxy"
+                    || k_low == "mise_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export mise_proxy=")
+            || lower.starts_with("export mise_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("mise_proxy=")
+            || lower.starts_with("mise_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "mise_proxy"
+                || k_trim == "mise_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_mise_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_mise_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_mise_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_mise_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_mise_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_mise_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_pixi_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pixi_proxy"
+                    || k_low == "pixi_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"PIXI_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export pixi_proxy=")
+            || lower.starts_with("export pixi_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("pixi_proxy=")
+            || lower.starts_with("pixi_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export PIXI_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "pixi_proxy"
+                || k_trim == "pixi_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"PIXI_HTTP_PROXY={}\"", proxy_url));
+        } else if content.contains("[network]") {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        } else {
+            lines.push("[network]".to_string());
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pixi_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pixi_proxy"
+                    || k_low == "pixi_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export pixi_proxy=")
+            || lower.starts_with("export pixi_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("pixi_proxy=")
+            || lower.starts_with("pixi_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "pixi_proxy"
+                || k_trim == "pixi_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_pixi_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pixi_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_pixi_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_pixi_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pixi_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pixi_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -49621,6 +50023,8 @@ pub async fn turn_on(
     devpod: bool,
     gitpod: bool,
     devcontainer: bool,
+    mise: bool,
+    pixi: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -49880,6 +50284,8 @@ pub async fn turn_on(
     let set_devpod = devpod || all;
     let set_gitpod = gitpod || all;
     let set_devcontainer = devcontainer || all;
+    let set_mise = mise || all;
+    let set_pixi = pixi || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -53651,6 +54057,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_mise {
+        match set_mise_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Mise dev environment ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Mise config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_pixi {
+        match set_pixi_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Pixi dev environment ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Pixi config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -53924,6 +54360,8 @@ pub fn turn_off(
     devpod: bool,
     gitpod: bool,
     devcontainer: bool,
+    mise: bool,
+    pixi: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -54183,6 +54621,8 @@ pub fn turn_off(
     let unset_devpod = devpod || all;
     let unset_gitpod = gitpod || all;
     let unset_devcontainer = devcontainer || all;
+    let unset_mise = mise || all;
+    let unset_pixi = pixi || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -56316,6 +56756,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Dev Container daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Dev Container proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Dev Container daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_mise {
+        match unset_mise_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Mise dev environment proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Mise proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Mise dev environment proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pixi {
+        match unset_pixi_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Pixi dev environment proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Pixi proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Pixi dev environment proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -62304,5 +62760,39 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("DEVCONTAINER_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_mise_proxy() {
+        let toml_initial = "[settings]\nlegacy_version_file = true\n";
+        let toml_updated = apply_mise_proxy(toml_initial, "http://10.0.0.128:7890");
+        assert!(toml_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (toml_cleaned, toml_removed) = remove_mise_proxy(&toml_updated);
+        assert!(toml_removed);
+        assert!(!toml_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/mise\n";
+        let dropin_updated = apply_mise_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_mise_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pixi_proxy() {
+        let toml_initial = "[workspace]\nchannels = [\"conda-forge\"]\n";
+        let toml_updated = apply_pixi_proxy(toml_initial, "http://10.0.0.128:7890");
+        assert!(toml_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (toml_cleaned, toml_removed) = remove_pixi_proxy(&toml_updated);
+        assert!(toml_removed);
+        assert!(!toml_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/pixi\n";
+        let dropin_updated = apply_pixi_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_pixi_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
     }
 }
