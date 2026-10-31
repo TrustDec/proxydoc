@@ -143,6 +143,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (12300, false, "Sshuttle Transparent SSH Proxy Daemon (Forward/Control)"),
     (8081, false, "Psiphon Censorship Circumvention Daemon (HTTP/Tunnel)"),
     (3999, false, "Localtunnel Localhost Reverse Tunnel Daemon (Client/Control)"),
+    (8088, false, "Pagekite Fast Localhost Tunnel & Reverse Proxy Daemon (HTTP/Tunnel)"),
+    (8474, false, "Toxiproxy Resiliency & Fault Injection Proxy Daemon (HTTP/Admin)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

@@ -2094,6 +2094,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Llama-Omni AI CDN",
         "https://github.com/ictnlp/Llama-Omni",
     ),
+    (
+        "Pagekite Reverse Proxy CDN",
+        "https://github.com/pagekite/PyPagekite",
+    ),
+    (
+        "Toxiproxy Resiliency Proxy CDN",
+        "https://github.com/Shopify/toxiproxy",
+    ),
+    (
+        "Depth-Anything-V2 AI CDN",
+        "https://github.com/DepthAnything/Depth-Anything-V2",
+    ),
+    (
+        "Kolors AI CDN",
+        "https://github.com/Kwai-Kolors/Kolors",
+    ),
+    (
+        "WhisperX AI CDN",
+        "https://github.com/m-bain/whisperX",
+    ),
+    (
+        "TripoSR AI CDN",
+        "https://github.com/VAST-AI-Research/TripoSR",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3974,6 +3998,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Llama-Omni AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pagekite Reverse Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Toxiproxy Resiliency Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Depth-Anything-V2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Kolors AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "WhisperX AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "TripoSR AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

@@ -44820,6 +44820,609 @@ pub fn get_localtunnel_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_pagekite_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PAGEKITE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PAGEKITE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PAGEKITE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("pagekite.rc");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".pagekite.rc"),
+            home.join(".config").join("pagekite").join("pagekite.rc"),
+            home.join(".config").join("pagekite").join("pagekite.conf"),
+            home.join(".pagekite").join("pagekite.rc"),
+            home.join(".config").join("systemd").join("user").join("pagekite.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/pagekite.d/pagekite.rc"),
+        PathBuf::from("/etc/pagekite.rc"),
+        PathBuf::from("/etc/pagekite/pagekite.rc"),
+        PathBuf::from("/etc/pagekite/pagekite.conf"),
+        PathBuf::from("/var/lib/pagekite/pagekite.rc"),
+        PathBuf::from("/usr/local/etc/pagekite.rc"),
+        PathBuf::from("/opt/homebrew/etc/pagekite.rc"),
+        PathBuf::from("/etc/default/pagekite"),
+        PathBuf::from("/etc/sysconfig/pagekite"),
+        PathBuf::from("/etc/systemd/system/pagekite.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_pagekite_d = PathBuf::from("/etc/pagekite.d");
+    if etc_pagekite_d.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_pagekite_d) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "rc" || ext == "conf" || ext == "json" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_pagekite_config_path() -> Option<PathBuf> {
+    let paths = get_pagekite_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_pagekite_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_pagekite_write_path() -> PathBuf {
+    if let Some(p) = get_pagekite_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PAGEKITE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("PAGEKITE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("pagekite");
+        if dir.is_dir() {
+            return dir.join("pagekite.rc");
+        }
+        let dir2 = home.join(".pagekite");
+        if dir2.is_dir() {
+            return dir2.join("pagekite.rc");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/pagekite.d");
+    if etc_dir.is_dir() {
+        return etc_dir.join("pagekite.rc");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/pagekite.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".pagekite.rc");
+    }
+    PathBuf::from("/etc/pagekite.rc")
+}
+
+pub fn parse_pagekite_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "pagekite_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pagekite_proxy"
+                    || k_low == "pagekite_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pagekite_proxy"
+                    || k_low == "pagekite_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("--proxy=") || lower.starts_with("-proxy=") {
+            let val = trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("pagekite_proxy:")
+            || clean.starts_with("pagekite_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_pagekite_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pagekite_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pagekite_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PAGEKITE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PAGEKITE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PAGEKITE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PAGEKITE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_toxiproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TOXIPROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TOXIPROXY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TOXIPROXY_DIR") {
+        let p = PathBuf::from(dir.trim()).join("toxiproxy.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("toxiproxy").join("toxiproxy.json"),
+            home.join(".config").join("toxiproxy").join("config.json"),
+            home.join(".toxiproxy.json"),
+            home.join(".toxiproxy").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("toxiproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/toxiproxy/toxiproxy.json"),
+        PathBuf::from("/etc/toxiproxy/config.json"),
+        PathBuf::from("/etc/toxiproxy.json"),
+        PathBuf::from("/var/lib/toxiproxy/toxiproxy.json"),
+        PathBuf::from("/usr/local/etc/toxiproxy.json"),
+        PathBuf::from("/opt/homebrew/etc/toxiproxy.json"),
+        PathBuf::from("/etc/default/toxiproxy"),
+        PathBuf::from("/etc/sysconfig/toxiproxy"),
+        PathBuf::from("/etc/systemd/system/toxiproxy.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_toxiproxy = PathBuf::from("/etc/toxiproxy");
+    if etc_toxiproxy.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_toxiproxy) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_toxiproxy_config_path() -> Option<PathBuf> {
+    let paths = get_toxiproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_toxiproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_toxiproxy_write_path() -> PathBuf {
+    if let Some(p) = get_toxiproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TOXIPROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TOXIPROXY_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("toxiproxy");
+        if dir.is_dir() {
+            return dir.join("toxiproxy.json");
+        }
+        let dir2 = home.join(".toxiproxy");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/toxiproxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("toxiproxy.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/toxiproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("toxiproxy").join("toxiproxy.json");
+    }
+    PathBuf::from("/etc/toxiproxy/toxiproxy.json")
+}
+
+pub fn parse_toxiproxy_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "upstream_proxy",
+                "upstream_proxy_url",
+                "upstreamProxy",
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "toxiproxy_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "toxiproxy_proxy"
+                    || k_low == "toxiproxy_http_proxy"
+                    || k_low == "upstream_proxy"
+                    || k_low == "upstream_proxy_url"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "toxiproxy_proxy"
+                    || k_low == "toxiproxy_http_proxy"
+                    || k_low == "upstream_proxy"
+                    || k_low == "upstream_proxy_url"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("toxiproxy_proxy:")
+            || clean.starts_with("toxiproxy_proxy=")
+            || clean.starts_with("upstream_proxy:")
+            || clean.starts_with("upstream_proxy=")
+            || clean.starts_with("upstream_proxy_url:")
+            || clean.starts_with("upstream_proxy_url=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_toxiproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_toxiproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_toxiproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TOXIPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TOXIPROXY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TOXIPROXY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TOXIPROXY_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -52825,6 +53428,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Localtunnel Daemon Proxy",
             "~/.localtunnelrc & /etc/localtunnel/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Pagekite Localhost Tunnel & Reverse Proxy Daemon (~/.pagekite.rc / /etc/pagekite.d/pagekite.rc / /etc/systemd/system/pagekite.service.d/http-proxy.conf)
+    if let Some((pagekite_proxy, pagekite_path)) = get_pagekite_proxy() {
+        let ok = verify_proxy_url(&pagekite_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Pagekite proxy `{}` in {} is dead! (Pagekite localhost tunnel and reverse proxy forwarding will fail)",
+                pagekite_proxy,
+                pagekite_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Pagekite Daemon Proxy",
+            format!("{}", pagekite_path.display()),
+            pagekite_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Pagekite fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Pagekite Daemon Proxy",
+            "~/.pagekite.rc & /etc/pagekite.d/pagekite.rc",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Toxiproxy Resiliency & Fault Injection Proxy Daemon (~/.config/toxiproxy/toxiproxy.json / /etc/toxiproxy/toxiproxy.json / /etc/systemd/system/toxiproxy.service.d/http-proxy.conf)
+    if let Some((toxiproxy_proxy, toxiproxy_path)) = get_toxiproxy_proxy() {
+        let ok = verify_proxy_url(&toxiproxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Toxiproxy proxy `{}` in {} is dead! (Toxiproxy upstream proxy simulation and forwarding will fail)",
+                toxiproxy_proxy,
+                toxiproxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Toxiproxy Daemon Proxy",
+            format!("{}", toxiproxy_path.display()),
+            toxiproxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Toxiproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Toxiproxy Daemon Proxy",
+            "~/.config/toxiproxy/toxiproxy.json & /etc/toxiproxy/toxiproxy.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -61722,5 +62389,75 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; localtunnel_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_localtunnel_proxy(input_comment), None);
         assert_eq!(parse_localtunnel_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pagekite_proxy() {
+        let pagekite_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_pagekite_proxy(pagekite_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let pagekite_conf = r#"
+# Pagekite configuration
+pagekite_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pagekite_proxy(pagekite_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pagekite_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; pagekite_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_pagekite_proxy(input_comment), None);
+        assert_eq!(parse_pagekite_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_toxiproxy_proxy() {
+        let toxi_json = r#"
+{
+  "upstream_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_toxiproxy_proxy(toxi_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let toxi_conf = r#"
+# Toxiproxy configuration
+toxiproxy_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_toxiproxy_proxy(toxi_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_toxiproxy_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; toxiproxy_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_toxiproxy_proxy(input_comment), None);
+        assert_eq!(parse_toxiproxy_proxy(""), None);
     }
 }
