@@ -43086,6 +43086,579 @@ pub fn get_freelan_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_omniedge_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("OMNIEDGE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("OMNIEDGE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("OMNIEDGE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("omniedge.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".omniedge").join("omniedge.json"),
+            home.join(".omniedge").join("config.json"),
+            home.join(".config").join("omniedge").join("omniedge.json"),
+            home.join(".config").join("omniedge").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("omniedge.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/omniedge/omniedge.json"),
+        PathBuf::from("/etc/omniedge/config.json"),
+        PathBuf::from("/etc/omniedge/omniedge.conf"),
+        PathBuf::from("/var/lib/omniedge/omniedge.json"),
+        PathBuf::from("/usr/local/etc/omniedge/omniedge.json"),
+        PathBuf::from("/opt/homebrew/etc/omniedge/omniedge.json"),
+        PathBuf::from("/etc/default/omniedge"),
+        PathBuf::from("/etc/sysconfig/omniedge"),
+        PathBuf::from("/etc/systemd/system/omniedge.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_omniedge = PathBuf::from("/etc/omniedge");
+    if etc_omniedge.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_omniedge) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_omniedge_config_path() -> Option<PathBuf> {
+    let paths = get_omniedge_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_omniedge_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_omniedge_write_path() -> PathBuf {
+    if let Some(p) = get_omniedge_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("OMNIEDGE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".omniedge");
+        if dir.is_dir() {
+            return dir.join("omniedge.json");
+        }
+        let cfg_dir = home.join(".config").join("omniedge");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("omniedge.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/omniedge");
+    if etc_dir.is_dir() {
+        return etc_dir.join("omniedge.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/omniedge.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".omniedge").join("omniedge.json");
+    }
+    PathBuf::from("/etc/omniedge/omniedge.json")
+}
+
+pub fn parse_omniedge_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "omniedge_proxy",
+                "connect_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "omniedge_proxy"
+                    || k_low == "omniedge_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "omniedge_proxy"
+                    || k_low == "omniedge_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("omniedge_proxy:")
+            || clean.starts_with("omniedge_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_omniedge_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_omniedge_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_omniedge_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("OMNIEDGE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OMNIEDGE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("OMNIEDGE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OMNIEDGE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_lantern_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("LANTERN_SETTINGS") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("LANTERN_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("LANTERN_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("LANTERN_DIR") {
+        let p = PathBuf::from(dir.trim()).join("settings.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".lantern").join("settings.yaml"),
+            home.join(".lantern").join("lantern.conf"),
+            home.join(".config").join("lantern").join("settings.yaml"),
+            home.join(".config").join("lantern").join("lantern.conf"),
+            home.join(".config").join("systemd").join("user").join("lantern.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/lantern/settings.yaml"),
+        PathBuf::from("/etc/lantern/lantern.conf"),
+        PathBuf::from("/var/lib/lantern/settings.yaml"),
+        PathBuf::from("/usr/local/etc/lantern/settings.yaml"),
+        PathBuf::from("/opt/homebrew/etc/lantern/settings.yaml"),
+        PathBuf::from("/etc/default/lantern"),
+        PathBuf::from("/etc/sysconfig/lantern"),
+        PathBuf::from("/etc/systemd/system/lantern.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_lantern = PathBuf::from("/etc/lantern");
+    if etc_lantern.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_lantern) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "json" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_lantern_config_path() -> Option<PathBuf> {
+    let paths = get_lantern_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_lantern_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_lantern_write_path() -> PathBuf {
+    if let Some(p) = get_lantern_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("LANTERN_SETTINGS") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("LANTERN_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".lantern");
+        if dir.is_dir() {
+            return dir.join("settings.yaml");
+        }
+        let cfg_dir = home.join(".config").join("lantern");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("settings.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/lantern");
+    if etc_dir.is_dir() {
+        return etc_dir.join("settings.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/lantern.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".lantern").join("settings.yaml");
+    }
+    PathBuf::from("/etc/lantern/settings.yaml")
+}
+
+pub fn parse_lantern_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "lantern_proxy",
+                "socks5_proxy",
+                "addr",
+                "socksAddr",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "lantern_proxy"
+                    || k_low == "lantern_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "lantern_proxy"
+                    || k_low == "lantern_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("lantern_proxy:")
+            || clean.starts_with("lantern_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_lantern_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_lantern_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_lantern_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("LANTERN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LANTERN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LANTERN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LANTERN_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -50899,6 +51472,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "FreeLAN Daemon Proxy",
             "~/.config/freelan/freelan.conf & /etc/freelan/freelan.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // OmniEdge Decentralized Mesh VPN Daemon (~/.omniedge/omniedge.json / /etc/omniedge/omniedge.json / /etc/systemd/system/omniedge.service.d/http-proxy.conf)
+    if let Some((omniedge_proxy, omniedge_path)) = get_omniedge_proxy() {
+        let ok = verify_proxy_url(&omniedge_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "OmniEdge proxy `{}` in {} is dead! (OmniEdge mesh peer discovery and virtual overlay will fail)",
+                omniedge_proxy,
+                omniedge_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "OmniEdge Daemon Proxy",
+            format!("{}", omniedge_path.display()),
+            omniedge_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (OmniEdge fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "OmniEdge Daemon Proxy",
+            "~/.omniedge/omniedge.json & /etc/omniedge/omniedge.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Lantern Censorship Circumvention Proxy Daemon (~/.lantern/settings.yaml / /etc/lantern/settings.yaml / /etc/systemd/system/lantern.service.d/http-proxy.conf)
+    if let Some((lantern_proxy, lantern_path)) = get_lantern_proxy() {
+        let ok = verify_proxy_url(&lantern_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Lantern proxy `{}` in {} is dead! (Lantern upstream circumvention proxy will fail)",
+                lantern_proxy,
+                lantern_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Lantern Daemon Proxy",
+            format!("{}", lantern_path.display()),
+            lantern_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Lantern fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Lantern Daemon Proxy",
+            "~/.lantern/settings.yaml & /etc/lantern/settings.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -59587,5 +60224,73 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# server.http_proxy_url = \"http://127.0.0.1:7890\"\n; freelan_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_freelan_proxy(input_comment), None);
         assert_eq!(parse_freelan_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_omniedge_proxy() {
+        let omniedge_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_omniedge_proxy(omniedge_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let omniedge_conf = r#"
+# OmniEdge configuration
+omniedge_proxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_omniedge_proxy(omniedge_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_omniedge_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; omniedge_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_omniedge_proxy(input_comment), None);
+        assert_eq!(parse_omniedge_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_lantern_proxy() {
+        let lantern_yaml = r#"
+# Lantern settings
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_lantern_proxy(lantern_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let lantern_conf = r#"
+lantern_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_lantern_proxy(lantern_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_lantern_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; lantern_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_lantern_proxy(input_comment), None);
+        assert_eq!(parse_lantern_proxy(""), None);
     }
 }

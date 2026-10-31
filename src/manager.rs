@@ -39433,6 +39433,437 @@ pub fn unset_freelan_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_omniedge_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("omniedge_proxy = \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "omniedge_proxy"
+                    || k_low == "omniedge_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"OMNIEDGE_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("omniedge_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("omniedge_proxy:")
+            || clean.starts_with("omniedge_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_omniedge_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "omniedge_proxy",
+                "connect_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "omniedge_proxy"
+                    || k_low == "omniedge_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "omniedge_proxy"
+                    || k_low == "omniedge_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("omniedge_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("omniedge_proxy:")
+            || clean.starts_with("omniedge_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_omniedge_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_omniedge_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_omniedge_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_omniedge_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_omniedge_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_omniedge_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_lantern_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy: \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "lantern_proxy"
+                    || k_low == "lantern_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"LANTERN_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("lantern_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("lantern_proxy:")
+            || clean.starts_with("lantern_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_lantern_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "lantern_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "lantern_proxy"
+                    || k_low == "lantern_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "lantern_proxy"
+                    || k_low == "lantern_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("lantern_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("lantern_proxy:")
+            || clean.starts_with("lantern_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_lantern_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_lantern_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_lantern_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_lantern_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_lantern_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_lantern_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -39649,6 +40080,8 @@ pub async fn turn_on(
     boringproxy: bool,
     ghostunnel: bool,
     freelan: bool,
+    omniedge: bool,
+    lantern: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -39864,6 +40297,8 @@ pub async fn turn_on(
     let set_boringproxy = boringproxy || all;
     let set_ghostunnel = ghostunnel || all;
     let set_freelan = freelan || all;
+    let set_omniedge = omniedge || all;
+    let set_lantern = lantern || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -42975,6 +43410,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_omniedge {
+        match set_omniedge_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ OmniEdge daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update OmniEdge daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_lantern {
+        match set_lantern_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Lantern daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Lantern daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -43204,6 +43669,8 @@ pub fn turn_off(
     boringproxy: bool,
     ghostunnel: bool,
     freelan: bool,
+    omniedge: bool,
+    lantern: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -43419,6 +43886,8 @@ pub fn turn_off(
     let unset_boringproxy = boringproxy || all;
     let unset_ghostunnel = ghostunnel || all;
     let unset_freelan = freelan || all;
+    let unset_omniedge = omniedge || all;
+    let unset_lantern = lantern || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -45200,6 +45669,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ FreeLAN daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ FreeLAN proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset FreeLAN daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_omniedge {
+        match unset_omniedge_proxy() {
+            Ok(true) => eprintln!("{}", "✔ OmniEdge daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ OmniEdge proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset OmniEdge daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_lantern {
+        match unset_lantern_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Lantern daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Lantern proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Lantern daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -50352,5 +50837,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("FREELAN_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_omniedge_proxy() {
+        let omniedge_initial = "{\n  \"proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let omniedge_updated = apply_omniedge_proxy(omniedge_initial, "http://10.0.0.128:7890");
+        assert!(omniedge_updated.contains("http://10.0.0.128:7890"));
+        let (omniedge_cleaned, omniedge_removed) = remove_omniedge_proxy(&omniedge_updated);
+        assert!(omniedge_removed);
+        assert!(!omniedge_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_omniedge_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"OMNIEDGE_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_omniedge_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("OMNIEDGE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_lantern_proxy() {
+        let lantern_initial = "proxy: \"http://127.0.0.1:1080\"\n";
+        let lantern_updated = apply_lantern_proxy(lantern_initial, "http://10.0.0.128:7890");
+        assert!(lantern_updated.contains("http://10.0.0.128:7890"));
+        let (lantern_cleaned, lantern_removed) = remove_lantern_proxy(&lantern_updated);
+        assert!(lantern_removed);
+        assert!(!lantern_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_lantern_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"LANTERN_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_lantern_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("LANTERN_PROXY="));
     }
 }
