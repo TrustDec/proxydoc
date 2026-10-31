@@ -2190,6 +2190,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Baichuan-Omni AI CDN",
         "https://github.com/baichuan-inc/Baichuan-Omni",
     ),
+    (
+        "Tunnelmole Tunnel CDN",
+        "https://github.com/robbie-cahill/tunnelmole-client",
+    ),
+    (
+        "Expose Tunnel CDN",
+        "https://github.com/beyondcode/expose",
+    ),
+    (
+        "Phi-4 AI CDN",
+        "https://github.com/microsoft/phi-4",
+    ),
+    (
+        "Qwen2.5-Math AI CDN",
+        "https://github.com/QwenLM/Qwen2.5-Math",
+    ),
+    (
+        "DeepSeek-Coder-V2 AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-Coder-V2",
+    ),
+    (
+        "GLM-4V AI CDN",
+        "https://github.com/THUDM/GLM-4V",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4142,6 +4166,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Baichuan-Omni AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Tunnelmole Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Expose Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Phi-4 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen2.5-Math AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-Coder-V2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GLM-4V AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

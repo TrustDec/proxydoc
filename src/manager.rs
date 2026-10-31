@@ -42595,6 +42595,504 @@ pub fn unset_loophole_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_tunnelmole_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy: \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelmole_proxy"
+                    || k_low == "tunnelmole_http_proxy"
+                    || k_low == "tmole_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"TUNNELMOLE_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("tunnelmole_proxy=")
+            || lower.starts_with("tmole_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("tunnelmole_proxy:")
+            || clean.starts_with("tunnelmole_proxy=")
+            || clean.starts_with("tmole_proxy:")
+            || clean.starts_with("tmole_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.trim().is_empty() {
+            let mut obj = serde_json::Map::new();
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&serde_json::Value::Object(obj)).unwrap_or_else(|_| directive) + "\n";
+        }
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_tunnelmole_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "tunnelmole_proxy",
+                "tmole_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelmole_proxy"
+                    || k_low == "tunnelmole_http_proxy"
+                    || k_low == "tmole_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelmole_proxy"
+                    || k_low == "tunnelmole_http_proxy"
+                    || k_low == "tmole_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("tunnelmole_proxy=")
+            || lower.starts_with("tmole_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("tunnelmole_proxy:")
+            || clean.starts_with("tunnelmole_proxy=")
+            || clean.starts_with("tmole_proxy:")
+            || clean.starts_with("tmole_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_tunnelmole_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tunnelmole_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_tunnelmole_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_tunnelmole_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tunnelmole_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tunnelmole_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_expose_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy: \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "expose_proxy"
+                    || k_low == "expose_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"EXPOSE_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trimmed.split_once("=>") {
+            let k_clean = k.trim().trim_matches('\'').trim_matches('"').to_ascii_lowercase();
+            if k_clean == "proxy" || k_clean == "proxy_url" || k_clean == "expose_proxy" || k_clean == "http_proxy" {
+                if !replaced {
+                    lines.push(format!("    'proxy' => '{}',", proxy_url));
+                    replaced = true;
+                }
+                continue;
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("expose_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("expose_proxy:")
+            || clean.starts_with("expose_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if content.contains("<?php") && content.contains('[') {
+            let mut php_lines = Vec::new();
+            let mut inserted = false;
+            for line in content.lines() {
+                php_lines.push(line.to_string());
+                if !inserted && (line.contains("return [") || line.contains("return array(")) {
+                    php_lines.push(format!("    'proxy' => '{}',", proxy_url));
+                    inserted = true;
+                }
+            }
+            if inserted {
+                return php_lines.join("\n") + "\n";
+            }
+        } else if content.trim().is_empty() {
+            let mut obj = serde_json::Map::new();
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&serde_json::Value::Object(obj)).unwrap_or_else(|_| directive) + "\n";
+        }
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_expose_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "expose_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "expose_proxy"
+                    || k_low == "expose_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if let Some((k, _)) = trimmed.split_once("=>") {
+            let k_clean = k.trim().trim_matches('\'').trim_matches('"').to_ascii_lowercase();
+            if k_clean == "proxy" || k_clean == "proxy_url" || k_clean == "expose_proxy" || k_clean == "http_proxy" {
+                removed = true;
+                continue;
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "expose_proxy"
+                    || k_low == "expose_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("expose_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("expose_proxy:")
+            || clean.starts_with("expose_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_expose_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_expose_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_expose_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_expose_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_expose_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_expose_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -42825,6 +43323,8 @@ pub async fn turn_on(
     sish: bool,
     pinggy: bool,
     loophole: bool,
+    tunnelmole: bool,
+    expose: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -43054,6 +43554,8 @@ pub async fn turn_on(
     let set_sish = sish || all;
     let set_pinggy = pinggy || all;
     let set_loophole = loophole || all;
+    let set_tunnelmole = tunnelmole || all;
+    let set_expose = expose || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -46375,6 +46877,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_tunnelmole {
+        match set_tunnelmole_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Tunnelmole daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Tunnelmole daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_expose {
+        match set_expose_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Expose daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Expose daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -46618,6 +47150,8 @@ pub fn turn_off(
     sish: bool,
     pinggy: bool,
     loophole: bool,
+    tunnelmole: bool,
+    expose: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -46847,6 +47381,8 @@ pub fn turn_off(
     let unset_sish = sish || all;
     let unset_pinggy = pinggy || all;
     let unset_loophole = loophole || all;
+    let unset_tunnelmole = tunnelmole || all;
+    let unset_expose = expose || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -48740,6 +49276,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Loophole daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Loophole proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Loophole daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tunnelmole {
+        match unset_tunnelmole_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Tunnelmole daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Tunnelmole proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Tunnelmole daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_expose {
+        match unset_expose_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Expose daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Expose proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Expose daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -54158,5 +54710,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("LOOPHOLE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tunnelmole_proxy() {
+        let tunnelmole_initial = "{\n  \"proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let tunnelmole_updated = apply_tunnelmole_proxy(tunnelmole_initial, "http://10.0.0.128:7890");
+        assert!(tunnelmole_updated.contains("http://10.0.0.128:7890"));
+        let (tunnelmole_cleaned, tunnelmole_removed) = remove_tunnelmole_proxy(&tunnelmole_updated);
+        assert!(tunnelmole_removed);
+        assert!(!tunnelmole_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_tunnelmole_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"TUNNELMOLE_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_tunnelmole_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TUNNELMOLE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_expose_proxy() {
+        let expose_php_initial = "<?php\nreturn [\n    'proxy' => 'http://127.0.0.1:1080',\n];\n";
+        let expose_updated = apply_expose_proxy(expose_php_initial, "http://10.0.0.128:7890");
+        assert!(expose_updated.contains("http://10.0.0.128:7890"));
+        let (expose_cleaned, expose_removed) = remove_expose_proxy(&expose_updated);
+        assert!(expose_removed);
+        assert!(!expose_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_expose_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"EXPOSE_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_expose_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("EXPOSE_PROXY="));
     }
 }

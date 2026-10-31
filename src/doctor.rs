@@ -47267,6 +47267,663 @@ pub fn get_loophole_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_tunnelmole_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TUNNELMOLE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TUNNELMOLE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TUNNELMOLE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".tunnelmole").join("config.json"),
+            home.join(".config").join("tunnelmole").join("config.json"),
+            home.join(".tunnelmole").join("tunnelmole.json"),
+            home.join(".tmole").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("tunnelmole.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tunnelmole/config.json"),
+        PathBuf::from("/etc/tunnelmole.json"),
+        PathBuf::from("/var/lib/tunnelmole/config.json"),
+        PathBuf::from("/usr/local/etc/tunnelmole/config.json"),
+        PathBuf::from("/opt/homebrew/etc/tunnelmole/config.json"),
+        PathBuf::from("/etc/default/tunnelmole"),
+        PathBuf::from("/etc/sysconfig/tunnelmole"),
+        PathBuf::from("/etc/systemd/system/tunnelmole.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/tmole.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_tunnelmole = PathBuf::from("/etc/tunnelmole");
+    if etc_tunnelmole.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_tunnelmole) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_tunnelmole_config_path() -> Option<PathBuf> {
+    let paths = get_tunnelmole_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tunnelmole_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tunnelmole_write_path() -> PathBuf {
+    if let Some(p) = get_tunnelmole_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TUNNELMOLE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TUNNELMOLE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".tunnelmole");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("tunnelmole");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/tunnelmole");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tunnelmole.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".tunnelmole").join("config.json");
+    }
+    PathBuf::from("/etc/tunnelmole/config.json")
+}
+
+pub fn parse_tunnelmole_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "tunnelmole_proxy",
+                "tmole_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelmole_proxy"
+                    || k_low == "tunnelmole_http_proxy"
+                    || k_low == "tmole_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelmole_proxy"
+                    || k_low == "tunnelmole_http_proxy"
+                    || k_low == "tmole_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "tunnelmole_proxy"
+                || k_low == "tmole_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "tunnelmole_proxy"
+                || k_low == "tmole_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_tunnelmole_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tunnelmole_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tunnelmole_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TUNNELMOLE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUNNELMOLE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TUNNELMOLE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUNNELMOLE_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TMOLE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TMOLE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_expose_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("EXPOSE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("EXPOSE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("EXPOSE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.php");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".expose").join("config.php"),
+            home.join(".expose").join("config.json"),
+            home.join(".config").join("expose").join("config.php"),
+            home.join(".config").join("expose").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("expose.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/expose/config.php"),
+        PathBuf::from("/etc/expose/config.json"),
+        PathBuf::from("/etc/expose.json"),
+        PathBuf::from("/var/lib/expose/config.json"),
+        PathBuf::from("/usr/local/etc/expose/config.json"),
+        PathBuf::from("/opt/homebrew/etc/expose/config.json"),
+        PathBuf::from("/etc/default/expose"),
+        PathBuf::from("/etc/sysconfig/expose"),
+        PathBuf::from("/etc/systemd/system/expose.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_expose = PathBuf::from("/etc/expose");
+    if etc_expose.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_expose) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "php" || ext == "json" || ext == "conf" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_expose_config_path() -> Option<PathBuf> {
+    let paths = get_expose_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_expose_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_expose_write_path() -> PathBuf {
+    if let Some(p) = get_expose_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("EXPOSE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("EXPOSE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".expose");
+        if dir.is_dir() {
+            if dir.join("config.php").exists() {
+                return dir.join("config.php");
+            }
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("expose");
+        if dir2.is_dir() {
+            if dir2.join("config.php").exists() {
+                return dir2.join("config.php");
+            }
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/expose");
+    if etc_dir.is_dir() {
+        if etc_dir.join("config.php").exists() {
+            return etc_dir.join("config.php");
+        }
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/expose.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".expose").join("config.json");
+    }
+    PathBuf::from("/etc/expose/config.json")
+}
+
+pub fn parse_expose_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "expose_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "expose_proxy"
+                    || k_low == "expose_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if let Some((k, v)) = trimmed.split_once("=>") {
+            let k_clean = k.trim().trim_matches('\'').trim_matches('"').to_ascii_lowercase();
+            if k_clean == "proxy" || k_clean == "proxy_url" || k_clean == "expose_proxy" || k_clean == "http_proxy" {
+                let val = v.trim().trim_end_matches(',').trim_end_matches(';').trim().trim_matches('\'').trim_matches('"');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "expose_proxy"
+                    || k_low == "expose_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "expose_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "expose_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_expose_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_expose_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_expose_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("EXPOSE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:EXPOSE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("EXPOSE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:EXPOSE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -55528,6 +56185,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Loophole Daemon Proxy",
             "~/.loophole/config.yaml & /etc/loophole/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Tunnelmole Localhost Reverse Proxy & Tunnel Daemon (~/.tunnelmole/config.json / /etc/tunnelmole/config.json / /etc/systemd/system/tunnelmole.service.d/http-proxy.conf)
+    if let Some((tunnelmole_proxy, tunnelmole_path)) = get_tunnelmole_proxy() {
+        let ok = verify_proxy_url(&tunnelmole_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Tunnelmole proxy `{}` in {} is dead! (Tunnelmole localhost reverse tunnel and forwarding will fail)",
+                tunnelmole_proxy,
+                tunnelmole_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Tunnelmole Daemon Proxy",
+            format!("{}", tunnelmole_path.display()),
+            tunnelmole_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Tunnelmole fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Tunnelmole Daemon Proxy",
+            "~/.tunnelmole/config.json & /etc/tunnelmole/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Expose Localhost Reverse Proxy & Tunnel Daemon (~/.expose/config.php / ~/.expose/config.json / /etc/systemd/system/expose.service.d/http-proxy.conf)
+    if let Some((expose_proxy, expose_path)) = get_expose_proxy() {
+        let ok = verify_proxy_url(&expose_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Expose proxy `{}` in {} is dead! (Expose localhost reverse tunnel and forwarding will fail)",
+                expose_proxy,
+                expose_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Expose Daemon Proxy",
+            format!("{}", expose_path.display()),
+            expose_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Expose fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Expose Daemon Proxy",
+            "~/.expose/config.php & /etc/expose/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -64699,5 +65420,76 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; loophole_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_loophole_proxy(input_comment), None);
         assert_eq!(parse_loophole_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tunnelmole_proxy() {
+        let tunnelmole_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_tunnelmole_proxy(tunnelmole_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let tunnelmole_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tunnelmole_proxy(tunnelmole_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tunnelmole_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; tunnelmole_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_tunnelmole_proxy(input_comment), None);
+        assert_eq!(parse_tunnelmole_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_expose_proxy() {
+        let expose_php = r#"
+<?php
+return [
+    'proxy' => 'http://127.0.0.1:7890',
+];
+"#;
+        assert_eq!(
+            parse_expose_proxy(expose_php),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let expose_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_expose_proxy(expose_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_expose_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; expose_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_expose_proxy(input_comment), None);
+        assert_eq!(parse_expose_proxy(""), None);
     }
 }
