@@ -51804,6 +51804,646 @@ pub fn get_mysocketctl_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_openp2p_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("OPENP2P_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("OPENP2P_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("OPENP2P_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".openp2p").join("config.json"),
+            home.join(".config").join("openp2p").join("config.json"),
+            home.join(".openp2p.json"),
+            home.join(".openp2p").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("openp2p.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/openp2p/config.json"),
+        PathBuf::from("/etc/openp2p.json"),
+        PathBuf::from("/var/lib/openp2p/config.json"),
+        PathBuf::from("/usr/local/etc/openp2p/config.json"),
+        PathBuf::from("/opt/homebrew/etc/openp2p/config.json"),
+        PathBuf::from("/etc/default/openp2p"),
+        PathBuf::from("/etc/sysconfig/openp2p"),
+        PathBuf::from("/etc/systemd/system/openp2p.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/openp2pd.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_openp2p = PathBuf::from("/etc/openp2p");
+    if etc_openp2p.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_openp2p) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_openp2p_config_path() -> Option<PathBuf> {
+    let paths = get_openp2p_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_openp2p_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_openp2p_write_path() -> PathBuf {
+    if let Some(p) = get_openp2p_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("OPENP2P_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".openp2p");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("openp2p");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/openp2p");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/openp2p.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".openp2p").join("config.json");
+    }
+    PathBuf::from("/etc/openp2p/config.json")
+}
+
+pub fn parse_openp2p_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "openp2p_proxy",
+                "openp2p_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openp2p_proxy"
+                    || k_low == "openp2p_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "openp2p_proxy"
+                    || k_low == "openp2p_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "openp2p_proxy"
+                || k_low == "openp2p_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "openp2p_proxy"
+                || k_low == "openp2p_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_openp2p_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_openp2p_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_openp2p_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("OPENP2P_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OPENP2P_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("OPENP2P_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OPENP2P_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("OPENP2P_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OPENP2P_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_rport_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("RPORT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("RPORT_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("RPORT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("rport.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".rport").join("rport.conf"),
+            home.join(".config").join("rport").join("rport.conf"),
+            home.join(".rport.conf"),
+            home.join(".rport").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("rport.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/rport/rport.conf"),
+        PathBuf::from("/etc/rport.conf"),
+        PathBuf::from("/var/lib/rport/rport.conf"),
+        PathBuf::from("/usr/local/etc/rport/rport.conf"),
+        PathBuf::from("/opt/homebrew/etc/rport/rport.conf"),
+        PathBuf::from("/etc/default/rport"),
+        PathBuf::from("/etc/sysconfig/rport"),
+        PathBuf::from("/etc/systemd/system/rport.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/rportd.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_rport = PathBuf::from("/etc/rport");
+    if etc_rport.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_rport) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "ini" || ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_rport_config_path() -> Option<PathBuf> {
+    let paths = get_rport_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_rport_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_rport_write_path() -> PathBuf {
+    if let Some(p) = get_rport_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("RPORT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".rport");
+        if dir.is_dir() {
+            return dir.join("rport.conf");
+        }
+        let dir2 = home.join(".config").join("rport");
+        if dir2.is_dir() {
+            return dir2.join("rport.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/rport");
+    if etc_dir.is_dir() {
+        return etc_dir.join("rport.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/rport.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".rport").join("rport.conf");
+    }
+    PathBuf::from("/etc/rport/rport.conf")
+}
+
+pub fn parse_rport_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "rport_proxy",
+                "rport_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rport_proxy"
+                    || k_low == "rport_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rport_proxy"
+                    || k_low == "rport_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "rport_proxy"
+                || k_low == "rport_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "rport_proxy"
+                || k_low == "rport_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_rport_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_rport_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_rport_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("RPORT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RPORT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("RPORT_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RPORT_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("RPORT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RPORT_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -60513,6 +61153,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "mysocketctl Daemon Proxy",
             "~/.mysocket/config.json & /etc/mysocketctl/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // openp2p Decentralized P2P Reverse Tunnel & Port Forwarding Client (~/.openp2p/config.json / /etc/openp2p/config.json / /etc/systemd/system/openp2p.service.d/http-proxy.conf)
+    if let Some((openp2p_proxy, openp2p_path)) = get_openp2p_proxy() {
+        let ok = verify_proxy_url(&openp2p_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "openp2p proxy `{}` in {} is dead! (openp2p peer-to-peer reverse tunneling and port forwarding will fail)",
+                openp2p_proxy,
+                openp2p_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "openp2p Daemon Proxy",
+            format!("{}", openp2p_path.display()),
+            openp2p_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (openp2p fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "openp2p Daemon Proxy",
+            "~/.openp2p/config.json & /etc/openp2p/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // rport Remote Management & Reverse Tunnel Client (~/.rport/rport.conf / /etc/rport/rport.conf / /etc/systemd/system/rport.service.d/http-proxy.conf)
+    if let Some((rport_proxy, rport_path)) = get_rport_proxy() {
+        let ok = verify_proxy_url(&rport_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "rport proxy `{}` in {} is dead! (rport remote management and reverse tunneling will fail)",
+                rport_proxy,
+                rport_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "rport Daemon Proxy",
+            format!("{}", rport_path.display()),
+            rport_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (rport fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "rport Daemon Proxy",
+            "~/.rport/rport.conf & /etc/rport/rport.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -70166,5 +70870,74 @@ Environment="BORDER0_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; mysocketctl_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_mysocketctl_proxy(input_comment), None);
         assert_eq!(parse_mysocketctl_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_openp2p_proxy() {
+        let openp2p_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_openp2p_proxy(openp2p_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let openp2p_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_openp2p_proxy(openp2p_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="OPENP2P_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_openp2p_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; openp2p_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_openp2p_proxy(input_comment), None);
+        assert_eq!(parse_openp2p_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_rport_proxy() {
+        let rport_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_rport_proxy(rport_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let rport_conf = r#"
+[remote-management]
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_rport_proxy(rport_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="RPORT_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_rport_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; rport_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_rport_proxy(input_comment), None);
+        assert_eq!(parse_rport_proxy(""), None);
     }
 }

@@ -2358,6 +2358,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "InternLM2 AI CDN",
         "https://github.com/InternLM/InternLM",
     ),
+    (
+        "openp2p Tunnel CDN",
+        "https://github.com/openp2p-cn/openp2p",
+    ),
+    (
+        "rport Tunnel CDN",
+        "https://github.com/open-rport/rport",
+    ),
+    (
+        "MiniCPM3 AI CDN",
+        "https://github.com/OpenBMB/MiniCPM",
+    ),
+    (
+        "Yi-1.5 AI CDN",
+        "https://github.com/01-ai/Yi-1.5",
+    ),
+    (
+        "Mistral-Nemo AI CDN",
+        "https://github.com/mistralai/mistral-inference",
+    ),
+    (
+        "InternLM-XComposer2 AI CDN",
+        "https://github.com/InternLM/InternLM-XComposer",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4436,6 +4460,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "InternLM2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "openp2p Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "rport Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MiniCPM3 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Yi-1.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Mistral-Nemo AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InternLM-XComposer2 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
