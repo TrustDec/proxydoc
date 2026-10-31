@@ -59226,6 +59226,737 @@ pub fn get_devbox_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_aqua_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("AQUA_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("AQUA_GLOBAL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("AQUA_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("aqua.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("aqua.yml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Ok(dir) = std::env::var("AQUA_ROOT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("aqua.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("aqua.yaml"),
+        PathBuf::from("aqua.yml"),
+        PathBuf::from(".aqua.yaml"),
+        PathBuf::from(".aqua.yml"),
+        PathBuf::from("aqua-all.yaml"),
+        PathBuf::from("aqua-all.yml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("aquaproj-aqua").join("aqua.yaml"),
+            home.join(".config").join("aquaproj-aqua").join("aqua.yml"),
+            home.join(".local").join("share").join("aquaproj-aqua").join("aqua.yaml"),
+            home.join(".aqua").join("aqua.yaml"),
+            home.join(".aqua").join("aqua.yml"),
+            home.join(".config").join("aqua").join("aqua.yaml"),
+            home.join(".config").join("systemd").join("user").join("aqua.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/aqua/aqua.yaml"),
+        PathBuf::from("/etc/aqua/aqua.yml"),
+        PathBuf::from("/etc/aquaproj-aqua/aqua.yaml"),
+        PathBuf::from("/usr/local/etc/aqua/aqua.yaml"),
+        PathBuf::from("/opt/homebrew/etc/aqua/aqua.yaml"),
+        PathBuf::from("/etc/default/aqua"),
+        PathBuf::from("/etc/sysconfig/aqua"),
+        PathBuf::from("/etc/systemd/system/aqua.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_aqua = PathBuf::from("/etc/aqua");
+    if etc_aqua.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_aqua) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "json" || ext == "toml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_aqua_config_path() -> Option<PathBuf> {
+    let paths = get_aqua_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_aqua_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_aqua_write_path() -> PathBuf {
+    if let Some(p) = get_aqua_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("AQUA_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("AQUA_GLOBAL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("aquaproj-aqua");
+        if dir.is_dir() {
+            return dir.join("aqua.yaml");
+        }
+        let dir2 = home.join(".aqua");
+        if dir2.is_dir() {
+            return dir2.join("aqua.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/aqua");
+    if etc_dir.is_dir() {
+        return etc_dir.join("aqua.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/aqua.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("aquaproj-aqua").join("aqua.yaml");
+    }
+    PathBuf::from("/etc/aqua/aqua.yaml")
+}
+
+pub fn parse_aqua_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "aqua_proxy", "aqua_http_proxy"] {
+                if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+                    let trim = s.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+            if let Some(env_obj) = obj.get("env").and_then(|v| v.as_object()) {
+                for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "AQUA_HTTP_PROXY"] {
+                    if let Some(s) = env_obj.get(key).and_then(|v| v.as_str()) {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "aqua_proxy"
+                    || k_low == "aqua_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export aqua_proxy=")
+            || lower.starts_with("export aqua_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("aqua_proxy=")
+            || lower.starts_with("aqua_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy =")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http =")
+            || clean.starts_with("http=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https-proxy =")
+            || clean.starts_with("https-proxy=")
+            || clean.starts_with("https =")
+            || clean.starts_with("https=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("aqua_proxy =")
+            || clean.starts_with("aqua_proxy=")
+            || clean.starts_with("aqua_http_proxy =")
+            || clean.starts_with("aqua_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https-proxy:")
+            || clean.starts_with("https:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("aqua_proxy:")
+            || clean.starts_with("aqua_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_aqua_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_aqua_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_aqua_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("AQUA_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AQUA_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("AQUA_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AQUA_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("AQUA_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AQUA_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("AQUA_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:AQUA_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_hermit_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("HERMIT_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("HERMIT_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.hcl");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Ok(dir) = std::env::var("HERMIT_ROOT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("hermit.hcl");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("HERMIT_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.hcl");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("hermit.hcl"),
+        PathBuf::from(".hermit.hcl"),
+        PathBuf::from("bin/hermit.hcl"),
+        PathBuf::from(".hermit/config.hcl"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("hermit").join("config.hcl"),
+            home.join(".config").join("hermit").join("config.toml"),
+            home.join(".cache").join("hermit").join("config.hcl"),
+            home.join(".hermit").join("config.hcl"),
+            home.join(".hermit.hcl"),
+            home.join(".config").join("systemd").join("user").join("hermit.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/hermit/config.hcl"),
+        PathBuf::from("/etc/hermit/config.toml"),
+        PathBuf::from("/etc/hermit.hcl"),
+        PathBuf::from("/usr/local/etc/hermit/config.hcl"),
+        PathBuf::from("/opt/homebrew/etc/hermit/config.hcl"),
+        PathBuf::from("/etc/default/hermit"),
+        PathBuf::from("/etc/sysconfig/hermit"),
+        PathBuf::from("/etc/systemd/system/hermit.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_hermit = PathBuf::from("/etc/hermit");
+    if etc_hermit.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_hermit) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "hcl" || ext == "toml" || ext == "json" || ext == "yaml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_hermit_config_path() -> Option<PathBuf> {
+    let paths = get_hermit_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_hermit_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_hermit_write_path() -> PathBuf {
+    if let Some(p) = get_hermit_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("HERMIT_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("hermit");
+        if dir.is_dir() {
+            return dir.join("config.hcl");
+        }
+        let dir2 = home.join(".cache").join("hermit");
+        if dir2.is_dir() {
+            return dir2.join("config.hcl");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/hermit");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.hcl");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/hermit.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("hermit").join("config.hcl");
+    }
+    PathBuf::from("/etc/hermit/config.hcl")
+}
+
+pub fn parse_hermit_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "hermit_proxy", "hermit_http_proxy"] {
+                if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+                    let trim = s.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "hermit_proxy"
+                    || k_low == "hermit_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export hermit_proxy=")
+            || lower.starts_with("export hermit_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("hermit_proxy=")
+            || lower.starts_with("hermit_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy =")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http =")
+            || clean.starts_with("http=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https-proxy =")
+            || clean.starts_with("https-proxy=")
+            || clean.starts_with("https =")
+            || clean.starts_with("https=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("hermit_proxy =")
+            || clean.starts_with("hermit_proxy=")
+            || clean.starts_with("hermit_http_proxy =")
+            || clean.starts_with("hermit_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https-proxy:")
+            || clean.starts_with("https:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("hermit_proxy:")
+            || clean.starts_with("hermit_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_hermit_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_hermit_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_hermit_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("HERMIT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HERMIT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HERMIT_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HERMIT_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HERMIT_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HERMIT_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HERMIT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HERMIT_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -68639,6 +69370,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Devbox Dev Proxy",
             "~/.config/devbox/config.json & /etc/devbox/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Aqua Declarative CLI Version Manager Daemon (~/.config/aquaproj-aqua/aqua.yaml / aqua.yaml / /etc/aqua/aqua.yaml / /etc/systemd/system/aqua.service.d/http-proxy.conf)
+    if let Some((aqua_proxy, aqua_path)) = get_aqua_proxy() {
+        let ok = verify_proxy_url(&aqua_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Aqua proxy `{}` in {} is dead! (Aqua declarative CLI toolchain proxy will fail)",
+                aqua_proxy,
+                aqua_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Aqua Dev Proxy",
+            format!("{}", aqua_path.display()),
+            aqua_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Aqua fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Aqua Dev Proxy",
+            "~/.config/aquaproj-aqua/aqua.yaml & /etc/aqua/aqua.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Hermit Isolated & Reproducible Dev Environment Daemon (~/.config/hermit/config.hcl / hermit.hcl / /etc/hermit/config.hcl / /etc/systemd/system/hermit.service.d/http-proxy.conf)
+    if let Some((hermit_proxy, hermit_path)) = get_hermit_proxy() {
+        let ok = verify_proxy_url(&hermit_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Hermit proxy `{}` in {} is dead! (Hermit isolated dev environment proxy will fail)",
+                hermit_proxy,
+                hermit_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Hermit Dev Proxy",
+            format!("{}", hermit_path.display()),
+            hermit_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Hermit fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Hermit Dev Proxy",
+            "~/.config/hermit/config.hcl & /etc/hermit/config.hcl",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -79051,5 +79846,63 @@ Environment="DEVBOX_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http-proxy = \"http://127.0.0.1:7890\"\n; devbox_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_devbox_proxy(input_comment), None);
         assert_eq!(parse_devbox_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_aqua_proxy() {
+        let yaml_config = r#"
+http_proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_aqua_proxy(yaml_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let json_config = r#"
+{
+  "http-proxy": "http://10.0.0.5:8888"
+}
+"#;
+        assert_eq!(
+            parse_aqua_proxy(json_config),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="AQUA_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_aqua_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy: \"http://127.0.0.1:7890\"\n; aqua_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_aqua_proxy(input_comment), None);
+        assert_eq!(parse_aqua_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_hermit_proxy() {
+        let hcl_config = r#"
+http-proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_hermit_proxy(hcl_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HERMIT_PROXY=http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_hermit_proxy(dropin),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let input_comment = "# http-proxy = \"http://127.0.0.1:7890\"\n// hermit_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_hermit_proxy(input_comment), None);
+        assert_eq!(parse_hermit_proxy(""), None);
     }
 }

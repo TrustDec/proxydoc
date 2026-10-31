@@ -2622,6 +2622,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "SimpleRL-Reason AI CDN",
         "https://github.com/hkust-nlp/simple-rl-reason",
     ),
+    (
+        "aqua Dev CDN",
+        "https://github.com/aquaproj/aqua",
+    ),
+    (
+        "hermit Dev CDN",
+        "https://github.com/cashapp/hermit",
+    ),
+    (
+        "Search-R1 AI CDN",
+        "https://github.com/PeterGriffinJin/Search-R1",
+    ),
+    (
+        "STILL-2 AI CDN",
+        "https://github.com/DAMO-NLP-SG/STILL-2",
+    ),
+    (
+        "LIMR AI CDN",
+        "https://github.com/GAIR-NLP/LIMR",
+    ),
+    (
+        "R1-Searcher AI CDN",
+        "https://github.com/RUCAIBox/R1-Searcher",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4898,6 +4922,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "SimpleRL-Reason AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "aqua Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "hermit Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Search-R1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "STILL-2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LIMR AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "R1-Searcher AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

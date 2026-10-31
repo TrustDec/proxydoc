@@ -183,6 +183,8 @@
   - 智能诊断 **Flox (基于 Nix 的轻量虚拟开发环境与包管理器 flox) 代理**（`~/.config/flox/config.toml`、`flox.toml`、`.flox/env/manifest.toml`、`/etc/flox/config.toml`、`/etc/systemd/system/flox.service.d/http-proxy.conf`、`FLOX_HTTP_PROXY`），排查软件包解析、依赖安装与虚拟环境构建因死代理卡死；
   - 智能诊断 **Devenv (超快声明式 Nix 开发环境管理器 devenv) 代理**（`~/.config/devenv/config.json`、`~/.config/devenv/devenv.toml`、`devenv.yaml`、`/etc/devenv/config.json`、`/etc/systemd/system/devenv.service.d/http-proxy.conf`、`DEVENV_HTTP_PROXY`），排查声明式开发环境初始化、容器构建与依赖下载因死代理卡死；
   - 智能诊断 **Devbox (便携式 Nix 隔离开发环境 devbox) 代理**（`~/.config/devbox/config.json`、`devbox.json`、`/etc/devbox/config.json`、`/etc/systemd/system/devbox.service.d/http-proxy.conf`、`DEVBOX_HTTP_PROXY`），排查 Nix 软件包解析、Flake 依赖同步与容器化环境构建因死代理失败；
+  - 智能诊断 **Aqua (声明式 CLI 版本与工具链管理器 aqua) 代理**（`~/.config/aquaproj-aqua/aqua.yaml`、`aqua.yaml`、`/etc/aqua/aqua.yaml`、`/etc/systemd/system/aqua.service.d/http-proxy.conf`、`AQUA_HTTP_PROXY`），排查 CLI 工具下载、Registry 查询与工具链安装因死代理卡死；
+  - 智能诊断 **Hermit (自包含可重现开发环境与包管理器 hermit) 代理**（`~/.config/hermit/config.hcl`、`hermit.hcl`、`/etc/hermit/config.hcl`、`/etc/systemd/system/hermit.service.d/http-proxy.conf`、`HERMIT_HTTP_PROXY`），排查软件环境隔离包下载、Channel 依赖同步与开发工具执行因死代理失败；
   - 智能诊断 **Ollama (本地 AI 模型服务守护进程) 代理**（`/etc/systemd/system/ollama.service.d/http-proxy.conf`、`~/.ollama/environment`、`~/Library/LaunchAgents/com.ollama.ollama.plist`），排查 `ollama pull` 与 `ollama run` 因守护进程死代理超时卡死；
   - 智能诊断 **Alpine Linux apk 包管理器仓库与镜像源**（`/etc/apk/repositories`），排查 `apk add` 与 `apk update` 因死镜像源阻塞；
   - 智能诊断 **Flatpak (Linux 桌面应用包管理器与运行环境) 仓库代理**（`~/.local/share/flatpak/repo/config`、`/var/lib/flatpak/repo/config`、`/etc/flatpak/remotes.d/`），排查 `flatpak install` 与应用更新因死代理失败；
