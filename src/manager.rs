@@ -42149,6 +42149,452 @@ pub fn unset_sish_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_pinggy_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy: \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pinggy_proxy"
+                    || k_low == "pinggy_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"PINGGY_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("pinggy_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("pinggy_proxy:")
+            || clean.starts_with("pinggy_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pinggy_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "pinggy_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pinggy_proxy"
+                    || k_low == "pinggy_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pinggy_proxy"
+                    || k_low == "pinggy_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("pinggy_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("pinggy_proxy:")
+            || clean.starts_with("pinggy_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_pinggy_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pinggy_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_pinggy_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_pinggy_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pinggy_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pinggy_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_loophole_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy: \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "loophole_proxy"
+                    || k_low == "loophole_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"LOOPHOLE_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("loophole_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("loophole_proxy:")
+            || clean.starts_with("loophole_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_loophole_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "loophole_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "loophole_proxy"
+                    || k_low == "loophole_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "loophole_proxy"
+                    || k_low == "loophole_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("loophole_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("loophole_proxy:")
+            || clean.starts_with("loophole_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_loophole_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_loophole_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_loophole_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_loophole_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_loophole_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_loophole_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -42377,6 +42823,8 @@ pub async fn turn_on(
     localxpose: bool,
     packetriot: bool,
     sish: bool,
+    pinggy: bool,
+    loophole: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -42604,6 +43052,8 @@ pub async fn turn_on(
     let set_localxpose = localxpose || all;
     let set_packetriot = packetriot || all;
     let set_sish = sish || all;
+    let set_pinggy = pinggy || all;
+    let set_loophole = loophole || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -45895,6 +46345,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_pinggy {
+        match set_pinggy_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Pinggy daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Pinggy daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_loophole {
+        match set_loophole_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Loophole daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Loophole daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -46136,6 +46616,8 @@ pub fn turn_off(
     localxpose: bool,
     packetriot: bool,
     sish: bool,
+    pinggy: bool,
+    loophole: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -46363,6 +46845,8 @@ pub fn turn_off(
     let unset_localxpose = localxpose || all;
     let unset_packetriot = packetriot || all;
     let unset_sish = sish || all;
+    let unset_pinggy = pinggy || all;
+    let unset_loophole = loophole || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -48240,6 +48724,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ sish daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ sish proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset sish daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pinggy {
+        match unset_pinggy_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Pinggy daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Pinggy proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Pinggy daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_loophole {
+        match unset_loophole_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Loophole daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Loophole proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Loophole daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -53620,5 +54120,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("SISH_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pinggy_proxy() {
+        let pinggy_initial = "{\n  \"proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let pinggy_updated = apply_pinggy_proxy(pinggy_initial, "http://10.0.0.128:7890");
+        assert!(pinggy_updated.contains("http://10.0.0.128:7890"));
+        let (pinggy_cleaned, pinggy_removed) = remove_pinggy_proxy(&pinggy_updated);
+        assert!(pinggy_removed);
+        assert!(!pinggy_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_pinggy_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"PINGGY_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_pinggy_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("PINGGY_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_loophole_proxy() {
+        let loophole_initial = "proxy: \"http://127.0.0.1:1080\"\n";
+        let loophole_updated = apply_loophole_proxy(loophole_initial, "http://10.0.0.128:7890");
+        assert!(loophole_updated.contains("http://10.0.0.128:7890"));
+        let (loophole_cleaned, loophole_removed) = remove_loophole_proxy(&loophole_updated);
+        assert!(loophole_removed);
+        assert!(!loophole_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_loophole_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"LOOPHOLE_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_loophole_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("LOOPHOLE_PROXY="));
     }
 }

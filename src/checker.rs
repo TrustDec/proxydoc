@@ -2166,6 +2166,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "CogView4 AI CDN",
         "https://github.com/THUDM/CogView4",
     ),
+    (
+        "Pinggy Tunnel CDN",
+        "https://github.com/Pinggy-io/pinggy",
+    ),
+    (
+        "Loophole Tunnel CDN",
+        "https://github.com/loophole/cli",
+    ),
+    (
+        "YOLOv10 AI CDN",
+        "https://github.com/THU-MIG/yolov10",
+    ),
+    (
+        "MiniCPM-V AI CDN",
+        "https://github.com/OpenBMB/MiniCPM-V",
+    ),
+    (
+        "Qwen2-Audio AI CDN",
+        "https://github.com/QwenLM/Qwen2-Audio",
+    ),
+    (
+        "Baichuan-Omni AI CDN",
+        "https://github.com/baichuan-inc/Baichuan-Omni",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4100,6 +4124,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "CogView4 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pinggy Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Loophole Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "YOLOv10 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MiniCPM-V AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen2-Audio AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Baichuan-Omni AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

@@ -743,7 +743,13 @@ enum Commands {
         /// Also configure sish HTTP/TCP localhost tunnel & reverse proxy daemon (~/.sish/config.yaml / /etc/sish/config.yaml / /etc/systemd/system/sish.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "sish-daemon", visible_alias = "sish-proxy", visible_alias = "sish-tunnel")]
         sish: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, and sish proxy
+        /// Also configure Pinggy HTTP/TCP localhost tunnel & reverse proxy daemon (~/.pinggy/config.json / /etc/pinggy/config.json / /etc/systemd/system/pinggy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "pinggy-tunnel", visible_alias = "pinggy-proxy", visible_alias = "pinggy-daemon")]
+        pinggy: bool,
+        /// Also configure Loophole E2EE localhost reverse proxy & tunnel daemon (~/.loophole/config.yaml / /etc/loophole/config.yaml / /etc/systemd/system/loophole.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "loophole-proxy", visible_alias = "loophole-tunnel", visible_alias = "loophole-daemon")]
+        loophole: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, and loophole proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1430,7 +1436,13 @@ enum Commands {
         /// Also unset sish HTTP/TCP localhost tunnel & reverse proxy daemon (~/.sish/config.yaml / /etc/sish/config.yaml / /etc/systemd/system/sish.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "sish-daemon", visible_alias = "sish-proxy", visible_alias = "sish-tunnel")]
         sish: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, and sish proxy
+        /// Also unset Pinggy HTTP/TCP localhost tunnel & reverse proxy daemon (~/.pinggy/config.json / /etc/pinggy/config.json / /etc/systemd/system/pinggy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "pinggy-tunnel", visible_alias = "pinggy-proxy", visible_alias = "pinggy-daemon")]
+        pinggy: bool,
+        /// Also unset Loophole E2EE localhost reverse proxy & tunnel daemon (~/.loophole/config.yaml / /etc/loophole/config.yaml / /etc/systemd/system/loophole.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "loophole-proxy", visible_alias = "loophole-tunnel", visible_alias = "loophole-daemon")]
+        loophole: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, and loophole proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1700,6 +1712,8 @@ async fn main() -> Result<()> {
             localxpose,
             packetriot,
             sish,
+            pinggy,
+            loophole,
             all,
             shell,
         }) => {
@@ -1931,6 +1945,8 @@ async fn main() -> Result<()> {
                 localxpose,
                 packetriot,
                 sish,
+                pinggy,
+                loophole,
                 all,
                 shell.as_deref(),
             )
@@ -2163,6 +2179,8 @@ async fn main() -> Result<()> {
             localxpose,
             packetriot,
             sish,
+            pinggy,
+            loophole,
             all,
             shell,
         }) => {
@@ -2393,6 +2411,8 @@ async fn main() -> Result<()> {
                 localxpose,
                 packetriot,
                 sish,
+                pinggy,
+                loophole,
                 all,
                 shell.as_deref(),
             )?;
@@ -9443,6 +9463,98 @@ mod tests {
         match cli.command {
             Some(Commands::Off { sish, .. }) => {
                 assert!(sish);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_pinggy() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--pinggy"]).unwrap();
+        match cli.command {
+            Some(Commands::On { pinggy, .. }) => {
+                assert!(pinggy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--pinggy-tunnel"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { pinggy, .. }) => {
+                assert!(pinggy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--pinggy-proxy"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { pinggy, .. }) => {
+                assert!(pinggy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--pinggy-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { pinggy, .. }) => {
+                assert!(pinggy);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_pinggy() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--pinggy"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { pinggy, .. }) => {
+                assert!(pinggy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_loophole() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--loophole"]).unwrap();
+        match cli.command {
+            Some(Commands::On { loophole, .. }) => {
+                assert!(loophole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--loophole-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { loophole, .. }) => {
+                assert!(loophole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--loophole-tunnel"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { loophole, .. }) => {
+                assert!(loophole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--loophole-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { loophole, .. }) => {
+                assert!(loophole);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_loophole() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--loophole"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { loophole, .. }) => {
+                assert!(loophole);
             }
             _ => panic!("Expected Off command"),
         }
