@@ -2118,6 +2118,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "TripoSR AI CDN",
         "https://github.com/VAST-AI-Research/TripoSR",
     ),
+    (
+        "Telepresence Proxy CDN",
+        "https://github.com/telepresenceio/telepresence",
+    ),
+    (
+        "LocalXpose Reverse Proxy CDN",
+        "https://github.com/localxpose/localxpose-client",
+    ),
+    (
+        "TRELLIS AI CDN",
+        "https://github.com/microsoft/TRELLIS",
+    ),
+    (
+        "Sana AI CDN",
+        "https://github.com/NVlabs/Sana",
+    ),
+    (
+        "Sky-T1 AI CDN",
+        "https://github.com/NovaSky-AI/Sky-T1",
+    ),
+    (
+        "V-Express AI CDN",
+        "https://github.com/tencent-ailab/V-Express",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4016,6 +4040,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "TripoSR AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Telepresence Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LocalXpose Reverse Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "TRELLIS AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Sana AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Sky-T1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "V-Express AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

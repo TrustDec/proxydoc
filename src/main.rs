@@ -731,7 +731,13 @@ enum Commands {
         /// Also configure Toxiproxy resiliency & fault injection proxy daemon (~/.config/toxiproxy/toxiproxy.json / /etc/toxiproxy/toxiproxy.json / /etc/systemd/system/toxiproxy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "toxiproxy-daemon", visible_alias = "toxiproxy-proxy", visible_alias = "toxi")]
         toxiproxy: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, and toxiproxy proxy
+        /// Also configure Telepresence Kubernetes microservice local proxy & intercept daemon (~/.config/telepresence/config.yml / /etc/telepresence/config.yml / /etc/systemd/system/telepresence.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "telepresence-proxy", visible_alias = "telepresence-daemon", visible_alias = "tp")]
+        telepresence: bool,
+        /// Also configure LocalXpose localhost reverse proxy & tunnel daemon (~/.localxpose/config.yaml / /etc/localxpose/config.yaml / /etc/systemd/system/loclx.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "localxpose-proxy", visible_alias = "localxpose-tunnel", visible_alias = "loclx")]
+        localxpose: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, and localxpose proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1406,6 +1412,12 @@ enum Commands {
         /// Also unset Toxiproxy resiliency & fault injection proxy daemon (~/.config/toxiproxy/toxiproxy.json / /etc/toxiproxy/toxiproxy.json / /etc/systemd/system/toxiproxy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "toxiproxy-daemon", visible_alias = "toxiproxy-proxy", visible_alias = "toxi")]
         toxiproxy: bool,
+        /// Also unset Telepresence Kubernetes microservice local proxy & intercept daemon (~/.config/telepresence/config.yml / /etc/telepresence/config.yml / /etc/systemd/system/telepresence.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "telepresence-proxy", visible_alias = "telepresence-daemon", visible_alias = "tp")]
+        telepresence: bool,
+        /// Also unset LocalXpose localhost reverse proxy & tunnel daemon (~/.localxpose/config.yaml / /etc/localxpose/config.yaml / /etc/systemd/system/loclx.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "localxpose-proxy", visible_alias = "localxpose-tunnel", visible_alias = "loclx")]
+        localxpose: bool,
         /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, and toxiproxy proxy
         #[arg(short, long)]
         all: bool,
@@ -1672,6 +1684,8 @@ async fn main() -> Result<()> {
             localtunnel,
             pagekite,
             toxiproxy,
+            telepresence,
+            localxpose,
             all,
             shell,
         }) => {
@@ -1899,6 +1913,8 @@ async fn main() -> Result<()> {
                 localtunnel,
                 pagekite,
                 toxiproxy,
+                telepresence,
+                localxpose,
                 all,
                 shell.as_deref(),
             )
@@ -2127,6 +2143,8 @@ async fn main() -> Result<()> {
             localtunnel,
             pagekite,
             toxiproxy,
+            telepresence,
+            localxpose,
             all,
             shell,
         }) => {
@@ -2353,6 +2371,8 @@ async fn main() -> Result<()> {
                 localtunnel,
                 pagekite,
                 toxiproxy,
+                telepresence,
+                localxpose,
                 all,
                 shell.as_deref(),
             )?;
@@ -9251,6 +9271,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { toxiproxy, .. }) => {
                 assert!(toxiproxy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_telepresence() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--telepresence"]).unwrap();
+        match cli.command {
+            Some(Commands::On { telepresence, .. }) => {
+                assert!(telepresence);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--telepresence-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { telepresence, .. }) => {
+                assert!(telepresence);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--tp"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { telepresence, .. }) => {
+                assert!(telepresence);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_telepresence() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--telepresence"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { telepresence, .. }) => {
+                assert!(telepresence);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_localxpose() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--localxpose"]).unwrap();
+        match cli.command {
+            Some(Commands::On { localxpose, .. }) => {
+                assert!(localxpose);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--localxpose-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { localxpose, .. }) => {
+                assert!(localxpose);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--loclx"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { localxpose, .. }) => {
+                assert!(localxpose);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_localxpose() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--localxpose"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { localxpose, .. }) => {
+                assert!(localxpose);
             }
             _ => panic!("Expected Off command"),
         }

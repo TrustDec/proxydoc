@@ -45423,6 +45423,664 @@ pub fn get_toxiproxy_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_telepresence_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TELEPRESENCE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TELEPRESENCE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TELEPRESENCE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("telepresence").join("config.yml"),
+            home.join(".config").join("telepresence").join("config.yaml"),
+            home.join(".telepresence").join("config.yml"),
+            home.join(".telepresence").join("config.yaml"),
+            home.join("Library").join("Application Support").join("telepresence").join("config.yml"),
+            home.join(".config").join("systemd").join("user").join("telepresence.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/telepresence/config.yml"),
+        PathBuf::from("/etc/telepresence/config.yaml"),
+        PathBuf::from("/etc/telepresence.yml"),
+        PathBuf::from("/etc/telepresence.yaml"),
+        PathBuf::from("/var/lib/telepresence/config.yml"),
+        PathBuf::from("/usr/local/etc/telepresence/config.yml"),
+        PathBuf::from("/opt/homebrew/etc/telepresence/config.yml"),
+        PathBuf::from("/etc/default/telepresence"),
+        PathBuf::from("/etc/sysconfig/telepresence"),
+        PathBuf::from("/etc/systemd/system/telepresence.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_telepresence = PathBuf::from("/etc/telepresence");
+    if etc_telepresence.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_telepresence) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yml" || ext == "yaml" || ext == "conf" || ext == "json" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_telepresence_config_path() -> Option<PathBuf> {
+    let paths = get_telepresence_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_telepresence_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_telepresence_write_path() -> PathBuf {
+    if let Some(p) = get_telepresence_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TELEPRESENCE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TELEPRESENCE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("telepresence");
+        if dir.is_dir() {
+            return dir.join("config.yml");
+        }
+        let dir2 = home.join(".telepresence");
+        if dir2.is_dir() {
+            return dir2.join("config.yml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/telepresence");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/telepresence.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("telepresence").join("config.yml");
+    }
+    PathBuf::from("/etc/telepresence/config.yml")
+}
+
+pub fn parse_telepresence_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            if let Some(client_val) = obj.get("client") {
+                if let Some(client_obj) = client_val.as_object() {
+                    for key in ["httpProxy", "http_proxy", "https_proxy", "proxy", "proxyUrl", "proxy_url"] {
+                        if let Some(v) = client_obj.get(key) {
+                            if let Some(s) = v.as_str() {
+                                let trim = s.trim();
+                                if !trim.is_empty() {
+                                    return Some(if trim.starts_with("http://")
+                                        || trim.starts_with("https://")
+                                        || trim.starts_with("socks")
+                                    {
+                                        trim.to_string()
+                                    } else {
+                                        format!("http://{}", trim)
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for key in [
+                "httpProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "telepresence_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "telepresence_proxy"
+                    || k_low == "telepresence_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "telepresence_proxy"
+                    || k_low == "telepresence_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("httpproxy:")
+            || clean.starts_with("httpproxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("telepresence_proxy:")
+            || clean.starts_with("telepresence_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_telepresence_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_telepresence_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_telepresence_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TELEPRESENCE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TELEPRESENCE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TELEPRESENCE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TELEPRESENCE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_localxpose_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("LOCALXPOSE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("LOCLX_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("LOCALXPOSE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".localxpose").join("config.yaml"),
+            home.join(".localxpose").join("config.json"),
+            home.join(".config").join("localxpose").join("config.yaml"),
+            home.join(".config").join("localxpose").join("config.json"),
+            home.join(".loclx").join("config.yaml"),
+            home.join(".loclx").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("loclx.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("localxpose.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/localxpose/config.yaml"),
+        PathBuf::from("/etc/localxpose/config.json"),
+        PathBuf::from("/etc/loclx/config.yaml"),
+        PathBuf::from("/etc/loclx/config.json"),
+        PathBuf::from("/var/lib/localxpose/config.yaml"),
+        PathBuf::from("/usr/local/etc/localxpose/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/localxpose/config.yaml"),
+        PathBuf::from("/etc/default/localxpose"),
+        PathBuf::from("/etc/sysconfig/localxpose"),
+        PathBuf::from("/etc/systemd/system/loclx.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/localxpose.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_localxpose = PathBuf::from("/etc/localxpose");
+    if etc_localxpose.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_localxpose) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "json" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_localxpose_config_path() -> Option<PathBuf> {
+    let paths = get_localxpose_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_localxpose_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_localxpose_write_path() -> PathBuf {
+    if let Some(p) = get_localxpose_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("LOCALXPOSE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("LOCLX_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".localxpose");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+        let dir2 = home.join(".config").join("localxpose");
+        if dir2.is_dir() {
+            return dir2.join("config.yaml");
+        }
+        let dir3 = home.join(".loclx");
+        if dir3.is_dir() {
+            return dir3.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/localxpose");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/loclx.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".localxpose").join("config.yaml");
+    }
+    PathBuf::from("/etc/localxpose/config.yaml")
+}
+
+pub fn parse_localxpose_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "localxpose_proxy",
+                "loclx_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "localxpose_proxy"
+                    || k_low == "loclx_proxy"
+                    || k_low == "localxpose_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "localxpose_proxy"
+                    || k_low == "loclx_proxy"
+                    || k_low == "localxpose_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("--proxy=") || lower.starts_with("-proxy=") {
+            let val = trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("localxpose_proxy:")
+            || clean.starts_with("localxpose_proxy=")
+            || clean.starts_with("loclx_proxy:")
+            || clean.starts_with("loclx_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_localxpose_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_localxpose_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_localxpose_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("LOCALXPOSE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LOCALXPOSE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LOCLX_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LOCLX_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LOCALXPOSE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LOCALXPOSE_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LOCLX_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LOCLX_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -53492,6 +54150,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Toxiproxy Daemon Proxy",
             "~/.config/toxiproxy/toxiproxy.json & /etc/toxiproxy/toxiproxy.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Telepresence Kubernetes Microservice Local Proxy & Intercept Daemon (~/.config/telepresence/config.yml / /etc/telepresence/config.yml / /etc/systemd/system/telepresence.service.d/http-proxy.conf)
+    if let Some((telepresence_proxy, telepresence_path)) = get_telepresence_proxy() {
+        let ok = verify_proxy_url(&telepresence_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Telepresence proxy `{}` in {} is dead! (Telepresence Kubernetes cluster intercept and workload forwarding will fail)",
+                telepresence_proxy,
+                telepresence_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Telepresence Daemon Proxy",
+            format!("{}", telepresence_path.display()),
+            telepresence_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Telepresence fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Telepresence Daemon Proxy",
+            "~/.config/telepresence/config.yml & /etc/telepresence/config.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // LocalXpose Localhost Reverse Proxy & Tunnel Daemon (~/.localxpose/config.yaml / /etc/localxpose/config.yaml / /etc/systemd/system/loclx.service.d/http-proxy.conf)
+    if let Some((localxpose_proxy, localxpose_path)) = get_localxpose_proxy() {
+        let ok = verify_proxy_url(&localxpose_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "LocalXpose proxy `{}` in {} is dead! (LocalXpose localhost reverse tunnel and forwarding will fail)",
+                localxpose_proxy,
+                localxpose_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "LocalXpose Daemon Proxy",
+            format!("{}", localxpose_path.display()),
+            localxpose_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (LocalXpose fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "LocalXpose Daemon Proxy",
+            "~/.localxpose/config.yaml & /etc/localxpose/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -62459,5 +63181,73 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; toxiproxy_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_toxiproxy_proxy(input_comment), None);
         assert_eq!(parse_toxiproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_telepresence_proxy() {
+        let tp_yaml = r#"
+client:
+  httpProxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_telepresence_proxy(tp_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let tp_top = r#"
+# Telepresence configuration
+httpProxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_telepresence_proxy(tp_top),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_telepresence_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; telepresence_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_telepresence_proxy(input_comment), None);
+        assert_eq!(parse_telepresence_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_localxpose_proxy() {
+        let loclx_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_localxpose_proxy(loclx_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let loclx_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_localxpose_proxy(loclx_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_localxpose_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; loclx_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_localxpose_proxy(input_comment), None);
+        assert_eq!(parse_localxpose_proxy(""), None);
     }
 }
