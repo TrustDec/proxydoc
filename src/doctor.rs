@@ -47924,6 +47924,620 @@ pub fn get_expose_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_playit_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PLAYIT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PLAYIT_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PLAYIT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("playit.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("playit").join("playit.toml"),
+            home.join(".playit").join("playit.toml"),
+            home.join(".playit").join("config.toml"),
+            home.join(".config").join("playit").join("config.toml"),
+            home.join(".config").join("systemd").join("user").join("playit.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/playit/playit.toml"),
+        PathBuf::from("/etc/playit.toml"),
+        PathBuf::from("/var/lib/playit/playit.toml"),
+        PathBuf::from("/usr/local/etc/playit/playit.toml"),
+        PathBuf::from("/opt/homebrew/etc/playit/playit.toml"),
+        PathBuf::from("/etc/default/playit"),
+        PathBuf::from("/etc/sysconfig/playit"),
+        PathBuf::from("/etc/systemd/system/playit.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/playit-agent.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_playit = PathBuf::from("/etc/playit");
+    if etc_playit.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_playit) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "toml" || ext == "conf" || ext == "json" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_playit_config_path() -> Option<PathBuf> {
+    let paths = get_playit_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_playit_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_playit_write_path() -> PathBuf {
+    if let Some(p) = get_playit_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PLAYIT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("PLAYIT_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("playit");
+        if dir.is_dir() {
+            return dir.join("playit.toml");
+        }
+        let dir2 = home.join(".playit");
+        if dir2.is_dir() {
+            return dir2.join("playit.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/playit");
+    if etc_dir.is_dir() {
+        return etc_dir.join("playit.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/playit.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("playit").join("playit.toml");
+    }
+    PathBuf::from("/etc/playit/playit.toml")
+}
+
+pub fn parse_playit_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "playit_proxy",
+                "playit_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "playit_proxy"
+                    || k_low == "playit_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "playit_proxy"
+                    || k_low == "playit_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "playit_proxy"
+                || k_low == "playit_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "playit_proxy"
+                || k_low == "playit_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_playit_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_playit_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_playit_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PLAYIT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PLAYIT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PLAYIT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PLAYIT_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_pgrok_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PGROK_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PGROK_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PGROK_DIR") {
+        let p = PathBuf::from(dir.trim()).join("pgrok.yml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".pgrok").join("pgrok.yml"),
+            home.join(".config").join("pgrok").join("config.yaml"),
+            home.join(".pgrok").join("config.yaml"),
+            home.join(".pgrok").join("pgrok.toml"),
+            home.join(".config").join("systemd").join("user").join("pgrok.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/pgrok/pgrok.yml"),
+        PathBuf::from("/etc/pgrok/config.yaml"),
+        PathBuf::from("/etc/pgrok.yml"),
+        PathBuf::from("/var/lib/pgrok/pgrok.yml"),
+        PathBuf::from("/usr/local/etc/pgrok/pgrok.yml"),
+        PathBuf::from("/opt/homebrew/etc/pgrok/pgrok.yml"),
+        PathBuf::from("/etc/default/pgrok"),
+        PathBuf::from("/etc/sysconfig/pgrok"),
+        PathBuf::from("/etc/systemd/system/pgrok.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_pgrok = PathBuf::from("/etc/pgrok");
+    if etc_pgrok.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_pgrok) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yml" || ext == "yaml" || ext == "toml" || ext == "json" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_pgrok_config_path() -> Option<PathBuf> {
+    let paths = get_pgrok_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_pgrok_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_pgrok_write_path() -> PathBuf {
+    if let Some(p) = get_pgrok_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PGROK_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("PGROK_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".pgrok");
+        if dir.is_dir() {
+            return dir.join("pgrok.yml");
+        }
+        let dir2 = home.join(".config").join("pgrok");
+        if dir2.is_dir() {
+            return dir2.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/pgrok");
+    if etc_dir.is_dir() {
+        return etc_dir.join("pgrok.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/pgrok.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".pgrok").join("pgrok.yml");
+    }
+    PathBuf::from("/etc/pgrok/pgrok.yml")
+}
+
+pub fn parse_pgrok_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "pgrok_proxy",
+                "pgrok_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pgrok_proxy"
+                    || k_low == "pgrok_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pgrok_proxy"
+                    || k_low == "pgrok_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "pgrok_proxy"
+                || k_low == "pgrok_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "pgrok_proxy"
+                || k_low == "pgrok_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_pgrok_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pgrok_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pgrok_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PGROK_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PGROK_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PGROK_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PGROK_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -56249,6 +56863,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Expose Daemon Proxy",
             "~/.expose/config.php & /etc/expose/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Playit Localhost Reverse Proxy & Tunnel Daemon (~/.config/playit/playit.toml / /etc/playit/playit.toml / /etc/systemd/system/playit.service.d/http-proxy.conf)
+    if let Some((playit_proxy, playit_path)) = get_playit_proxy() {
+        let ok = verify_proxy_url(&playit_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Playit proxy `{}` in {} is dead! (Playit localhost reverse tunnel and forwarding will fail)",
+                playit_proxy,
+                playit_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Playit Daemon Proxy",
+            format!("{}", playit_path.display()),
+            playit_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Playit fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Playit Daemon Proxy",
+            "~/.config/playit/playit.toml & /etc/playit/playit.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // pgrok Localhost Reverse Proxy & Tunnel Daemon (~/.pgrok/pgrok.yml / /etc/pgrok/pgrok.yml / /etc/systemd/system/pgrok.service.d/http-proxy.conf)
+    if let Some((pgrok_proxy, pgrok_path)) = get_pgrok_proxy() {
+        let ok = verify_proxy_url(&pgrok_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "pgrok proxy `{}` in {} is dead! (pgrok localhost reverse tunnel and forwarding will fail)",
+                pgrok_proxy,
+                pgrok_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "pgrok Daemon Proxy",
+            format!("{}", pgrok_path.display()),
+            pgrok_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (pgrok fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "pgrok Daemon Proxy",
+            "~/.pgrok/pgrok.yml & /etc/pgrok/pgrok.yml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -65491,5 +66169,73 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; expose_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_expose_proxy(input_comment), None);
         assert_eq!(parse_expose_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_playit_proxy() {
+        let playit_toml = r#"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_playit_proxy(playit_toml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let playit_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_playit_proxy(playit_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="PLAYIT_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_playit_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; playit_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_playit_proxy(input_comment), None);
+        assert_eq!(parse_playit_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pgrok_proxy() {
+        let pgrok_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pgrok_proxy(pgrok_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let pgrok_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_pgrok_proxy(pgrok_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="PGROK_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_pgrok_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; pgrok_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_pgrok_proxy(input_comment), None);
+        assert_eq!(parse_pgrok_proxy(""), None);
     }
 }

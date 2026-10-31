@@ -2214,6 +2214,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "GLM-4V AI CDN",
         "https://github.com/THUDM/GLM-4V",
     ),
+    (
+        "Playit Tunnel CDN",
+        "https://github.com/playit-cloud/playit-agent",
+    ),
+    (
+        "pgrok Tunnel CDN",
+        "https://github.com/joshuasing/pgrok",
+    ),
+    (
+        "InternLM3 AI CDN",
+        "https://github.com/InternLM/InternLM",
+    ),
+    (
+        "Moonlight AI CDN",
+        "https://github.com/moonshot-ai/Moonlight",
+    ),
+    (
+        "HuatuoGPT-o1 AI CDN",
+        "https://github.com/FreedomIntelligence/HuatuoGPT-o1",
+    ),
+    (
+        "DeepSeek-Prover-V1.5 AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-Prover-V1.5",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4184,6 +4208,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "GLM-4V AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Playit Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "pgrok Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InternLM3 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Moonlight AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "HuatuoGPT-o1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-Prover-V1.5 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

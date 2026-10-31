@@ -43093,6 +43093,456 @@ pub fn unset_expose_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_playit_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy = \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "playit_proxy"
+                    || k_low == "playit_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"PLAYIT_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("playit_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("playit_proxy=")
+            || clean.starts_with("playit_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push(String::new());
+        }
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_playit_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "playit_proxy",
+                "playit_http_proxy",
+                "http_proxy",
+                "https_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "playit_proxy"
+                    || k_low == "playit_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "playit_proxy"
+                    || k_low == "playit_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("playit_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("playit_proxy=")
+            || clean.starts_with("playit_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_playit_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_playit_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_playit_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_playit_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_playit_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_playit_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_pgrok_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy: \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pgrok_proxy"
+                    || k_low == "pgrok_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"PGROK_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("pgrok_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("pgrok_proxy:")
+            || clean.starts_with("pgrok_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push(String::new());
+        }
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pgrok_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "pgrok_proxy",
+                "pgrok_http_proxy",
+                "http_proxy",
+                "https_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pgrok_proxy"
+                    || k_low == "pgrok_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pgrok_proxy"
+                    || k_low == "pgrok_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("pgrok_proxy=")
+            || lower.starts_with("tunnel_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("pgrok_proxy:")
+            || clean.starts_with("pgrok_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_pgrok_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pgrok_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_pgrok_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_pgrok_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pgrok_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pgrok_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -43325,6 +43775,8 @@ pub async fn turn_on(
     loophole: bool,
     tunnelmole: bool,
     expose: bool,
+    playit: bool,
+    pgrok: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -43556,6 +44008,8 @@ pub async fn turn_on(
     let set_loophole = loophole || all;
     let set_tunnelmole = tunnelmole || all;
     let set_expose = expose || all;
+    let set_playit = playit || all;
+    let set_pgrok = pgrok || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -46907,6 +47361,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_playit {
+        match set_playit_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Playit daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Playit daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_pgrok {
+        match set_pgrok_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ pgrok daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update pgrok daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -47152,6 +47636,8 @@ pub fn turn_off(
     loophole: bool,
     tunnelmole: bool,
     expose: bool,
+    playit: bool,
+    pgrok: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -47383,6 +47869,8 @@ pub fn turn_off(
     let unset_loophole = loophole || all;
     let unset_tunnelmole = tunnelmole || all;
     let unset_expose = expose || all;
+    let unset_playit = playit || all;
+    let unset_pgrok = pgrok || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -49292,6 +49780,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Expose daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Expose proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Expose daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_playit {
+        match unset_playit_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Playit daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Playit proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Playit daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pgrok {
+        match unset_pgrok_proxy() {
+            Ok(true) => eprintln!("{}", "✔ pgrok daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ pgrok proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset pgrok daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -54748,5 +55252,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("EXPOSE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_playit_proxy() {
+        let playit_initial = "proxy = \"http://127.0.0.1:1080\"\n";
+        let playit_updated = apply_playit_proxy(playit_initial, "http://10.0.0.128:7890");
+        assert!(playit_updated.contains("http://10.0.0.128:7890"));
+        let (playit_cleaned, playit_removed) = remove_playit_proxy(&playit_updated);
+        assert!(playit_removed);
+        assert!(!playit_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_playit_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"PLAYIT_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_playit_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("PLAYIT_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pgrok_proxy() {
+        let pgrok_initial = "proxy: \"http://127.0.0.1:1080\"\n";
+        let pgrok_updated = apply_pgrok_proxy(pgrok_initial, "http://10.0.0.128:7890");
+        assert!(pgrok_updated.contains("http://10.0.0.128:7890"));
+        let (pgrok_cleaned, pgrok_removed) = remove_pgrok_proxy(&pgrok_updated);
+        assert!(pgrok_removed);
+        assert!(!pgrok_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_pgrok_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"PGROK_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_pgrok_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("PGROK_PROXY="));
     }
 }

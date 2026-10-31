@@ -153,6 +153,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8085, false, "Loophole E2EE Localhost Reverse Proxy & Tunnel Daemon (Control/Tunnel)"),
     (8001, false, "Tunnelmole Localhost Reverse Proxy & Tunnel Daemon (Control/Tunnel)"),
     (10200, false, "Expose Localhost Reverse Proxy & Tunnel Daemon (Control/Tunnel)"),
+    (55556, false, "Playit Localhost Reverse Proxy & Tunnel Daemon (Control/Tunnel)"),
+    (3320, false, "pgrok Localhost Reverse Proxy & Tunnel Daemon (Control/Tunnel)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
