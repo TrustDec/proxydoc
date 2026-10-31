@@ -52,6 +52,7 @@ use crate::doctor::{
     get_psiphon_proxy, get_localtunnel_proxy,
     get_pagekite_proxy, get_toxiproxy_proxy,
     get_telepresence_proxy, get_localxpose_proxy,
+    get_packetriot_proxy, get_sish_proxy,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bazel_proxy, unset_bun_proxy,
@@ -100,6 +101,7 @@ use crate::manager::{
     unset_psiphon_proxy, unset_localtunnel_proxy,
     unset_pagekite_proxy, unset_toxiproxy_proxy,
     unset_telepresence_proxy, unset_localxpose_proxy,
+    unset_packetriot_proxy, unset_sish_proxy,
 };
 use crate::scanner;
 
@@ -6227,17 +6229,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [224/231] Toxiproxy proxy: {}", "Reachable".green());
+            println!("  [224/233] Toxiproxy proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [224/231] Toxiproxy proxy: {}", "Clean or not set".dimmed());
+        println!("  [224/233] Toxiproxy proxy: {}", "Clean or not set".dimmed());
     }
 
     // 225. Clean dead Telepresence Kubernetes Local Proxy & Intercept daemon in config / systemd
     if let Some((telepresence_proxy, telepresence_path)) = get_telepresence_proxy() {
         if !verify_proxy_url(&telepresence_proxy).await {
             println!(
-                "  [225/231] Found dead Telepresence proxy (`{}` in {}), cleaning with backup...",
+                "  [225/233] Found dead Telepresence proxy (`{}` in {}), cleaning with backup...",
                 telepresence_proxy.yellow(),
                 telepresence_path.display()
             );
@@ -6254,17 +6256,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [225/231] Telepresence proxy: {}", "Reachable".green());
+            println!("  [225/233] Telepresence proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [225/231] Telepresence proxy: {}", "Clean or not set".dimmed());
+        println!("  [225/233] Telepresence proxy: {}", "Clean or not set".dimmed());
     }
 
     // 226. Clean dead LocalXpose Localhost Reverse Proxy & Tunnel daemon in config / systemd
     if let Some((localxpose_proxy, localxpose_path)) = get_localxpose_proxy() {
         if !verify_proxy_url(&localxpose_proxy).await {
             println!(
-                "  [226/231] Found dead LocalXpose proxy (`{}` in {}), cleaning with backup...",
+                "  [226/233] Found dead LocalXpose proxy (`{}` in {}), cleaning with backup...",
                 localxpose_proxy.yellow(),
                 localxpose_path.display()
             );
@@ -6281,13 +6283,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [226/231] LocalXpose proxy: {}", "Reachable".green());
+            println!("  [226/233] LocalXpose proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [226/231] LocalXpose proxy: {}", "Clean or not set".dimmed());
+        println!("  [226/233] LocalXpose proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 227. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 227. Clean dead Packetriot Localhost Reverse Tunnel & Proxy daemon in config / systemd
+    if let Some((packetriot_proxy, packetriot_path)) = get_packetriot_proxy() {
+        if !verify_proxy_url(&packetriot_proxy).await {
+            println!(
+                "  [227/233] Found dead Packetriot proxy (`{}` in {}), cleaning with backup...",
+                packetriot_proxy.yellow(),
+                packetriot_path.display()
+            );
+            if packetriot_path.exists() {
+                let backup = packetriot_path.with_extension("bak");
+                let _ = std::fs::copy(&packetriot_path, &backup);
+            }
+            if let Ok(true) = unset_packetriot_proxy() {
+                println!(
+                    "  {} Cleared broken Packetriot proxy in {} (backup saved)",
+                    "✔".green(),
+                    packetriot_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [227/233] Packetriot proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [227/233] Packetriot proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 228. Clean dead sish HTTP/TCP Localhost Tunnel & Reverse Proxy daemon in config / systemd
+    if let Some((sish_proxy, sish_path)) = get_sish_proxy() {
+        if !verify_proxy_url(&sish_proxy).await {
+            println!(
+                "  [228/233] Found dead sish proxy (`{}` in {}), cleaning with backup...",
+                sish_proxy.yellow(),
+                sish_path.display()
+            );
+            if sish_path.exists() {
+                let backup = sish_path.with_extension("bak");
+                let _ = std::fs::copy(&sish_path, &backup);
+            }
+            if let Ok(true) = unset_sish_proxy() {
+                println!(
+                    "  {} Cleared broken sish proxy in {} (backup saved)",
+                    "✔".green(),
+                    sish_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [228/233] sish proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [228/233] sish proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 229. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -6301,7 +6357,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [227/231] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [229/233] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -6318,17 +6374,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [227/231] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [229/233] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [227/231] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [229/233] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [227/231] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [229/233] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 228. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 230. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -6342,7 +6398,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [228/231] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [230/233] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -6360,17 +6416,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [228/231] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [230/233] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [228/231] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [230/233] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [228/231] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [230/233] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 229. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 231. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -6384,7 +6440,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [229/231] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [231/233] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -6402,17 +6458,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [229/231] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [231/233] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [229/231] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [231/233] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [229/231] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [231/233] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 230. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 232. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -6431,7 +6487,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [230/231] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [232/233] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -6459,12 +6515,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [230/231] No active local proxy client found. Ensure your proxy software is open."
+            "  [232/233] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 231. Flush local DNS cache
-    println!("  [231/231] Flushing local DNS cache to fix resolution stalls...");
+    // 233. Flush local DNS cache
+    println!("  [233/233] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

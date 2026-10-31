@@ -2142,6 +2142,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "V-Express AI CDN",
         "https://github.com/tencent-ailab/V-Express",
     ),
+    (
+        "Packetriot Tunnel CDN",
+        "https://github.com/packetriot/pktriot",
+    ),
+    (
+        "Sish Tunnel Proxy CDN",
+        "https://github.com/antoniomika/sish",
+    ),
+    (
+        "NVIDIA Cosmos AI CDN",
+        "https://github.com/NVIDIA/Cosmos",
+    ),
+    (
+        "GLM-Edge AI CDN",
+        "https://github.com/THUDM/GLM-Edge",
+    ),
+    (
+        "Index-1.9B AI CDN",
+        "https://github.com/bilibili/Index-1.9B",
+    ),
+    (
+        "CogView4 AI CDN",
+        "https://github.com/THUDM/CogView4",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4058,6 +4082,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "V-Express AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Packetriot Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Sish Tunnel Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "NVIDIA Cosmos AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GLM-Edge AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Index-1.9B AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CogView4 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

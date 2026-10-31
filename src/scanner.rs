@@ -147,6 +147,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8474, false, "Toxiproxy Resiliency & Fault Injection Proxy Daemon (HTTP/Admin)"),
     (9080, false, "Telepresence Kubernetes Local Proxy & Intercept Daemon (Control/Intercept)"),
     (4040, false, "LocalXpose Localhost Reverse Proxy & Tunnel Daemon (HTTP/Admin)"),
+    (4005, false, "Packetriot Localhost Reverse Tunnel & Proxy Daemon (Control/Tunnel)"),
+    (3333, false, "sish HTTP/TCP Localhost Tunnel & Reverse Proxy Daemon (Tunnel/SSH)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
