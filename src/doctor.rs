@@ -63447,6 +63447,488 @@ pub fn get_phpenv_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_swiftenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("SWIFTENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("default-packages");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".swiftenv").join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".swiftenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("swiftenv").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("swiftenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".swiftenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/swiftenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/swiftenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_vars = PathBuf::from("/etc/swiftenv/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_swiftenv_config_path() -> Option<PathBuf> {
+    let paths = get_swiftenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_swiftenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_swiftenv_write_path() -> PathBuf {
+    if let Some(p) = get_swiftenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("SWIFTENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("vars");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let swiftenv_dir = home.join(".swiftenv");
+        if swiftenv_dir.is_dir() {
+            return swiftenv_dir.join("vars");
+        }
+        let cfg_dir = home.join(".config").join("swiftenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".swiftenv").join("vars");
+    }
+    PathBuf::from("/etc/swiftenv/vars")
+}
+
+pub fn parse_swiftenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "swiftenv_proxy", "swiftenv_http_proxy", "swift_build_http_client"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "swiftenv_http_proxy"
+                    || k_low == "swiftenv_https_proxy"
+                    || k_low == "swiftenv_proxy"
+                    || k_low == "swift_build_http_client"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export swiftenv_http_proxy=")
+            || lower.starts_with("export swiftenv_https_proxy=")
+            || lower.starts_with("export swiftenv_proxy=")
+            || lower.starts_with("export swift_build_http_client=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("swiftenv_http_proxy=")
+            || lower.starts_with("swiftenv_https_proxy=")
+            || lower.starts_with("swiftenv_proxy=")
+            || lower.starts_with("swift_build_http_client=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("swiftenv_http_proxy")
+            || clean.starts_with("swiftenv_https_proxy")
+            || clean.starts_with("swiftenv_proxy")
+            || clean.starts_with("swift_build_http_client")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_swiftenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_swiftenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_swiftenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SWIFTENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SWIFTENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SWIFTENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SWIFTENV_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_perlbrew_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("PERLBREW_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("default-packages");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".perlbrew").join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".perlbrew").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("perlbrew").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("perlbrew").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".perlbrewrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/perlbrew.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/perlbrew/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_vars = PathBuf::from("/etc/perlbrew/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_perlbrew_config_path() -> Option<PathBuf> {
+    let paths = get_perlbrew_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_perlbrew_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_perlbrew_write_path() -> PathBuf {
+    if let Some(p) = get_perlbrew_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("PERLBREW_ROOT") {
+        return PathBuf::from(dir.trim()).join("vars");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let perlbrew_dir = home.join(".perlbrew");
+        if perlbrew_dir.is_dir() {
+            return perlbrew_dir.join("vars");
+        }
+        let cfg_dir = home.join(".config").join("perlbrew");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".perlbrew").join("vars");
+    }
+    PathBuf::from("/etc/perlbrew/vars")
+}
+
+pub fn parse_perlbrew_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "perlbrew_proxy", "perlbrew_http_proxy", "cpan_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "perlbrew_http_proxy"
+                    || k_low == "perlbrew_https_proxy"
+                    || k_low == "perlbrew_proxy"
+                    || k_low == "cpan_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export perlbrew_http_proxy=")
+            || lower.starts_with("export perlbrew_https_proxy=")
+            || lower.starts_with("export perlbrew_proxy=")
+            || lower.starts_with("export cpan_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("perlbrew_http_proxy=")
+            || lower.starts_with("perlbrew_https_proxy=")
+            || lower.starts_with("perlbrew_proxy=")
+            || lower.starts_with("cpan_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("perlbrew_http_proxy")
+            || clean.starts_with("perlbrew_https_proxy")
+            || clean.starts_with("perlbrew_proxy")
+            || clean.starts_with("cpan_http_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_perlbrew_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_perlbrew_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_perlbrew_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PERLBREW_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PERLBREW_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PERLBREW_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PERLBREW_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -73540,6 +74022,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "phpenv Dev Proxy",
             "~/.phpenv/vars & ~/.config/phpenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // swiftenv Swift Toolchain & Version Manager Daemon (~/.swiftenv/vars / ~/.swiftenv/config / ~/.config/swiftenv/config / /etc/swiftenv/config / /etc/systemd/system/swiftenv.service.d/http-proxy.conf)
+    if let Some((swiftenv_proxy, swiftenv_path)) = get_swiftenv_proxy() {
+        let ok = verify_proxy_url(&swiftenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "swiftenv proxy `{}` in {} is dead! (swiftenv toolchain proxy will fail)",
+                swiftenv_proxy,
+                swiftenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "swiftenv Dev Proxy",
+            format!("{}", swiftenv_path.display()),
+            swiftenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (swiftenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "swiftenv Dev Proxy",
+            "~/.swiftenv/vars & ~/.config/swiftenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // perlbrew Perl Toolchain & Version Manager Daemon (~/.perlbrew/vars / ~/.perlbrew/config / ~/.config/perlbrew/config / /etc/perlbrew/config / /etc/systemd/system/perlbrew.service.d/http-proxy.conf)
+    if let Some((perlbrew_proxy, perlbrew_path)) = get_perlbrew_proxy() {
+        let ok = verify_proxy_url(&perlbrew_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "perlbrew proxy `{}` in {} is dead! (perlbrew toolchain proxy will fail)",
+                perlbrew_proxy,
+                perlbrew_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "perlbrew Dev Proxy",
+            format!("{}", perlbrew_path.display()),
+            perlbrew_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (perlbrew fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "perlbrew Dev Proxy",
+            "~/.perlbrew/vars & ~/.config/perlbrew/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -84363,5 +84909,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// phpenv_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_phpenv_proxy(input_comment), None);
         assert_eq!(parse_phpenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_swiftenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_swiftenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "swiftenv_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_swiftenv_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_swiftenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// swiftenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_swiftenv_proxy(input_comment), None);
+        assert_eq!(parse_swiftenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_perlbrew_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_perlbrew_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "perlbrew_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_perlbrew_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_perlbrew_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// perlbrew_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_perlbrew_proxy(input_comment), None);
+        assert_eq!(parse_perlbrew_proxy(""), None);
     }
 }
