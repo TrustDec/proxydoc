@@ -51613,6 +51613,384 @@ pub fn unset_vfox_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_sdkman_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sdkman_http_proxy"
+                    || k_low == "sdkman_https_proxy"
+                    || k_low == "sdkman_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"SDKMAN_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export sdkman_http_proxy=")
+            || lower.starts_with("export sdkman_https_proxy=")
+            || lower.starts_with("export sdkman_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("sdkman_http_proxy=")
+            || lower.starts_with("sdkman_https_proxy=")
+            || lower.starts_with("sdkman_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export SDKMAN_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "sdkman_http_proxy"
+                || k_trim == "sdkman_https_proxy"
+                || k_trim == "sdkman_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            lines.push(format!("{}sdkman_http_proxy={}", indent, proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"SDKMAN_HTTP_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("sdkman_http_proxy={}", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_sdkman_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sdkman_http_proxy"
+                    || k_low == "sdkman_https_proxy"
+                    || k_low == "sdkman_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export sdkman_http_proxy=")
+            || lower.starts_with("export sdkman_https_proxy=")
+            || lower.starts_with("export sdkman_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("sdkman_http_proxy=")
+            || lower.starts_with("sdkman_https_proxy=")
+            || lower.starts_with("sdkman_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "sdkman_http_proxy"
+                || k_trim == "sdkman_https_proxy"
+                || k_trim == "sdkman_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_sdkman_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_sdkman_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_sdkman_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_sdkman_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_sdkman_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_sdkman_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_rustup_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rustup_http_proxy"
+                    || k_low == "rustup_https_proxy"
+                    || k_low == "rustup_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"RUSTUP_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export rustup_http_proxy=")
+            || lower.starts_with("export rustup_https_proxy=")
+            || lower.starts_with("export rustup_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("rustup_http_proxy=")
+            || lower.starts_with("rustup_https_proxy=")
+            || lower.starts_with("rustup_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export RUSTUP_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "rustup_http_proxy"
+                || k_trim == "rustup_https_proxy"
+                || k_trim == "rustup_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"RUSTUP_HTTP_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_rustup_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rustup_http_proxy"
+                    || k_low == "rustup_https_proxy"
+                    || k_low == "rustup_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export rustup_http_proxy=")
+            || lower.starts_with("export rustup_https_proxy=")
+            || lower.starts_with("export rustup_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("rustup_http_proxy=")
+            || lower.starts_with("rustup_https_proxy=")
+            || lower.starts_with("rustup_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "rustup_http_proxy"
+                || k_trim == "rustup_https_proxy"
+                || k_trim == "rustup_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_rustup_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_rustup_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_rustup_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_rustup_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_rustup_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_rustup_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -51883,6 +52261,8 @@ pub async fn turn_on(
     hermit: bool,
     asdf: bool,
     vfox: bool,
+    sdkman: bool,
+    rustup: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -52152,6 +52532,8 @@ pub async fn turn_on(
     let set_hermit = hermit || all;
     let set_asdf = asdf || all;
     let set_vfox = vfox || all;
+    let set_sdkman = sdkman || all;
+    let set_rustup = rustup || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -56073,6 +56455,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_sdkman {
+        match set_sdkman_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ SDKMAN! toolchain manager ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update SDKMAN config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_rustup {
+        match set_rustup_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Rustup toolchain manager ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Rustup config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -56356,6 +56768,8 @@ pub fn turn_off(
     hermit: bool,
     asdf: bool,
     vfox: bool,
+    sdkman: bool,
+    rustup: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -56625,6 +57039,8 @@ pub fn turn_off(
     let unset_hermit = hermit || all;
     let unset_asdf = asdf || all;
     let unset_vfox = vfox || all;
+    let unset_sdkman = sdkman || all;
+    let unset_rustup = rustup || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -58838,6 +59254,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ vfox toolchain manager proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ vfox proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset vfox toolchain manager proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_sdkman {
+        match unset_sdkman_proxy() {
+            Ok(true) => eprintln!("{}", "✔ SDKMAN! toolchain manager proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ SDKMAN! proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset SDKMAN! toolchain manager proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_rustup {
+        match unset_rustup_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Rustup toolchain manager proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Rustup proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Rustup toolchain manager proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -65022,6 +65454,40 @@ auth: pass123
         let dropin_updated = apply_vfox_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_vfox_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_sdkman_proxy() {
+        let ini_initial = "sdkman_auto_answer=false\nsdkman_curl_connect_timeout=7\n";
+        let ini_updated = apply_sdkman_proxy(ini_initial, "http://10.0.0.128:7890");
+        assert!(ini_updated.contains("sdkman_http_proxy=http://10.0.0.128:7890"));
+        let (ini_cleaned, ini_removed) = remove_sdkman_proxy(&ini_updated);
+        assert!(ini_removed);
+        assert!(!ini_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/sdkman\n";
+        let dropin_updated = apply_sdkman_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_sdkman_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_rustup_proxy() {
+        let toml_initial = "version = \"12\"\ndefault_toolchain = \"stable\"\n";
+        let toml_updated = apply_rustup_proxy(toml_initial, "http://10.0.0.128:7890");
+        assert!(toml_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (toml_cleaned, toml_removed) = remove_rustup_proxy(&toml_updated);
+        assert!(toml_removed);
+        assert!(!toml_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/rustup\n";
+        let dropin_updated = apply_rustup_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_rustup_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

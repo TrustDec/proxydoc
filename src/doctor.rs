@@ -60633,6 +60633,428 @@ pub fn get_vfox_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_sdkman_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("SDKMAN_DIR") {
+        let p = PathBuf::from(dir.trim()).join("etc").join("config");
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".sdkman").join("etc").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("sdkman").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    let local = PathBuf::from(".sdkmanrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/sdkman.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/sdkman/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    paths
+}
+
+pub fn get_sdkman_config_path() -> Option<PathBuf> {
+    let paths = get_sdkman_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_sdkman_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_sdkman_write_path() -> PathBuf {
+    if let Some(p) = get_sdkman_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("SDKMAN_DIR") {
+        return PathBuf::from(dir.trim()).join("etc").join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let sdkman_dir = home.join(".sdkman").join("etc");
+        if sdkman_dir.is_dir() {
+            return sdkman_dir.join("config");
+        }
+        return home.join(".sdkman").join("etc").join("config");
+    }
+    PathBuf::from("/etc/sdkman/config")
+}
+
+pub fn parse_sdkman_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sdkman_http_proxy"
+                    || k_low == "sdkman_https_proxy"
+                    || k_low == "sdkman_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export sdkman_http_proxy=")
+            || lower.starts_with("export sdkman_https_proxy=")
+            || lower.starts_with("export sdkman_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("sdkman_http_proxy=")
+            || lower.starts_with("sdkman_https_proxy=")
+            || lower.starts_with("sdkman_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("sdkman_http_proxy")
+            || clean.starts_with("sdkman_https_proxy")
+            || clean.starts_with("sdkman_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_sdkman_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_sdkman_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_sdkman_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SDKMAN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SDKMAN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SDKMAN_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SDKMAN_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SDKMAN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SDKMAN_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_rustup_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("RUSTUP_HOME") {
+        let p = PathBuf::from(dir.trim()).join("settings.toml");
+        if p.exists() {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".rustup").join("settings.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".rustup").join("config.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("rustup").join("settings.toml");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/rustup.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_settings = PathBuf::from("/etc/rustup/settings.toml");
+    if etc_settings.exists() && !paths.contains(&etc_settings) {
+        paths.push(etc_settings);
+    }
+    paths
+}
+
+pub fn get_rustup_config_path() -> Option<PathBuf> {
+    let paths = get_rustup_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_rustup_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_rustup_write_path() -> PathBuf {
+    if let Some(p) = get_rustup_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("RUSTUP_HOME") {
+        return PathBuf::from(dir.trim()).join("settings.toml");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let rustup_dir = home.join(".rustup");
+        if rustup_dir.is_dir() {
+            return rustup_dir.join("settings.toml");
+        }
+        return home.join(".rustup").join("settings.toml");
+    }
+    PathBuf::from("/etc/rustup/settings.toml")
+}
+
+pub fn parse_rustup_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rustup_http_proxy"
+                    || k_low == "rustup_https_proxy"
+                    || k_low == "rustup_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export rustup_http_proxy=")
+            || lower.starts_with("export rustup_https_proxy=")
+            || lower.starts_with("export rustup_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("rustup_http_proxy=")
+            || lower.starts_with("rustup_https_proxy=")
+            || lower.starts_with("rustup_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("rustup_http_proxy")
+            || clean.starts_with("rustup_https_proxy")
+            || clean.starts_with("rustup_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("http-proxy")
+            || clean.starts_with("https-proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_rustup_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_rustup_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_rustup_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("RUSTUP_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RUSTUP_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("RUSTUP_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RUSTUP_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("RUSTUP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RUSTUP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -70174,6 +70596,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "vfox Dev Proxy",
             "~/.version-fox/config.yaml & /etc/vfox/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // SDKMAN! Multi-Platform Software Development Kit Manager Daemon (~/.sdkman/etc/config / ~/.config/sdkman/config / /etc/sdkman/config / /etc/systemd/system/sdkman.service.d/http-proxy.conf)
+    if let Some((sdkman_proxy, sdkman_path)) = get_sdkman_proxy() {
+        let ok = verify_proxy_url(&sdkman_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "sdkman proxy `{}` in {} is dead! (sdkman toolchain proxy will fail)",
+                sdkman_proxy,
+                sdkman_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "SDKMAN Dev Proxy",
+            format!("{}", sdkman_path.display()),
+            sdkman_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (sdkman fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "SDKMAN Dev Proxy",
+            "~/.sdkman/etc/config & /etc/sdkman/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Rustup Rust Toolchain Installer & Multiplexer Daemon (~/.rustup/settings.toml / ~/.rustup/config.toml / /etc/rustup/settings.toml / /etc/systemd/system/rustup.service.d/http-proxy.conf)
+    if let Some((rustup_proxy, rustup_path)) = get_rustup_proxy() {
+        let ok = verify_proxy_url(&rustup_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "rustup proxy `{}` in {} is dead! (rustup toolchain proxy will fail)",
+                rustup_proxy,
+                rustup_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Rustup Dev Proxy",
+            format!("{}", rustup_path.display()),
+            rustup_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (rustup fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Rustup Dev Proxy",
+            "~/.rustup/settings.toml & /etc/rustup/settings.toml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -80702,5 +81188,56 @@ Environment="VFOX_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy: \"http://127.0.0.1:7890\"\n// vfox_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_vfox_proxy(input_comment), None);
         assert_eq!(parse_vfox_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_sdkman_proxy() {
+        let ini_config = r#"
+# SDKMAN configuration
+sdkman_auto_answer=false
+sdkman_http_proxy=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_sdkman_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="SDKMAN_PROXY=http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_sdkman_proxy(dropin),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let input_comment = "# sdkman_http_proxy=http://127.0.0.1:7890\n; proxy=socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_sdkman_proxy(input_comment), None);
+        assert_eq!(parse_sdkman_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_rustup_proxy() {
+        let toml_config = r#"
+version = "12"
+http_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_rustup_proxy(toml_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="RUSTUP_PROXY=http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_rustup_proxy(dropin),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// rustup_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_rustup_proxy(input_comment), None);
+        assert_eq!(parse_rustup_proxy(""), None);
     }
 }

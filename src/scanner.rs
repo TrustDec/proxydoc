@@ -191,6 +191,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (32323, false, "Hermit Isolated & Reproducible Dev Environment Daemon (HTTP/API)"),
     (34343, false, "asdf Polyglot Runtime Version Manager Daemon (HTTP/API)"),
     (35353, false, "vfox (VersionFox) Extensible Multi-Platform Toolchain Manager Daemon (HTTP/API)"),
+    (36363, false, "SDKMAN! Multi-Platform Software Development Kit Manager Daemon (HTTP/API)"),
+    (37373, false, "Rustup Rust Toolchain Installer & Multiplexer Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

@@ -187,6 +187,8 @@
   - 智能诊断 **Hermit (自包含可重现开发环境与包管理器 hermit) 代理**（`~/.config/hermit/config.hcl`、`hermit.hcl`、`/etc/hermit/config.hcl`、`/etc/systemd/system/hermit.service.d/http-proxy.conf`、`HERMIT_HTTP_PROXY`），排查软件环境隔离包下载、Channel 依赖同步与开发工具执行因死代理失败；
   - 智能诊断 **asdf (多语言运行时与工具链版本管理器 asdf) 代理**（`~/.asdfrc`、`.asdfrc`、`~/.config/asdf/asdfrc`、`/etc/asdfrc`、`/etc/systemd/system/asdf.service.d/http-proxy.conf`、`ASDF_HTTP_PROXY`），排查插件安装、工具下载与运行时构建因死代理卡死；
   - 智能诊断 **vfox (VersionFox 可扩展跨平台多语言版本管理器 vfox) 代理**（`~/.version-fox/config.yaml`、`~/.config/vfox/config.yaml`、`/etc/vfox/config.yaml`、`/etc/systemd/system/vfox.service.d/http-proxy.conf`、`VFOX_HTTP_PROXY`），排查工具链包下载、插件源拉取与多版本切换因死代理失败；
+  - 智能诊断 **SDKMAN! (多平台软件开发工具包与 JVM 版本管理器 sdkman) 代理**（`~/.sdkman/etc/config`、`~/.config/sdkman/config`、`/etc/sdkman/config`、`/etc/systemd/system/sdkman.service.d/http-proxy.conf`、`SDKMAN_HTTP_PROXY`），排查 Java、Kotlin、Scala、Gradle 与 Maven 候选安装及版本切换因死代理卡死；
+  - 智能诊断 **Rustup (Rust 官方工具链安装与多路复用管理器 rustup) 代理**（`~/.rustup/settings.toml`、`~/.rustup/config.toml`、`/etc/rustup/settings.toml`、`/etc/systemd/system/rustup.service.d/http-proxy.conf`、`RUSTUP_HTTP_PROXY`），排查 rustc、cargo、目标架构编译组件与工具链更新因死代理失败；
   - 智能诊断 **Ollama (本地 AI 模型服务守护进程) 代理**（`/etc/systemd/system/ollama.service.d/http-proxy.conf`、`~/.ollama/environment`、`~/Library/LaunchAgents/com.ollama.ollama.plist`），排查 `ollama pull` 与 `ollama run` 因守护进程死代理超时卡死；
   - 智能诊断 **Alpine Linux apk 包管理器仓库与镜像源**（`/etc/apk/repositories`），排查 `apk add` 与 `apk update` 因死镜像源阻塞；
   - 智能诊断 **Flatpak (Linux 桌面应用包管理器与运行环境) 仓库代理**（`~/.local/share/flatpak/repo/config`、`/var/lib/flatpak/repo/config`、`/etc/flatpak/remotes.d/`），排查 `flatpak install` 与应用更新因死代理失败；
