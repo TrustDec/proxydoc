@@ -38124,6 +38124,454 @@ pub fn unset_n2n_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_hyprspace_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy: \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "hyprspace_proxy"
+                    || k_low == "hyprspace_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"HYPRSPACE_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("hyprspace_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("hyprspace_proxy:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_hyprspace_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "hyprspace_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "hyprspace_proxy"
+                    || k_low == "hyprspace_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "hyprspace_proxy"
+                    || k_low == "hyprspace_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("hyprspace_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("hyprspace_proxy:")
+            || clean.starts_with("hyprspace_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_hyprspace_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_hyprspace_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_hyprspace_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_hyprspace_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_hyprspace_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_hyprspace_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_fastd_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("proxy \"{}\";", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "fastd_proxy"
+                    || k_low == "fastd_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"FASTD_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("proxy ") || lower.starts_with("forward proxy ") {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("fastd_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("fastd_proxy=")
+            || clean.starts_with("fastd_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_fastd_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "Proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "fastd_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "fastd_proxy"
+                    || k_low == "fastd_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "fastd_proxy"
+                    || k_low == "fastd_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("proxy ") || lower.starts_with("forward proxy ") {
+            removed = true;
+            continue;
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("fastd_proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("fastd_proxy=")
+            || clean.starts_with("fastd_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_fastd_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_fastd_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_fastd_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_fastd_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_fastd_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_fastd_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -38334,6 +38782,8 @@ pub async fn turn_on(
     inlets: bool,
     zrok: bool,
     n2n: bool,
+    hyprspace: bool,
+    fastd: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -38543,6 +38993,8 @@ pub async fn turn_on(
     let set_inlets = inlets || all;
     let set_zrok = zrok || all;
     let set_n2n = n2n || all;
+    let set_hyprspace = hyprspace || all;
+    let set_fastd = fastd || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -41564,6 +42016,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_hyprspace {
+        match set_hyprspace_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Hyprspace daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Hyprspace daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_fastd {
+        match set_fastd_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Fastd daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Fastd daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -41787,6 +42269,8 @@ pub fn turn_off(
     inlets: bool,
     zrok: bool,
     n2n: bool,
+    hyprspace: bool,
+    fastd: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -41996,6 +42480,8 @@ pub fn turn_off(
     let unset_inlets = inlets || all;
     let unset_zrok = zrok || all;
     let unset_n2n = n2n || all;
+    let unset_hyprspace = hyprspace || all;
+    let unset_fastd = fastd || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -43729,6 +44215,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ n2n daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ n2n proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset n2n daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_hyprspace {
+        match unset_hyprspace_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Hyprspace daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Hyprspace proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Hyprspace daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_fastd {
+        match unset_fastd_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Fastd daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Fastd proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Fastd daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -48767,5 +49269,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("N2N_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_hyprspace_proxy() {
+        let hyprspace_initial = "proxy: \"http://127.0.0.1:1080\"\n";
+        let hyprspace_updated = apply_hyprspace_proxy(hyprspace_initial, "http://10.0.0.128:7890");
+        assert!(hyprspace_updated.contains("proxy: \"http://10.0.0.128:7890\""));
+        let (hyprspace_cleaned, hyprspace_removed) = remove_hyprspace_proxy(&hyprspace_updated);
+        assert!(hyprspace_removed);
+        assert!(!hyprspace_cleaned.contains("proxy:"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_hyprspace_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"HYPRSPACE_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_hyprspace_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("HYPRSPACE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_fastd_proxy() {
+        let fastd_initial = "proxy \"http://127.0.0.1:1080\";\n";
+        let fastd_updated = apply_fastd_proxy(fastd_initial, "http://10.0.0.128:7890");
+        assert!(fastd_updated.contains("proxy \"http://10.0.0.128:7890\";"));
+        let (fastd_cleaned, fastd_removed) = remove_fastd_proxy(&fastd_updated);
+        assert!(fastd_removed);
+        assert!(!fastd_cleaned.contains("proxy \""));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_fastd_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"FASTD_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_fastd_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("FASTD_PROXY="));
     }
 }

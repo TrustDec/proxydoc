@@ -131,6 +131,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8090, false, "Inlets Cloud-Native Tunnel & Reverse Proxy Daemon (Control/Tunnel)"),
     (18080, false, "zrok Peer-to-Peer Sharing & Zero Trust Tunnel Daemon (HTTP/TCP)"),
     (5644, false, "n2n Peer-to-Peer Mesh VPN & Supernode Daemon (UDP/Tunnel)"),
+    (9999, false, "Hyprspace Peer-to-Peer Mesh VPN Daemon (libp2p/RPC)"),
+    (10000, false, "Fastd Secure Tunneling & Mesh VPN Daemon (Status/Tunnel)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
