@@ -43659,6 +43659,582 @@ pub fn get_lantern_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_tunsafe_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TUNSAFE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TUNSAFE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TUNSAFE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("tunsafe.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("tunsafe").join("tunsafe.conf"),
+            home.join(".config").join("tunsafe").join("config.conf"),
+            home.join(".tunsafe").join("tunsafe.conf"),
+            home.join(".tunsafe").join("config.conf"),
+            home.join(".config").join("systemd").join("user").join("tunsafe.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tunsafe/tunsafe.conf"),
+        PathBuf::from("/etc/tunsafe/config.conf"),
+        PathBuf::from("/var/lib/tunsafe/tunsafe.conf"),
+        PathBuf::from("/usr/local/etc/tunsafe/tunsafe.conf"),
+        PathBuf::from("/opt/homebrew/etc/tunsafe/tunsafe.conf"),
+        PathBuf::from("/etc/default/tunsafe"),
+        PathBuf::from("/etc/sysconfig/tunsafe"),
+        PathBuf::from("/etc/systemd/system/tunsafe.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_tunsafe = PathBuf::from("/etc/tunsafe");
+    if etc_tunsafe.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_tunsafe) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "json" || ext == "ini" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_tunsafe_config_path() -> Option<PathBuf> {
+    let paths = get_tunsafe_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tunsafe_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tunsafe_write_path() -> PathBuf {
+    if let Some(p) = get_tunsafe_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TUNSAFE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TUNSAFE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("tunsafe");
+        if dir.is_dir() {
+            return dir.join("tunsafe.conf");
+        }
+        let dir2 = home.join(".tunsafe");
+        if dir2.is_dir() {
+            return dir2.join("tunsafe.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/tunsafe");
+    if etc_dir.is_dir() {
+        return etc_dir.join("tunsafe.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tunsafe.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("tunsafe").join("tunsafe.conf");
+    }
+    PathBuf::from("/etc/tunsafe/tunsafe.conf")
+}
+
+pub fn parse_tunsafe_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "tunsafe_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunsafe_proxy"
+                    || k_low == "tunsafe_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunsafe_proxy"
+                    || k_low == "tunsafe_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("tunsafe_proxy:")
+            || clean.starts_with("tunsafe_proxy=")
+            || clean.starts_with("httpproxy:")
+            || clean.starts_with("httpproxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("socks5proxy:")
+            || clean.starts_with("socks5proxy=")
+            || clean.starts_with("socksproxy:")
+            || clean.starts_with("socksproxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_tunsafe_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tunsafe_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tunsafe_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TUNSAFE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUNSAFE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TUNSAFE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUNSAFE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_sshuttle_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SSHUTTLE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SSHUTTLE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("SSHUTTLE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("sshuttle.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("sshuttle").join("sshuttle.conf"),
+            home.join(".config").join("sshuttle").join("config.conf"),
+            home.join(".sshuttle").join("sshuttle.conf"),
+            home.join(".sshuttle").join("config.conf"),
+            home.join(".config").join("systemd").join("user").join("sshuttle.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/sshuttle/sshuttle.conf"),
+        PathBuf::from("/etc/sshuttle/config.conf"),
+        PathBuf::from("/var/lib/sshuttle/sshuttle.conf"),
+        PathBuf::from("/usr/local/etc/sshuttle/sshuttle.conf"),
+        PathBuf::from("/opt/homebrew/etc/sshuttle/sshuttle.conf"),
+        PathBuf::from("/etc/default/sshuttle"),
+        PathBuf::from("/etc/sysconfig/sshuttle"),
+        PathBuf::from("/etc/systemd/system/sshuttle.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_sshuttle = PathBuf::from("/etc/sshuttle");
+    if etc_sshuttle.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_sshuttle) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "json" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_sshuttle_config_path() -> Option<PathBuf> {
+    let paths = get_sshuttle_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_sshuttle_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_sshuttle_write_path() -> PathBuf {
+    if let Some(p) = get_sshuttle_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SSHUTTLE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("SSHUTTLE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("sshuttle");
+        if dir.is_dir() {
+            return dir.join("sshuttle.conf");
+        }
+        let dir2 = home.join(".sshuttle");
+        if dir2.is_dir() {
+            return dir2.join("sshuttle.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/sshuttle");
+    if etc_dir.is_dir() {
+        return etc_dir.join("sshuttle.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/sshuttle.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("sshuttle").join("sshuttle.conf");
+    }
+    PathBuf::from("/etc/sshuttle/sshuttle.conf")
+}
+
+pub fn parse_sshuttle_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "sshuttle_proxy",
+                "socks5_proxy",
+                "listen_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sshuttle_proxy"
+                    || k_low == "sshuttle_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sshuttle_proxy"
+                    || k_low == "sshuttle_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("sshuttle_proxy:")
+            || clean.starts_with("sshuttle_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("listen_proxy:")
+            || clean.starts_with("listen_proxy=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_sshuttle_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_sshuttle_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_sshuttle_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SSHUTTLE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SSHUTTLE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SSHUTTLE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SSHUTTLE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -51536,6 +52112,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Lantern Daemon Proxy",
             "~/.lantern/settings.yaml & /etc/lantern/settings.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // TunSafe WireGuard VPN Client Daemon (/etc/tunsafe/tunsafe.conf / ~/.config/tunsafe/tunsafe.conf / /etc/systemd/system/tunsafe.service.d/http-proxy.conf)
+    if let Some((tunsafe_proxy, tunsafe_path)) = get_tunsafe_proxy() {
+        let ok = verify_proxy_url(&tunsafe_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "TunSafe proxy `{}` in {} is dead! (TunSafe WireGuard tunnel routing will fail)",
+                tunsafe_proxy,
+                tunsafe_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "TunSafe Daemon Proxy",
+            format!("{}", tunsafe_path.display()),
+            tunsafe_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (TunSafe fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "TunSafe Daemon Proxy",
+            "~/.config/tunsafe/tunsafe.conf & /etc/tunsafe/tunsafe.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Sshuttle Transparent SSH Proxy Daemon (~/.config/sshuttle/sshuttle.conf / /etc/sshuttle/sshuttle.conf / /etc/systemd/system/sshuttle.service.d/http-proxy.conf)
+    if let Some((sshuttle_proxy, sshuttle_path)) = get_sshuttle_proxy() {
+        let ok = verify_proxy_url(&sshuttle_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Sshuttle proxy `{}` in {} is dead! (Sshuttle transparent proxy forwarding will fail)",
+                sshuttle_proxy,
+                sshuttle_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Sshuttle Daemon Proxy",
+            format!("{}", sshuttle_path.display()),
+            sshuttle_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Sshuttle fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Sshuttle Daemon Proxy",
+            "~/.config/sshuttle/sshuttle.conf & /etc/sshuttle/sshuttle.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -60292,5 +60932,76 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; lantern_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_lantern_proxy(input_comment), None);
         assert_eq!(parse_lantern_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tunsafe_proxy() {
+        let tunsafe_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_tunsafe_proxy(tunsafe_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let tunsafe_conf = r#"
+[Interface]
+# TunSafe WireGuard configuration
+HTTPProxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_tunsafe_proxy(tunsafe_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tunsafe_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; tunsafe_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_tunsafe_proxy(input_comment), None);
+        assert_eq!(parse_tunsafe_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_sshuttle_proxy() {
+        let sshuttle_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_sshuttle_proxy(sshuttle_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let sshuttle_conf = r#"
+# Sshuttle configuration
+sshuttle_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_sshuttle_proxy(sshuttle_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_sshuttle_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; sshuttle_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_sshuttle_proxy(input_comment), None);
+        assert_eq!(parse_sshuttle_proxy(""), None);
     }
 }

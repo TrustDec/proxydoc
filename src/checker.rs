@@ -2046,6 +2046,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Baichuan-M1 AI CDN",
         "https://github.com/baichuan-inc/Baichuan-M1",
     ),
+    (
+        "TunSafe Mesh VPN CDN",
+        "https://github.com/TunSafe/TunSafe",
+    ),
+    (
+        "Sshuttle Proxy CDN",
+        "https://github.com/sshuttle/sshuttle",
+    ),
+    (
+        "MInference AI CDN",
+        "https://github.com/microsoft/MInference",
+    ),
+    (
+        "VITA AI CDN",
+        "https://github.com/VITA-MLLM/VITA",
+    ),
+    (
+        "Megatron-DeepSpeed AI CDN",
+        "https://github.com/microsoft/Megatron-DeepSpeed",
+    ),
+    (
+        "Llama-Mesh AI CDN",
+        "https://github.com/BrianPugh/llama-mesh",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3890,6 +3914,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Baichuan-M1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "TunSafe Mesh VPN CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Sshuttle Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MInference AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "VITA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Megatron-DeepSpeed AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Llama-Mesh AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
