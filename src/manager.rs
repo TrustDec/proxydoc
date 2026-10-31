@@ -51139,6 +51139,480 @@ pub fn unset_hermit_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_asdf_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "asdf_proxy"
+                    || k_low == "asdf_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"ASDF_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export asdf_proxy=")
+            || lower.starts_with("export asdf_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("asdf_proxy=")
+            || lower.starts_with("asdf_http_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export ASDF_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http"
+                || k_trim == "https"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "asdf_proxy"
+                || k_trim == "asdf_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains(':') {
+                lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http_proxy = {}", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"ASDF_HTTP_PROXY={}\"", proxy_url));
+        } else if content.contains("[network]") {
+            lines.push(format!("http_proxy = {}", proxy_url));
+        } else if content.contains("[proxy]") {
+            lines.push(format!("http = {}", proxy_url));
+        } else {
+            lines.push(format!("http_proxy = {}", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_asdf_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "asdf_proxy", "asdf_http_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if let Some(env_obj) = obj.get_mut("env").and_then(|v| v.as_object_mut()) {
+                for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "ASDF_HTTP_PROXY"] {
+                    if env_obj.remove(key).is_some() {
+                        removed = true;
+                    }
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "asdf_proxy"
+                    || k_low == "asdf_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export asdf_proxy=")
+            || lower.starts_with("export asdf_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("asdf_proxy=")
+            || lower.starts_with("asdf_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http"
+                || k_trim == "https"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "asdf_proxy"
+                || k_trim == "asdf_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_asdf_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_asdf_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_asdf_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_asdf_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_asdf_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_asdf_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_vfox_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vfox_proxy"
+                    || k_low == "vfox_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"VFOX_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export vfox_proxy=")
+            || lower.starts_with("export vfox_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("vfox_proxy=")
+            || lower.starts_with("vfox_http_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export VFOX_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http"
+                || k_trim == "https"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "vfox_proxy"
+                || k_trim == "vfox_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"VFOX_HTTP_PROXY={}\"", proxy_url));
+        } else if content.contains("[network]") {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        } else if content.contains("[proxy]") {
+            lines.push(format!("http = \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http_proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_vfox_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "vfox_proxy", "vfox_http_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if let Some(env_obj) = obj.get_mut("env").and_then(|v| v.as_object_mut()) {
+                for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "VFOX_HTTP_PROXY"] {
+                    if env_obj.remove(key).is_some() {
+                        removed = true;
+                    }
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vfox_proxy"
+                    || k_low == "vfox_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export vfox_proxy=")
+            || lower.starts_with("export vfox_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("vfox_proxy=")
+            || lower.starts_with("vfox_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http"
+                || k_trim == "https"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "vfox_proxy"
+                || k_trim == "vfox_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_vfox_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_vfox_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_vfox_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_vfox_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_vfox_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_vfox_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -51407,6 +51881,8 @@ pub async fn turn_on(
     devbox: bool,
     aqua: bool,
     hermit: bool,
+    asdf: bool,
+    vfox: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -51674,6 +52150,8 @@ pub async fn turn_on(
     let set_devbox = devbox || all;
     let set_aqua = aqua || all;
     let set_hermit = hermit || all;
+    let set_asdf = asdf || all;
+    let set_vfox = vfox || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -55565,6 +56043,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_asdf {
+        match set_asdf_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ asdf runtime version manager ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update asdf config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_vfox {
+        match set_vfox_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ vfox toolchain manager ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update vfox config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -55846,6 +56354,8 @@ pub fn turn_off(
     devbox: bool,
     aqua: bool,
     hermit: bool,
+    asdf: bool,
+    vfox: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -56113,6 +56623,8 @@ pub fn turn_off(
     let unset_devbox = devbox || all;
     let unset_aqua = aqua || all;
     let unset_hermit = hermit || all;
+    let unset_asdf = asdf || all;
+    let unset_vfox = vfox || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -58310,6 +58822,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Hermit dev environment proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Hermit proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Hermit dev environment proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_asdf {
+        match unset_asdf_proxy() {
+            Ok(true) => eprintln!("{}", "✔ asdf runtime version manager proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ asdf proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset asdf runtime version manager proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_vfox {
+        match unset_vfox_proxy() {
+            Ok(true) => eprintln!("{}", "✔ vfox toolchain manager proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ vfox proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset vfox toolchain manager proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -64460,6 +64988,40 @@ auth: pass123
         let dropin_updated = apply_hermit_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_hermit_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_asdf_proxy() {
+        let rc_initial = "# asdf config\nlegacy_version_file = yes\n";
+        let rc_updated = apply_asdf_proxy(rc_initial, "http://10.0.0.128:7890");
+        assert!(rc_updated.contains("http_proxy = http://10.0.0.128:7890"));
+        let (rc_cleaned, rc_removed) = remove_asdf_proxy(&rc_updated);
+        assert!(rc_removed);
+        assert!(!rc_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/asdf\n";
+        let dropin_updated = apply_asdf_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_asdf_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_vfox_proxy() {
+        let yaml_initial = "legacy_version_file:\n  enable: true\n";
+        let yaml_updated = apply_vfox_proxy(yaml_initial, "http://10.0.0.128:7890");
+        assert!(yaml_updated.contains("http_proxy: \"http://10.0.0.128:7890\""));
+        let (yaml_cleaned, yaml_removed) = remove_vfox_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/vfox\n";
+        let dropin_updated = apply_vfox_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_vfox_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

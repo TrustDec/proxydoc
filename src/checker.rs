@@ -2646,6 +2646,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "R1-Searcher AI CDN",
         "https://github.com/RUCAIBox/R1-Searcher",
     ),
+    (
+        "asdf Dev CDN",
+        "https://github.com/asdf-vm/asdf",
+    ),
+    (
+        "vfox Dev CDN",
+        "https://github.com/version-fox/vfox",
+    ),
+    (
+        "Open-R1 AI CDN",
+        "https://github.com/huggingface/open-r1",
+    ),
+    (
+        "TinyZero AI CDN",
+        "https://github.com/Jiayi-Pan/TinyZero",
+    ),
+    (
+        "DeepScaleR AI CDN",
+        "https://github.com/agentica-project/deepscaler",
+    ),
+    (
+        "Marco-o1 AI CDN",
+        "https://github.com/AIDC-AI/Marco-o1",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4940,6 +4964,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "R1-Searcher AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "asdf Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "vfox Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-R1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "TinyZero AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepScaleR AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Marco-o1 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

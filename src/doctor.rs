@@ -59957,6 +59957,682 @@ pub fn get_hermit_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_asdf_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ASDF_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("ASDF_DIR") {
+        let p = PathBuf::from(dir.trim()).join(".asdfrc");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("ASDF_DATA_DIR") {
+        let p = PathBuf::from(dir.trim()).join(".asdfrc");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".asdfrc");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("asdf").join("asdfrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("asdf").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    let local = PathBuf::from(".asdfrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/asdf.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_asdf = PathBuf::from("/etc/asdfrc");
+    if etc_asdf.exists() && !paths.contains(&etc_asdf) {
+        paths.push(etc_asdf);
+    }
+    let etc_dir = PathBuf::from("/etc/asdf");
+    if etc_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "conf" || ext == "toml" || ext == "yaml" || ext == "yml" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_asdf_config_path() -> Option<PathBuf> {
+    let paths = get_asdf_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_asdf_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_asdf_write_path() -> PathBuf {
+    if let Some(p) = get_asdf_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ASDF_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".asdfrc");
+    }
+    PathBuf::from(".asdfrc")
+}
+
+pub fn parse_asdf_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "asdf_proxy", "asdf_http_proxy"] {
+                if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+                    let trim = s.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+            if let Some(env_obj) = obj.get("env").and_then(|v| v.as_object()) {
+                for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "ASDF_HTTP_PROXY"] {
+                    if let Some(s) = env_obj.get(key).and_then(|v| v.as_str()) {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "asdf_proxy"
+                    || k_low == "asdf_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export asdf_proxy=")
+            || lower.starts_with("export asdf_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("asdf_proxy=")
+            || lower.starts_with("asdf_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy =")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http =")
+            || clean.starts_with("http=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https-proxy =")
+            || clean.starts_with("https-proxy=")
+            || clean.starts_with("https =")
+            || clean.starts_with("https=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("asdf_proxy =")
+            || clean.starts_with("asdf_proxy=")
+            || clean.starts_with("asdf_http_proxy =")
+            || clean.starts_with("asdf_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https-proxy:")
+            || clean.starts_with("https:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("asdf_proxy:")
+            || clean.starts_with("asdf_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_asdf_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_asdf_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_asdf_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ASDF_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ASDF_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ASDF_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ASDF_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ASDF_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ASDF_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ASDF_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ASDF_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_vfox_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("VFOX_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("VFOX_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".version-fox").join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".version-fox").join("config.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("vfox").join("config.yaml");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("vfox").join("config.toml");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local1 = PathBuf::from(".vfox.yaml");
+    if local1.exists() && !paths.contains(&local1) {
+        paths.push(local1);
+    }
+    let local2 = PathBuf::from(".vfox.toml");
+    if local2.exists() && !paths.contains(&local2) {
+        paths.push(local2);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/vfox.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_dir = PathBuf::from("/etc/vfox");
+    if etc_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "toml" || ext == "json" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_vfox_config_path() -> Option<PathBuf> {
+    let paths = get_vfox_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_vfox_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_vfox_write_path() -> PathBuf {
+    if let Some(p) = get_vfox_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("VFOX_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".version-fox");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+        let dir2 = home.join(".config").join("vfox");
+        if dir2.is_dir() {
+            return dir2.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/vfox");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/vfox.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".version-fox").join("config.yaml");
+    }
+    PathBuf::from("/etc/vfox/config.yaml")
+}
+
+pub fn parse_vfox_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "vfox_proxy", "vfox_http_proxy"] {
+                if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+                    let trim = s.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+            if let Some(env_obj) = obj.get("env").and_then(|v| v.as_object()) {
+                for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "VFOX_HTTP_PROXY"] {
+                    if let Some(s) = env_obj.get(key).and_then(|v| v.as_str()) {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vfox_proxy"
+                    || k_low == "vfox_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export vfox_proxy=")
+            || lower.starts_with("export vfox_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("vfox_proxy=")
+            || lower.starts_with("vfox_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy =")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http =")
+            || clean.starts_with("http=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https-proxy =")
+            || clean.starts_with("https-proxy=")
+            || clean.starts_with("https =")
+            || clean.starts_with("https=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("vfox_proxy =")
+            || clean.starts_with("vfox_proxy=")
+            || clean.starts_with("vfox_http_proxy =")
+            || clean.starts_with("vfox_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https-proxy:")
+            || clean.starts_with("https:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("vfox_proxy:")
+            || clean.starts_with("vfox_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_vfox_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_vfox_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_vfox_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("VFOX_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VFOX_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VFOX_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VFOX_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VFOX_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VFOX_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VFOX_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VFOX_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -69434,6 +70110,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Hermit Dev Proxy",
             "~/.config/hermit/config.hcl & /etc/hermit/config.hcl",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // asdf Polyglot Runtime & Toolchain Version Manager Daemon (~/.asdfrc / .asdfrc / ~/.config/asdf/asdfrc / /etc/asdfrc / /etc/systemd/system/asdf.service.d/http-proxy.conf)
+    if let Some((asdf_proxy, asdf_path)) = get_asdf_proxy() {
+        let ok = verify_proxy_url(&asdf_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "asdf proxy `{}` in {} is dead! (asdf polyglot toolchain proxy will fail)",
+                asdf_proxy,
+                asdf_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "asdf Dev Proxy",
+            format!("{}", asdf_path.display()),
+            asdf_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (asdf fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "asdf Dev Proxy",
+            "~/.asdfrc & /etc/asdfrc",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // vfox (VersionFox) Extensible Multi-Platform Toolchain Manager Daemon (~/.version-fox/config.yaml / ~/.config/vfox/config.yaml / /etc/vfox/config.yaml / /etc/systemd/system/vfox.service.d/http-proxy.conf)
+    if let Some((vfox_proxy, vfox_path)) = get_vfox_proxy() {
+        let ok = verify_proxy_url(&vfox_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "vfox proxy `{}` in {} is dead! (vfox toolchain proxy will fail)",
+                vfox_proxy,
+                vfox_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "vfox Dev Proxy",
+            format!("{}", vfox_path.display()),
+            vfox_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (vfox fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "vfox Dev Proxy",
+            "~/.version-fox/config.yaml & /etc/vfox/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -79904,5 +80644,63 @@ Environment="HERMIT_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http-proxy = \"http://127.0.0.1:7890\"\n// hermit_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_hermit_proxy(input_comment), None);
         assert_eq!(parse_hermit_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_asdf_proxy() {
+        let rc_config = r#"
+http_proxy = http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_asdf_proxy(rc_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let json_config = r#"
+{
+  "http-proxy": "http://10.0.0.5:8888"
+}
+"#;
+        assert_eq!(
+            parse_asdf_proxy(json_config),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="ASDF_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_asdf_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = http://127.0.0.1:7890\n; asdf_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_asdf_proxy(input_comment), None);
+        assert_eq!(parse_asdf_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_vfox_proxy() {
+        let yaml_config = r#"
+http_proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_vfox_proxy(yaml_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="VFOX_PROXY=http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_vfox_proxy(dropin),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let input_comment = "# http_proxy: \"http://127.0.0.1:7890\"\n// vfox_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_vfox_proxy(input_comment), None);
+        assert_eq!(parse_vfox_proxy(""), None);
     }
 }

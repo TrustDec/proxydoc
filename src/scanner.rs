@@ -189,6 +189,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (27272, false, "Devbox Portable Nix-Based Isolated Dev Environment Daemon (HTTP/API)"),
     (31313, false, "Aqua Declarative CLI Version Manager Daemon (HTTP/API)"),
     (32323, false, "Hermit Isolated & Reproducible Dev Environment Daemon (HTTP/API)"),
+    (34343, false, "asdf Polyglot Runtime Version Manager Daemon (HTTP/API)"),
+    (35353, false, "vfox (VersionFox) Extensible Multi-Platform Toolchain Manager Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
