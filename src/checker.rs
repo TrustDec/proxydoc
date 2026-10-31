@@ -2286,6 +2286,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "ChatGLM3 AI CDN",
         "https://github.com/THUDM/ChatGLM3",
     ),
+    (
+        "lanproxy Tunnel CDN",
+        "https://github.com/ffay/lanproxy",
+    ),
+    (
+        "teleconsole Tunnel CDN",
+        "https://github.com/gravitational/teleconsole",
+    ),
+    (
+        "DeepSeek-VL AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-VL",
+    ),
+    (
+        "Qwen2-VL AI CDN",
+        "https://github.com/QwenLM/Qwen2-VL",
+    ),
+    (
+        "Llama-3.2 AI CDN",
+        "https://github.com/meta-llama/llama-models",
+    ),
+    (
+        "ChatGLM2-6B AI CDN",
+        "https://github.com/THUDM/ChatGLM2-6B",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4310,6 +4334,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "ChatGLM3 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "lanproxy Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "teleconsole Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-VL AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen2-VL AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Llama-3.2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ChatGLM2-6B AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

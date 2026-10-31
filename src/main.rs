@@ -773,7 +773,13 @@ enum Commands {
         /// Also configure NATAPP localhost reverse proxy & tunnel daemon (~/.natapp/config.ini / /etc/natapp/config.ini / /etc/systemd/system/natapp.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "natapp-proxy", visible_alias = "natapp-tunnel", visible_alias = "natapp-daemon")]
         natapp: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, and natapp proxy
+        /// Also configure lanproxy intranet penetration & reverse tunnel client (~/.lanproxy/config.properties / /etc/lanproxy/config.properties / /etc/systemd/system/lanproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "lanproxy-proxy", visible_alias = "lanproxy-tunnel", visible_alias = "lanproxy-client")]
+        lanproxy: bool,
+        /// Also configure teleconsole terminal sharing & SSH reverse tunnel daemon (~/.teleconsole/config.yaml / /etc/teleconsole/config.yaml / /etc/systemd/system/teleconsole.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "teleconsole-proxy", visible_alias = "teleconsole-tunnel", visible_alias = "teleconsole-daemon")]
+        teleconsole: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, and teleconsole proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1490,6 +1496,12 @@ enum Commands {
         /// Also unset NATAPP localhost reverse proxy & tunnel daemon (~/.natapp/config.ini / /etc/natapp/config.ini / /etc/systemd/system/natapp.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "natapp-proxy", visible_alias = "natapp-tunnel", visible_alias = "natapp-daemon")]
         natapp: bool,
+        /// Also unset lanproxy intranet penetration & reverse tunnel client (~/.lanproxy/config.properties / /etc/lanproxy/config.properties / /etc/systemd/system/lanproxy.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "lanproxy-proxy", visible_alias = "lanproxy-tunnel", visible_alias = "lanproxy-client")]
+        lanproxy: bool,
+        /// Also unset teleconsole terminal sharing & SSH reverse tunnel daemon (~/.teleconsole/config.yaml / /etc/teleconsole/config.yaml / /etc/systemd/system/teleconsole.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "teleconsole-proxy", visible_alias = "teleconsole-tunnel", visible_alias = "teleconsole-daemon")]
+        teleconsole: bool,
         /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, and natapp proxy
         #[arg(short, long)]
         all: bool,
@@ -1770,6 +1782,8 @@ async fn main() -> Result<()> {
             tmate,
             upterm,
             natapp,
+            lanproxy,
+            teleconsole,
             all,
             shell,
         }) => {
@@ -2011,6 +2025,8 @@ async fn main() -> Result<()> {
                 tmate,
                 upterm,
                 natapp,
+                lanproxy,
+                teleconsole,
                 all,
                 shell.as_deref(),
             )
@@ -2253,6 +2269,8 @@ async fn main() -> Result<()> {
             tmate,
             upterm,
             natapp,
+            lanproxy,
+            teleconsole,
             all,
             shell,
         }) => {
@@ -2493,6 +2511,8 @@ async fn main() -> Result<()> {
                 tmate,
                 upterm,
                 natapp,
+                lanproxy,
+                teleconsole,
                 all,
                 shell.as_deref(),
             )?;
@@ -10027,6 +10047,98 @@ mod tests {
         match cli.command {
             Some(Commands::Off { natapp, .. }) => {
                 assert!(natapp);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_lanproxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--lanproxy"]).unwrap();
+        match cli.command {
+            Some(Commands::On { lanproxy, .. }) => {
+                assert!(lanproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--lanproxy-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { lanproxy, .. }) => {
+                assert!(lanproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--lanproxy-tunnel"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { lanproxy, .. }) => {
+                assert!(lanproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--lanproxy-client"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { lanproxy, .. }) => {
+                assert!(lanproxy);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_lanproxy() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--lanproxy"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { lanproxy, .. }) => {
+                assert!(lanproxy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_teleconsole() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--teleconsole"]).unwrap();
+        match cli.command {
+            Some(Commands::On { teleconsole, .. }) => {
+                assert!(teleconsole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--teleconsole-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { teleconsole, .. }) => {
+                assert!(teleconsole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--teleconsole-tunnel"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { teleconsole, .. }) => {
+                assert!(teleconsole);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--teleconsole-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { teleconsole, .. }) => {
+                assert!(teleconsole);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_teleconsole() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--teleconsole"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { teleconsole, .. }) => {
+                assert!(teleconsole);
             }
             _ => panic!("Expected Off command"),
         }

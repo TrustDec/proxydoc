@@ -49790,6 +49790,632 @@ pub fn get_natapp_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_lanproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("LANPROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("LANPROXY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("LANPROXY_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.properties");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".lanproxy").join("config.properties"),
+            home.join(".config").join("lanproxy").join("config.properties"),
+            home.join(".lanproxy").join("lanproxy.properties"),
+            home.join(".lanproxy").join("client.properties"),
+            home.join(".config").join("systemd").join("user").join("lanproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/lanproxy/config.properties"),
+        PathBuf::from("/etc/lanproxy/client.properties"),
+        PathBuf::from("/etc/lanproxy.properties"),
+        PathBuf::from("/var/lib/lanproxy/config.properties"),
+        PathBuf::from("/usr/local/etc/lanproxy/config.properties"),
+        PathBuf::from("/opt/homebrew/etc/lanproxy/config.properties"),
+        PathBuf::from("/etc/default/lanproxy"),
+        PathBuf::from("/etc/sysconfig/lanproxy"),
+        PathBuf::from("/etc/systemd/system/lanproxy.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/lanproxyd.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_lanproxy = PathBuf::from("/etc/lanproxy");
+    if etc_lanproxy.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_lanproxy) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "properties" || ext == "conf" || ext == "ini" || ext == "json" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_lanproxy_config_path() -> Option<PathBuf> {
+    let paths = get_lanproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_lanproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_lanproxy_write_path() -> PathBuf {
+    if let Some(p) = get_lanproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("LANPROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("LANPROXY_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".lanproxy");
+        if dir.is_dir() {
+            return dir.join("config.properties");
+        }
+        let dir2 = home.join(".config").join("lanproxy");
+        if dir2.is_dir() {
+            return dir2.join("config.properties");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/lanproxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.properties");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/lanproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".lanproxy").join("config.properties");
+    }
+    PathBuf::from("/etc/lanproxy/config.properties")
+}
+
+pub fn parse_lanproxy_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy.http",
+                "proxy_http",
+                "http_proxy",
+                "http-proxy",
+                "proxy",
+                "proxy_url",
+                "https_proxy",
+                "lanproxy_proxy",
+                "lanproxy_http_proxy",
+                "client.proxy",
+                "tunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "lanproxy_proxy"
+                    || k_low == "lanproxy_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "lanproxy_proxy"
+                    || k_low == "lanproxy_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy.http"
+                || k_low == "proxy_http"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "lanproxy_proxy"
+                || k_low == "lanproxy_http_proxy"
+                || k_low == "client.proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy.http"
+                || k_low == "proxy_http"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "lanproxy_proxy"
+                || k_low == "lanproxy_http_proxy"
+                || k_low == "client.proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_lanproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_lanproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_lanproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("LANPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LANPROXY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LANPROXY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LANPROXY_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_teleconsole_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TELECONSOLE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TELECONSOLE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TELECONSOLE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".teleconsole").join("config.yaml"),
+            home.join(".teleconsole").join("config.yml"),
+            home.join(".config").join("teleconsole").join("config.yaml"),
+            home.join(".config").join("teleconsole").join("config.yml"),
+            home.join(".config").join("systemd").join("user").join("teleconsole.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/teleconsole/config.yaml"),
+        PathBuf::from("/etc/teleconsole/config.yml"),
+        PathBuf::from("/etc/teleconsole.yaml"),
+        PathBuf::from("/etc/teleconsole.yml"),
+        PathBuf::from("/var/lib/teleconsole/config.yaml"),
+        PathBuf::from("/usr/local/etc/teleconsole/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/teleconsole/config.yaml"),
+        PathBuf::from("/etc/default/teleconsole"),
+        PathBuf::from("/etc/sysconfig/teleconsole"),
+        PathBuf::from("/etc/systemd/system/teleconsole.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/teleconsoled.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_teleconsole = PathBuf::from("/etc/teleconsole");
+    if etc_teleconsole.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_teleconsole) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "toml" || ext == "json" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_teleconsole_config_path() -> Option<PathBuf> {
+    let paths = get_teleconsole_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_teleconsole_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_teleconsole_write_path() -> PathBuf {
+    if let Some(p) = get_teleconsole_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TELECONSOLE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TELECONSOLE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".teleconsole");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+        let dir2 = home.join(".config").join("teleconsole");
+        if dir2.is_dir() {
+            return dir2.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/teleconsole");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/teleconsole.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".teleconsole").join("config.yaml");
+    }
+    PathBuf::from("/etc/teleconsole/config.yaml")
+}
+
+pub fn parse_teleconsole_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "teleconsole_proxy",
+                "teleconsole_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "teleconsole_proxy"
+                    || k_low == "teleconsole_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "teleconsole_proxy"
+                    || k_low == "teleconsole_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "teleconsole_proxy"
+                || k_low == "teleconsole_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "teleconsole_proxy"
+                || k_low == "teleconsole_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_teleconsole_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_teleconsole_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_teleconsole_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TELECONSOLE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TELECONSOLE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TELECONSOLE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TELECONSOLE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -58307,6 +58933,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "NATAPP Daemon Proxy",
             "~/.natapp/config.ini & /etc/natapp/config.ini",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // lanproxy Intranet Penetration & Reverse Tunnel Client (~/.lanproxy/config.properties / /etc/lanproxy/config.properties / /etc/systemd/system/lanproxy.service.d/http-proxy.conf)
+    if let Some((lanproxy_proxy, lanproxy_path)) = get_lanproxy_proxy() {
+        let ok = verify_proxy_url(&lanproxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "lanproxy proxy `{}` in {} is dead! (lanproxy intranet penetration and reverse tunneling will fail)",
+                lanproxy_proxy,
+                lanproxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "lanproxy Daemon Proxy",
+            format!("{}", lanproxy_path.display()),
+            lanproxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (lanproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "lanproxy Daemon Proxy",
+            "~/.lanproxy/config.properties & /etc/lanproxy/config.properties",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // teleconsole Terminal Sharing & SSH Reverse Tunnel Daemon (~/.teleconsole/config.yaml / /etc/teleconsole/config.yaml / /etc/systemd/system/teleconsole.service.d/http-proxy.conf)
+    if let Some((teleconsole_proxy, teleconsole_path)) = get_teleconsole_proxy() {
+        let ok = verify_proxy_url(&teleconsole_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "teleconsole proxy `{}` in {} is dead! (teleconsole terminal sharing and SSH reverse tunnel will fail)",
+                teleconsole_proxy,
+                teleconsole_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "teleconsole Daemon Proxy",
+            format!("{}", teleconsole_path.display()),
+            teleconsole_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (teleconsole fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "teleconsole Daemon Proxy",
+            "~/.teleconsole/config.yaml & /etc/teleconsole/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -67755,5 +68445,74 @@ Environment="NATAPP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http_proxy=http://127.0.0.1:7890\n; natapp_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_natapp_proxy(input_comment), None);
         assert_eq!(parse_natapp_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_lanproxy_proxy() {
+        let lanproxy_prop = r#"
+client.ssl.enable=true
+proxy.http=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_lanproxy_proxy(lanproxy_prop),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let lanproxy_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_lanproxy_proxy(lanproxy_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="LANPROXY_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_lanproxy_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy.http=http://127.0.0.1:7890\n; lanproxy_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_lanproxy_proxy(input_comment), None);
+        assert_eq!(parse_lanproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_teleconsole_proxy() {
+        let teleconsole_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_teleconsole_proxy(teleconsole_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let teleconsole_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_teleconsole_proxy(teleconsole_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="TELECONSOLE_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_teleconsole_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; teleconsole_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_teleconsole_proxy(input_comment), None);
+        assert_eq!(parse_teleconsole_proxy(""), None);
     }
 }
