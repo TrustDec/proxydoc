@@ -193,6 +193,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (35353, false, "vfox (VersionFox) Extensible Multi-Platform Toolchain Manager Daemon (HTTP/API)"),
     (36363, false, "SDKMAN! Multi-Platform Software Development Kit Manager Daemon (HTTP/API)"),
     (37373, false, "Rustup Rust Toolchain Installer & Multiplexer Daemon (HTTP/API)"),
+    (38383, false, "fnm (Fast Node Manager) Toolchain Manager Daemon (HTTP/API)"),
+    (39393, false, "Volta JavaScript Toolchain Manager Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

@@ -61055,6 +61055,466 @@ pub fn get_rustup_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_fnm_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("FNM_DIR") {
+        let p = PathBuf::from(dir.trim()).join("configuration.json");
+        if p.exists() {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("settings.toml");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".config").join("fnm").join("configuration.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("fnm").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".fnm").join("settings.toml");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".fnm").join("config");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".fnmrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/fnm.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/fnm/configuration.json");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_config2 = PathBuf::from("/etc/fnm/config");
+    if etc_config2.exists() && !paths.contains(&etc_config2) {
+        paths.push(etc_config2);
+    }
+    paths
+}
+
+pub fn get_fnm_config_path() -> Option<PathBuf> {
+    let paths = get_fnm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_fnm_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_fnm_write_path() -> PathBuf {
+    if let Some(p) = get_fnm_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("FNM_DIR") {
+        return PathBuf::from(dir.trim()).join("configuration.json");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let fnm_config_dir = home.join(".config").join("fnm");
+        if fnm_config_dir.is_dir() {
+            return fnm_config_dir.join("configuration.json");
+        }
+        let fnm_dir = home.join(".fnm");
+        if fnm_dir.is_dir() {
+            return fnm_dir.join("settings.toml");
+        }
+        return fnm_config_dir.join("configuration.json");
+    }
+    PathBuf::from("/etc/fnm/configuration.json")
+}
+
+pub fn parse_fnm_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "fnm_proxy", "fnm_http_proxy", "node_dist_mirror"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "fnm_http_proxy"
+                    || k_low == "fnm_https_proxy"
+                    || k_low == "fnm_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export fnm_http_proxy=")
+            || lower.starts_with("export fnm_https_proxy=")
+            || lower.starts_with("export fnm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("fnm_http_proxy=")
+            || lower.starts_with("fnm_https_proxy=")
+            || lower.starts_with("fnm_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("fnm_http_proxy")
+            || clean.starts_with("fnm_https_proxy")
+            || clean.starts_with("fnm_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("http-proxy")
+            || clean.starts_with("https-proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_fnm_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_fnm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_fnm_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("FNM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FNM_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("FNM_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FNM_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_volta_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("VOLTA_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("hooks.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".volta").join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".volta").join("hooks.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("volta").join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/volta.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/volta/config.json");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    paths
+}
+
+pub fn get_volta_config_path() -> Option<PathBuf> {
+    let paths = get_volta_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_volta_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_volta_write_path() -> PathBuf {
+    if let Some(p) = get_volta_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("VOLTA_HOME") {
+        return PathBuf::from(dir.trim()).join("config.json");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let volta_dir = home.join(".volta");
+        if volta_dir.is_dir() {
+            return volta_dir.join("config.json");
+        }
+        return home.join(".volta").join("config.json");
+    }
+    PathBuf::from("/etc/volta/config.json")
+}
+
+pub fn parse_volta_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "volta_proxy", "volta_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "volta_http_proxy"
+                    || k_low == "volta_https_proxy"
+                    || k_low == "volta_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export volta_http_proxy=")
+            || lower.starts_with("export volta_https_proxy=")
+            || lower.starts_with("export volta_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("volta_http_proxy=")
+            || lower.starts_with("volta_https_proxy=")
+            || lower.starts_with("volta_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("volta_http_proxy")
+            || clean.starts_with("volta_https_proxy")
+            || clean.starts_with("volta_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("http-proxy")
+            || clean.starts_with("https-proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_volta_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_volta_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_volta_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("VOLTA_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VOLTA_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VOLTA_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VOLTA_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -61845,6 +62305,30 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     },
                 ));
             }
+        }
+    }
+
+    // fnm / Node.js Distribution Mirror
+    if let Ok(val) = std::env::var("FNM_NODE_DIST_MIRROR") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "fnm mirror variable `FNM_NODE_DIST_MIRROR` points to unreachable mirror `{}`! (fnm node install will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "fnm Mirror",
+                "FNM_NODE_DIST_MIRROR (Node.js dist server mirror)",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR! (fnm install fails)".red().bold().to_string()
+                },
+            ));
         }
     }
 
@@ -70660,6 +71144,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Rustup Dev Proxy",
             "~/.rustup/settings.toml & /etc/rustup/settings.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // fnm Fast Node Manager Toolchain Daemon (~/.config/fnm/configuration.json / ~/.fnm/settings.toml / ~/.fnm/config / /etc/fnm/config.json / /etc/systemd/system/fnm.service.d/http-proxy.conf)
+    if let Some((fnm_proxy, fnm_path)) = get_fnm_proxy() {
+        let ok = verify_proxy_url(&fnm_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "fnm proxy `{}` in {} is dead! (fnm toolchain proxy will fail)",
+                fnm_proxy,
+                fnm_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "fnm Dev Proxy",
+            format!("{}", fnm_path.display()),
+            fnm_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (fnm fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "fnm Dev Proxy",
+            "~/.config/fnm/configuration.json & ~/.fnm/settings.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Volta JavaScript Toolchain Manager Daemon (~/.volta/config.json / ~/.volta/hooks.json / ~/.config/volta/config.json / /etc/volta/config.json / /etc/systemd/system/volta.service.d/http-proxy.conf)
+    if let Some((volta_proxy, volta_path)) = get_volta_proxy() {
+        let ok = verify_proxy_url(&volta_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "volta proxy `{}` in {} is dead! (volta toolchain proxy will fail)",
+                volta_proxy,
+                volta_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Volta Dev Proxy",
+            format!("{}", volta_path.display()),
+            volta_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (volta fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Volta Dev Proxy",
+            "~/.volta/config.json & ~/.volta/hooks.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -81239,5 +81787,49 @@ Environment="RUSTUP_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// rustup_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_rustup_proxy(input_comment), None);
         assert_eq!(parse_rustup_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_fnm_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_fnm_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="FNM_PROXY=http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_fnm_proxy(dropin),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// fnm_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_fnm_proxy(input_comment), None);
+        assert_eq!(parse_fnm_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_volta_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_volta_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="VOLTA_PROXY=http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_volta_proxy(dropin),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// volta_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_volta_proxy(input_comment), None);
+        assert_eq!(parse_volta_proxy(""), None);
     }
 }

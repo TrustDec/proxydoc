@@ -75,6 +75,7 @@ use crate::doctor::{
     get_aqua_proxy, get_hermit_proxy,
     get_asdf_proxy, get_vfox_proxy,
     get_sdkman_proxy, get_rustup_proxy,
+    get_fnm_proxy, get_volta_proxy,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bazel_proxy, unset_bun_proxy,
@@ -146,6 +147,7 @@ use crate::manager::{
     unset_aqua_proxy, unset_hermit_proxy,
     unset_asdf_proxy, unset_vfox_proxy,
     unset_sdkman_proxy, unset_rustup_proxy,
+    unset_fnm_proxy, unset_volta_proxy,
 };
 use crate::scanner;
 
@@ -7418,7 +7420,7 @@ pub async fn run() -> Result<()> {
     if let Some((aqua_proxy, aqua_path)) = get_aqua_proxy() {
         if !verify_proxy_url(&aqua_proxy).await {
             println!(
-                "  [267/277] Found dead Aqua CLI toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [267/279] Found dead Aqua CLI toolchain proxy (`{}` in {}), cleaning with backup...",
                 aqua_proxy.yellow(),
                 aqua_path.display()
             );
@@ -7435,17 +7437,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [267/277] Aqua CLI toolchain proxy: {}", "Reachable".green());
+            println!("  [267/279] Aqua CLI toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [267/277] Aqua CLI toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [267/279] Aqua CLI toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 268. Clean dead Hermit Isolated & Reproducible Dev Environment in config / systemd
     if let Some((hermit_proxy, hermit_path)) = get_hermit_proxy() {
         if !verify_proxy_url(&hermit_proxy).await {
             println!(
-                "  [268/277] Found dead Hermit dev environment proxy (`{}` in {}), cleaning with backup...",
+                "  [268/279] Found dead Hermit dev environment proxy (`{}` in {}), cleaning with backup...",
                 hermit_proxy.yellow(),
                 hermit_path.display()
             );
@@ -7462,17 +7464,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [268/277] Hermit dev environment proxy: {}", "Reachable".green());
+            println!("  [268/279] Hermit dev environment proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [268/277] Hermit dev environment proxy: {}", "Clean or not set".dimmed());
+        println!("  [268/279] Hermit dev environment proxy: {}", "Clean or not set".dimmed());
     }
 
     // 269. Clean dead asdf Polyglot Runtime Version Manager in config / systemd
     if let Some((asdf_proxy, asdf_path)) = get_asdf_proxy() {
         if !verify_proxy_url(&asdf_proxy).await {
             println!(
-                "  [269/277] Found dead asdf polyglot version manager proxy (`{}` in {}), cleaning with backup...",
+                "  [269/279] Found dead asdf polyglot version manager proxy (`{}` in {}), cleaning with backup...",
                 asdf_proxy.yellow(),
                 asdf_path.display()
             );
@@ -7489,17 +7491,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [269/277] asdf polyglot version manager proxy: {}", "Reachable".green());
+            println!("  [269/279] asdf polyglot version manager proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [269/277] asdf polyglot version manager proxy: {}", "Clean or not set".dimmed());
+        println!("  [269/279] asdf polyglot version manager proxy: {}", "Clean or not set".dimmed());
     }
 
     // 270. Clean dead vfox Extensible Multi-Platform Toolchain Manager in config / systemd
     if let Some((vfox_proxy, vfox_path)) = get_vfox_proxy() {
         if !verify_proxy_url(&vfox_proxy).await {
             println!(
-                "  [270/277] Found dead vfox toolchain manager proxy (`{}` in {}), cleaning with backup...",
+                "  [270/279] Found dead vfox toolchain manager proxy (`{}` in {}), cleaning with backup...",
                 vfox_proxy.yellow(),
                 vfox_path.display()
             );
@@ -7516,17 +7518,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [270/277] vfox toolchain manager proxy: {}", "Reachable".green());
+            println!("  [270/279] vfox toolchain manager proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [270/277] vfox toolchain manager proxy: {}", "Clean or not set".dimmed());
+        println!("  [270/279] vfox toolchain manager proxy: {}", "Clean or not set".dimmed());
     }
 
     // 271. Clean dead SDKMAN! toolchain proxy in config / systemd
     if let Some((sdkman_proxy, sdkman_path)) = get_sdkman_proxy() {
         if !verify_proxy_url(&sdkman_proxy).await {
             println!(
-                "  [271/277] Found dead SDKMAN! toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [271/279] Found dead SDKMAN! toolchain proxy (`{}` in {}), cleaning with backup...",
                 sdkman_proxy.yellow(),
                 sdkman_path.display()
             );
@@ -7543,17 +7545,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [271/277] SDKMAN! toolchain proxy: {}", "Reachable".green());
+            println!("  [271/279] SDKMAN! toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [271/277] SDKMAN! toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [271/279] SDKMAN! toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 272. Clean dead Rustup toolchain proxy in config / systemd
     if let Some((rustup_proxy, rustup_path)) = get_rustup_proxy() {
         if !verify_proxy_url(&rustup_proxy).await {
             println!(
-                "  [272/277] Found dead Rustup toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [272/279] Found dead Rustup toolchain proxy (`{}` in {}), cleaning with backup...",
                 rustup_proxy.yellow(),
                 rustup_path.display()
             );
@@ -7570,13 +7572,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [272/277] Rustup toolchain proxy: {}", "Reachable".green());
+            println!("  [272/279] Rustup toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [272/277] Rustup toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [272/279] Rustup toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 273. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 273. Clean dead fnm Fast Node Manager toolchain proxy in config / systemd
+    if let Some((fnm_proxy, fnm_path)) = get_fnm_proxy() {
+        if !verify_proxy_url(&fnm_proxy).await {
+            println!(
+                "  [273/279] Found dead fnm toolchain proxy (`{}` in {}), cleaning with backup...",
+                fnm_proxy.yellow(),
+                fnm_path.display()
+            );
+            if fnm_path.exists() {
+                let backup = fnm_path.with_extension("bak");
+                let _ = std::fs::copy(&fnm_path, &backup);
+            }
+            if let Ok(true) = unset_fnm_proxy() {
+                println!(
+                    "  {} Cleared broken fnm toolchain proxy in {} (backup saved)",
+                    "✔".green(),
+                    fnm_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [273/279] fnm toolchain proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [273/279] fnm toolchain proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 274. Clean dead Volta JavaScript toolchain proxy in config / systemd
+    if let Some((volta_proxy, volta_path)) = get_volta_proxy() {
+        if !verify_proxy_url(&volta_proxy).await {
+            println!(
+                "  [274/279] Found dead Volta toolchain proxy (`{}` in {}), cleaning with backup...",
+                volta_proxy.yellow(),
+                volta_path.display()
+            );
+            if volta_path.exists() {
+                let backup = volta_path.with_extension("bak");
+                let _ = std::fs::copy(&volta_path, &backup);
+            }
+            if let Ok(true) = unset_volta_proxy() {
+                println!(
+                    "  {} Cleared broken Volta toolchain proxy in {} (backup saved)",
+                    "✔".green(),
+                    volta_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [274/279] Volta toolchain proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [274/279] Volta toolchain proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 275. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -7590,7 +7646,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [273/277] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [275/279] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -7607,17 +7663,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [273/277] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [275/279] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [273/277] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [275/279] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [273/277] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [275/279] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 274. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 276. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -7631,7 +7687,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [274/277] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [276/279] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -7649,17 +7705,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [274/277] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [276/279] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [274/277] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [276/279] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [274/277] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [276/279] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 275. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 277. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -7673,7 +7729,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [275/277] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [277/279] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -7691,17 +7747,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [275/277] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [277/279] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [275/277] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [277/279] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [275/277] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [277/279] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 276. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 278. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -7720,7 +7776,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [276/277] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [278/279] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -7748,12 +7804,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [276/277] No active local proxy client found. Ensure your proxy software is open."
+            "  [278/279] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 277. Flush local DNS cache
-    println!("  [277/277] Flushing local DNS cache to fix resolution stalls...");
+    // 279. Flush local DNS cache
+    println!("  [279/279] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();
