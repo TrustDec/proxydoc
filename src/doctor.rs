@@ -50416,6 +50416,687 @@ pub fn get_teleconsole_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_tunnelto_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TUNNELTO_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TUNNELTO_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TUNNELTO_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".tunnelto").join("config.toml"),
+            home.join(".config").join("tunnelto").join("config.toml"),
+            home.join(".tunnelto").join("tunnelto.toml"),
+            home.join(".tunnelto.toml"),
+            home.join(".config").join("systemd").join("user").join("tunnelto.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tunnelto/config.toml"),
+        PathBuf::from("/etc/tunnelto/tunnelto.toml"),
+        PathBuf::from("/etc/tunnelto.toml"),
+        PathBuf::from("/var/lib/tunnelto/config.toml"),
+        PathBuf::from("/usr/local/etc/tunnelto/config.toml"),
+        PathBuf::from("/opt/homebrew/etc/tunnelto/config.toml"),
+        PathBuf::from("/etc/default/tunnelto"),
+        PathBuf::from("/etc/sysconfig/tunnelto"),
+        PathBuf::from("/etc/systemd/system/tunnelto.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/tunneltod.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_tunnelto = PathBuf::from("/etc/tunnelto");
+    if etc_tunnelto.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_tunnelto) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "toml" || ext == "yaml" || ext == "yml" || ext == "json" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_tunnelto_config_path() -> Option<PathBuf> {
+    let paths = get_tunnelto_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tunnelto_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tunnelto_write_path() -> PathBuf {
+    if let Some(p) = get_tunnelto_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TUNNELTO_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TUNNELTO_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".tunnelto");
+        if dir.is_dir() {
+            return dir.join("config.toml");
+        }
+        let dir2 = home.join(".config").join("tunnelto");
+        if dir2.is_dir() {
+            return dir2.join("config.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/tunnelto");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tunnelto.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".tunnelto").join("config.toml");
+    }
+    PathBuf::from("/etc/tunnelto/config.toml")
+}
+
+pub fn parse_tunnelto_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "tunnelto_proxy",
+                "tunnelto_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelto_proxy"
+                    || k_low == "tunnelto_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelto_proxy"
+                    || k_low == "tunnelto_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "tunnelto_proxy"
+                || k_low == "tunnelto_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "tunnelto_proxy"
+                || k_low == "tunnelto_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_tunnelto_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tunnelto_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tunnelto_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TUNNELTO_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUNNELTO_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TUNNELTO_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TUNNELTO_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_webhookrelay_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("WEBHOOKRELAY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("RELAY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("WEBHOOKRELAY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("RELAY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("WEBHOOKRELAY_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("RELAY_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".relay").join("config.json"),
+            home.join(".webhookrelay").join("config.json"),
+            home.join(".config").join("relay").join("config.json"),
+            home.join(".config").join("webhookrelay").join("config.json"),
+            home.join(".relay").join("config.yaml"),
+            home.join(".webhookrelay").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("webhookrelay.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("relay.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/webhookrelay/config.json"),
+        PathBuf::from("/etc/relay/config.json"),
+        PathBuf::from("/etc/webhookrelay.json"),
+        PathBuf::from("/etc/relay.json"),
+        PathBuf::from("/var/lib/webhookrelay/config.json"),
+        PathBuf::from("/usr/local/etc/webhookrelay/config.json"),
+        PathBuf::from("/opt/homebrew/etc/webhookrelay/config.json"),
+        PathBuf::from("/etc/default/webhookrelay"),
+        PathBuf::from("/etc/default/relay"),
+        PathBuf::from("/etc/sysconfig/webhookrelay"),
+        PathBuf::from("/etc/systemd/system/webhookrelay.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/relay.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_webhookrelay = PathBuf::from("/etc/webhookrelay");
+    if etc_webhookrelay.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_webhookrelay) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_webhookrelay_config_path() -> Option<PathBuf> {
+    let paths = get_webhookrelay_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_webhookrelay_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_webhookrelay_write_path() -> PathBuf {
+    if let Some(p) = get_webhookrelay_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("WEBHOOKRELAY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("RELAY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".relay");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".webhookrelay");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/webhookrelay");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/webhookrelay.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".relay").join("config.json");
+    }
+    PathBuf::from("/etc/webhookrelay/config.json")
+}
+
+pub fn parse_webhookrelay_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "webhookrelay_proxy",
+                "webhookrelay_http_proxy",
+                "relay_proxy",
+                "relay_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "webhookrelay_proxy"
+                    || k_low == "webhookrelay_http_proxy"
+                    || k_low == "relay_proxy"
+                    || k_low == "relay_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "webhookrelay_proxy"
+                    || k_low == "webhookrelay_http_proxy"
+                    || k_low == "relay_proxy"
+                    || k_low == "relay_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "webhookrelay_proxy"
+                || k_low == "webhookrelay_http_proxy"
+                || k_low == "relay_proxy"
+                || k_low == "relay_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "webhookrelay_proxy"
+                || k_low == "webhookrelay_http_proxy"
+                || k_low == "relay_proxy"
+                || k_low == "relay_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_webhookrelay_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_webhookrelay_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_webhookrelay_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("WEBHOOKRELAY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WEBHOOKRELAY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("RELAY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RELAY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("RELAY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RELAY_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("WEBHOOKRELAY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WEBHOOKRELAY_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -58997,6 +59678,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "teleconsole Daemon Proxy",
             "~/.teleconsole/config.yaml & /etc/teleconsole/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // tunnelto Localhost Reverse Proxy & Public Tunnel Client (~/.tunnelto/config.toml / /etc/tunnelto/config.toml / /etc/systemd/system/tunnelto.service.d/http-proxy.conf)
+    if let Some((tunnelto_proxy, tunnelto_path)) = get_tunnelto_proxy() {
+        let ok = verify_proxy_url(&tunnelto_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "tunnelto proxy `{}` in {} is dead! (tunnelto reverse tunneling and public exposition will fail)",
+                tunnelto_proxy,
+                tunnelto_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "tunnelto Daemon Proxy",
+            format!("{}", tunnelto_path.display()),
+            tunnelto_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tunnelto fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "tunnelto Daemon Proxy",
+            "~/.tunnelto/config.toml & /etc/tunnelto/config.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Webhook Relay Localhost Tunnel & Webhook Forwarding Daemon (~/.relay/config.json / /etc/webhookrelay/config.json / /etc/systemd/system/webhookrelay.service.d/http-proxy.conf)
+    if let Some((webhookrelay_proxy, webhookrelay_path)) = get_webhookrelay_proxy() {
+        let ok = verify_proxy_url(&webhookrelay_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Webhook Relay proxy `{}` in {} is dead! (Webhook Relay localhost tunneling and webhook forwarding will fail)",
+                webhookrelay_proxy,
+                webhookrelay_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Webhook Relay Daemon Proxy",
+            format!("{}", webhookrelay_path.display()),
+            webhookrelay_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Webhook Relay fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Webhook Relay Daemon Proxy",
+            "~/.relay/config.json & /etc/webhookrelay/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -68514,5 +69259,73 @@ Environment="TELECONSOLE_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; teleconsole_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_teleconsole_proxy(input_comment), None);
         assert_eq!(parse_teleconsole_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tunnelto_proxy() {
+        let tunnelto_toml = r#"
+proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tunnelto_proxy(tunnelto_toml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let tunnelto_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_tunnelto_proxy(tunnelto_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="TUNNELTO_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tunnelto_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; tunnelto_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_tunnelto_proxy(input_comment), None);
+        assert_eq!(parse_tunnelto_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_webhookrelay_proxy() {
+        let relay_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_webhookrelay_proxy(relay_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let relay_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_webhookrelay_proxy(relay_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="RELAY_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_webhookrelay_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; webhookrelay_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_webhookrelay_proxy(input_comment), None);
+        assert_eq!(parse_webhookrelay_proxy(""), None);
     }
 }

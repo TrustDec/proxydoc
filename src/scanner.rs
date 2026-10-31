@@ -161,6 +161,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (3993, false, "NATAPP Localhost Reverse Tunnel & Web UI Daemon (HTTP/Web)"),
     (4900, false, "lanproxy Intranet Penetration & Reverse Tunnel Client (Control/Tunnel)"),
     (3022, false, "teleconsole Terminal Sharing & SSH Reverse Tunnel Daemon (SSH/Tunnel)"),
+    (8054, false, "tunnelto Localhost Reverse Proxy & Public Tunnel Client (Control/Tunnel)"),
+    (8040, false, "Webhook Relay Localhost Tunnel & Webhook Forwarding Daemon (HTTP/Control)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

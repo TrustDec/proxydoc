@@ -44865,6 +44865,449 @@ pub fn unset_teleconsole_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_tunnelto_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelto_proxy"
+                    || k_low == "tunnelto_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"TUNNELTO_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export tunnelto_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("tunnelto_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export TUNNELTO_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "tunnelto_proxy"
+                || k_trim == "tunnelto_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            lines.push(format!("{}proxy = \"{}\"", indent, proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"TUNNELTO_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_tunnelto_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "tunnelto_proxy",
+                "tunnelto-proxy",
+                "tunnelto_http_proxy",
+                "tunnel_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tunnelto_proxy"
+                    || k_low == "tunnelto_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export tunnelto_proxy=")
+            || lower.starts_with("export tunnelto_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("tunnelto_proxy=")
+            || lower.starts_with("tunnelto_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "tunnelto_proxy"
+                || k_trim == "tunnelto_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_tunnelto_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tunnelto_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_tunnelto_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_tunnelto_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tunnelto_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tunnelto_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_webhookrelay_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "webhookrelay_proxy"
+                    || k_low == "webhookrelay_http_proxy"
+                    || k_low == "relay_proxy"
+                    || k_low == "relay_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"RELAY_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export webhookrelay_proxy=")
+            || lower.starts_with("export relay_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("webhookrelay_proxy=")
+            || lower.starts_with("relay_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export RELAY_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "webhookrelay_proxy"
+                || k_trim == "webhookrelay_http_proxy"
+                || k_trim == "relay_proxy"
+                || k_trim == "relay_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            lines.push(format!("{}proxy: \"{}\"", indent, proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"RELAY_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_webhookrelay_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "webhookrelay_proxy",
+                "webhookrelay-proxy",
+                "webhookrelay_http_proxy",
+                "relay_proxy",
+                "relay-proxy",
+                "relay_http_proxy",
+                "tunnel_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "webhookrelay_proxy"
+                    || k_low == "webhookrelay_http_proxy"
+                    || k_low == "relay_proxy"
+                    || k_low == "relay_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export webhookrelay_proxy=")
+            || lower.starts_with("export relay_proxy=")
+            || lower.starts_with("export webhookrelay_http_proxy=")
+            || lower.starts_with("export relay_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("webhookrelay_proxy=")
+            || lower.starts_with("relay_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "webhookrelay_proxy"
+                || k_trim == "webhookrelay_http_proxy"
+                || k_trim == "relay_proxy"
+                || k_trim == "relay_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_webhookrelay_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_webhookrelay_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_webhookrelay_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_webhookrelay_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_webhookrelay_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_webhookrelay_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -45105,6 +45548,8 @@ pub async fn turn_on(
     natapp: bool,
     lanproxy: bool,
     teleconsole: bool,
+    tunnelto: bool,
+    webhookrelay: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -45344,6 +45789,8 @@ pub async fn turn_on(
     let set_natapp = natapp || all;
     let set_lanproxy = lanproxy || all;
     let set_teleconsole = teleconsole || all;
+    let set_tunnelto = tunnelto || all;
+    let set_webhookrelay = webhookrelay || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -48815,6 +49262,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_tunnelto {
+        match set_tunnelto_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ tunnelto daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update tunnelto daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_webhookrelay {
+        match set_webhookrelay_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Webhook Relay daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Webhook Relay daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -49068,6 +49545,8 @@ pub fn turn_off(
     natapp: bool,
     lanproxy: bool,
     teleconsole: bool,
+    tunnelto: bool,
+    webhookrelay: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -49307,6 +49786,8 @@ pub fn turn_off(
     let unset_natapp = natapp || all;
     let unset_lanproxy = lanproxy || all;
     let unset_teleconsole = teleconsole || all;
+    let unset_tunnelto = tunnelto || all;
+    let unset_webhookrelay = webhookrelay || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -51280,6 +51761,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ teleconsole daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ teleconsole proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset teleconsole daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tunnelto {
+        match unset_tunnelto_proxy() {
+            Ok(true) => eprintln!("{}", "✔ tunnelto daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ tunnelto proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset tunnelto daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_webhookrelay {
+        match unset_webhookrelay_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Webhook Relay daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Webhook Relay proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Webhook Relay daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -56888,5 +57385,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("TELECONSOLE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tunnelto_proxy() {
+        let initial = "proxy = \"http://127.0.0.1:1080\"\n";
+        let updated = apply_tunnelto_proxy(initial, "http://10.0.0.128:7890");
+        assert!(updated.contains("http://10.0.0.128:7890"));
+        let (cleaned, removed) = remove_tunnelto_proxy(&updated);
+        assert!(removed);
+        assert!(!cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_tunnelto_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"TUNNELTO_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_tunnelto_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("TUNNELTO_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_webhookrelay_proxy() {
+        let json_initial = "{\n  \"http_proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let json_updated = apply_webhookrelay_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("10.0.0.128:7890"));
+        let (json_cleaned, json_removed) = remove_webhookrelay_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_webhookrelay_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"RELAY_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_webhookrelay_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("RELAY_PROXY="));
     }
 }
