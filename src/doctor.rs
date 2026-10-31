@@ -54490,6 +54490,657 @@ pub fn get_skaffold_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_tilt_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TILT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TILT_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TILT_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("tilt.json"),
+        PathBuf::from("tilt.yaml"),
+        PathBuf::from("Tiltfile"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".tilt-dev").join("config.json"),
+            home.join(".tilt-dev").join("config.yaml"),
+            home.join(".config").join("tilt").join("config.json"),
+            home.join(".config").join("tilt").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("tilt.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/tilt/config.json"),
+        PathBuf::from("/etc/tilt/config.yaml"),
+        PathBuf::from("/etc/tilt.json"),
+        PathBuf::from("/var/lib/tilt/config.json"),
+        PathBuf::from("/usr/local/etc/tilt/config.json"),
+        PathBuf::from("/opt/homebrew/etc/tilt/config.json"),
+        PathBuf::from("/etc/default/tilt"),
+        PathBuf::from("/etc/sysconfig/tilt"),
+        PathBuf::from("/etc/systemd/system/tilt.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_tilt = PathBuf::from("/etc/tilt");
+    if etc_tilt.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_tilt) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_tilt_config_path() -> Option<PathBuf> {
+    let paths = get_tilt_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_tilt_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tilt_write_path() -> PathBuf {
+    if let Some(p) = get_tilt_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TILT_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".tilt-dev");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("tilt");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/tilt");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tilt.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".tilt-dev").join("config.json");
+    }
+    PathBuf::from("/etc/tilt/config.json")
+}
+
+pub fn parse_tilt_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "tilt_proxy",
+                "tilt_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tilt_proxy"
+                    || k_low == "tilt_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export tilt_proxy=")
+            || lower.starts_with("export tilt_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("tilt_proxy=")
+            || lower.starts_with("tilt_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("tilt_proxy=")
+            || clean.starts_with("tilt_http_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("tilt_proxy:")
+            || clean.starts_with("tilt_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tilt_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tilt_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tilt_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TILT_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TILT_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TILT_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TILT_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TILT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TILT_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_garden_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("GARDEN_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("GARDEN_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("GARDEN_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("garden.yaml"),
+        PathBuf::from("garden.yml"),
+        PathBuf::from(".garden.yaml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".garden").join("config.yaml"),
+            home.join(".garden").join("config.json"),
+            home.join(".config").join("garden").join("config.yaml"),
+            home.join(".config").join("garden").join("config.json"),
+            home.join(".garden.json"),
+            home.join(".config").join("systemd").join("user").join("garden.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/garden/config.yaml"),
+        PathBuf::from("/etc/garden/config.json"),
+        PathBuf::from("/etc/garden.yaml"),
+        PathBuf::from("/var/lib/garden/config.yaml"),
+        PathBuf::from("/usr/local/etc/garden/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/garden/config.yaml"),
+        PathBuf::from("/etc/default/garden"),
+        PathBuf::from("/etc/sysconfig/garden"),
+        PathBuf::from("/etc/systemd/system/garden.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_garden = PathBuf::from("/etc/garden");
+    if etc_garden.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_garden) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_garden_config_path() -> Option<PathBuf> {
+    let paths = get_garden_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_garden_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_garden_write_path() -> PathBuf {
+    if let Some(p) = get_garden_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("GARDEN_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".garden");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+        let dir2 = home.join(".config").join("garden");
+        if dir2.is_dir() {
+            return dir2.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/garden");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/garden.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".garden").join("config.yaml");
+    }
+    PathBuf::from("/etc/garden/config.yaml")
+}
+
+pub fn parse_garden_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "garden_proxy",
+                "garden_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "garden_proxy"
+                    || k_low == "garden_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export garden_proxy=")
+            || lower.starts_with("export garden_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("garden_proxy=")
+            || lower.starts_with("garden_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("garden_proxy=")
+            || clean.starts_with("garden_http_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("garden_proxy:")
+            || clean.starts_with("garden_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_garden_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_garden_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_garden_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GARDEN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GARDEN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GARDEN_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GARDEN_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GARDEN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GARDEN_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -63455,6 +64106,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Skaffold Daemon Proxy",
             "~/.skaffold/config & /etc/skaffold/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Tilt Cloud-Native Kubernetes Dev Engine & Live Update Proxy Daemon (~/.tilt-dev/config.json / /etc/tilt/config.json / /etc/systemd/system/tilt.service.d/http-proxy.conf)
+    if let Some((tilt_proxy, tilt_path)) = get_tilt_proxy() {
+        let ok = verify_proxy_url(&tilt_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Tilt proxy `{}` in {} is dead! (Tilt cloud-native Kubernetes dev live update & proxy will fail)",
+                tilt_proxy,
+                tilt_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Tilt Daemon Proxy",
+            format!("{}", tilt_path.display()),
+            tilt_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Tilt fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Tilt Daemon Proxy",
+            "~/.tilt-dev/config.json & /etc/tilt/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Garden Cloud-Native Kubernetes Dev Environment & Port-Forwarding Proxy Daemon (~/.garden/config.yaml / /etc/garden/config.yaml / /etc/systemd/system/garden.service.d/http-proxy.conf)
+    if let Some((garden_proxy, garden_path)) = get_garden_proxy() {
+        let ok = verify_proxy_url(&garden_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Garden proxy `{}` in {} is dead! (Garden cloud-native Kubernetes dev orchestration & port-forwarding will fail)",
+                garden_proxy,
+                garden_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Garden Daemon Proxy",
+            format!("{}", garden_path.display()),
+            garden_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Garden fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Garden Daemon Proxy",
+            "~/.garden/config.yaml & /etc/garden/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -73385,5 +74100,73 @@ Environment="SKAFFOLD_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; skaffold_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_skaffold_proxy(input_comment), None);
         assert_eq!(parse_skaffold_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tilt_proxy() {
+        let tilt_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_tilt_proxy(tilt_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let tilt_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tilt_proxy(tilt_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="TILT_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tilt_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; tilt_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_tilt_proxy(input_comment), None);
+        assert_eq!(parse_tilt_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_garden_proxy() {
+        let garden_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_garden_proxy(garden_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let garden_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_garden_proxy(garden_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="GARDEN_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_garden_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; garden_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_garden_proxy(input_comment), None);
+        assert_eq!(parse_garden_proxy(""), None);
     }
 }

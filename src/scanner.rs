@@ -173,6 +173,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (9909, false, "Geph Censorship-Resistant Proxy & Reverse Tunnel Client Daemon (HTTP/SOCKS5)"),
     (22100, false, "Okteto Cloud-Native Kubernetes Dev Reverse Tunnel & SSH Daemon (SSH/Tunnel)"),
     (50052, false, "Skaffold Cloud-Native Kubernetes Dev Port-Forward & Control Daemon (gRPC/HTTP)"),
+    (10350, false, "Tilt Cloud-Native Kubernetes Dev Engine & Web Proxy Daemon (HTTP/Web)"),
+    (9777, false, "Garden Cloud-Native Kubernetes Dev Environment & Console Daemon (HTTP/Web)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

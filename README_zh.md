@@ -169,6 +169,8 @@
   - 智能诊断 **Geph (强抗封锁多跳代理与反向隧道守护进程 geph4/geph5) 代理**（`~/.config/geph4/geph4.json`、`/etc/geph4/geph4.json`、`/etc/systemd/system/geph4.service.d/http-proxy.conf`、`GEPH_PROXY`），排查抗封锁反向代理与安全网络隧道因死代理中断；
   - 智能诊断 **Okteto (云原生 Kubernetes 远程开发反向穿透与 SSH 守护进程 okteto) 代理**（`~/.okteto/config.json`、`okteto.yaml`、`/etc/okteto/config.json`、`/etc/systemd/system/okteto.service.d/http-proxy.conf`、`OKTETO_PROXY`），排查 Kubernetes 远程开发同步、反向隧道与 SSH 端口映射因死代理失败；
   - 智能诊断 **Skaffold (云原生 Kubernetes 持续开发与端口转发守护进程 skaffold) 代理**（`~/.skaffold/config`、`skaffold.yaml`、`/etc/skaffold/config.yaml`、`/etc/systemd/system/skaffold.service.d/http-proxy.conf`、`SKAFFOLD_PROXY`），排查 Kubernetes 持续开发、反向代理与自动端口转发因死代理中断；
+  - 智能诊断 **Tilt (云原生 Kubernetes 本地联调引擎与热更新代理 tilt) 代理**（`~/.tilt-dev/config.json`、`tilt.yaml`、`/etc/tilt/config.json`、`/etc/systemd/system/tilt.service.d/http-proxy.conf`、`TILT_PROXY`），排查 Kubernetes 热更新、镜像构建与反向代理因死代理失败；
+  - 智能诊断 **Garden (云原生 Kubernetes 远程环境编排与端口转发客户端 garden) 代理**（`~/.garden/config.yaml`、`garden.yaml`、`/etc/garden/config.yaml`、`/etc/systemd/system/garden.service.d/http-proxy.conf`、`GARDEN_PROXY`），排查 Kubernetes 环境编排、测试流水线与端口映射因死代理中断；
   - 智能诊断 **Ollama (本地 AI 模型服务守护进程) 代理**（`/etc/systemd/system/ollama.service.d/http-proxy.conf`、`~/.ollama/environment`、`~/Library/LaunchAgents/com.ollama.ollama.plist`），排查 `ollama pull` 与 `ollama run` 因守护进程死代理超时卡死；
   - 智能诊断 **Alpine Linux apk 包管理器仓库与镜像源**（`/etc/apk/repositories`），排查 `apk add` 与 `apk update` 因死镜像源阻塞；
   - 智能诊断 **Flatpak (Linux 桌面应用包管理器与运行环境) 仓库代理**（`~/.local/share/flatpak/repo/config`、`/var/lib/flatpak/repo/config`、`/etc/flatpak/remotes.d/`），排查 `flatpak install` 与应用更新因死代理失败；

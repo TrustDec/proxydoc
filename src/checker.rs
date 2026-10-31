@@ -2454,6 +2454,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "CodeGemma AI CDN",
         "https://github.com/google-deepmind/gemma",
     ),
+    (
+        "tilt Tunnel CDN",
+        "https://github.com/tilt-dev/tilt",
+    ),
+    (
+        "garden Tunnel CDN",
+        "https://github.com/garden-io/garden",
+    ),
+    (
+        "Ministral AI CDN",
+        "https://mistral.ai/news/ministral/",
+    ),
+    (
+        "Llama-3.1-Nemotron AI CDN",
+        "https://github.com/NVIDIA/Megatron-LM",
+    ),
+    (
+        "InternLM2.5 AI CDN",
+        "https://github.com/InternLM/InternLM",
+    ),
+    (
+        "Skywork-o1 AI CDN",
+        "https://github.com/SkyworkAI/Skywork-o1",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4604,6 +4628,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "CodeGemma AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "tilt Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "garden Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Ministral AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Llama-3.1-Nemotron AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InternLM2.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Skywork-o1 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
