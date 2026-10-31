@@ -52431,6 +52431,454 @@ pub fn unset_volta_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_pyenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pyenv_http_proxy"
+                    || k_low == "pyenv_https_proxy"
+                    || k_low == "pyenv_proxy"
+                    || k_low == "python_build_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"PYENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export pyenv_http_proxy=")
+            || lower.starts_with("export pyenv_https_proxy=")
+            || lower.starts_with("export pyenv_proxy=")
+            || lower.starts_with("export python_build_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("pyenv_http_proxy=")
+            || lower.starts_with("pyenv_https_proxy=")
+            || lower.starts_with("pyenv_proxy=")
+            || lower.starts_with("python_build_http_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export PYENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "pyenv_http_proxy"
+                || k_trim == "pyenv_https_proxy"
+                || k_trim == "pyenv_proxy"
+                || k_trim == "python_build_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains(':') && !line.contains('=') {
+                lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"PYENV_HTTP_PROXY={}\"", proxy_url));
+        } else if content.trim().starts_with('{') {
+            lines.push(format!("  \"http_proxy\": \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pyenv_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for k in &["http_proxy", "https_proxy", "proxy", "pyenv_proxy", "pyenv_http_proxy", "python_build_http_proxy"] {
+                if obj.remove(*k).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pyenv_http_proxy"
+                    || k_low == "pyenv_https_proxy"
+                    || k_low == "pyenv_proxy"
+                    || k_low == "python_build_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export pyenv_http_proxy=")
+            || lower.starts_with("export pyenv_https_proxy=")
+            || lower.starts_with("export pyenv_proxy=")
+            || lower.starts_with("export python_build_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("pyenv_http_proxy=")
+            || lower.starts_with("pyenv_https_proxy=")
+            || lower.starts_with("pyenv_proxy=")
+            || lower.starts_with("python_build_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "pyenv_http_proxy"
+                || k_trim == "pyenv_https_proxy"
+                || k_trim == "pyenv_proxy"
+                || k_trim == "python_build_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_pyenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pyenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_pyenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_pyenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pyenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pyenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_nvm_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "nvm_http_proxy"
+                    || k_low == "nvm_https_proxy"
+                    || k_low == "nvm_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"NVM_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export nvm_http_proxy=")
+            || lower.starts_with("export nvm_https_proxy=")
+            || lower.starts_with("export nvm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("nvm_http_proxy=")
+            || lower.starts_with("nvm_https_proxy=")
+            || lower.starts_with("nvm_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export NVM_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "nvm_http_proxy"
+                || k_trim == "nvm_https_proxy"
+                || k_trim == "nvm_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains(':') && !line.contains('=') {
+                lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"NVM_HTTP_PROXY={}\"", proxy_url));
+        } else if content.trim().starts_with('{') {
+            lines.push(format!("  \"http_proxy\": \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_nvm_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for k in &["http_proxy", "https_proxy", "proxy", "nvm_proxy", "nvm_http_proxy"] {
+                if obj.remove(*k).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "nvm_http_proxy"
+                    || k_low == "nvm_https_proxy"
+                    || k_low == "nvm_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export nvm_http_proxy=")
+            || lower.starts_with("export nvm_https_proxy=")
+            || lower.starts_with("export nvm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("nvm_http_proxy=")
+            || lower.starts_with("nvm_https_proxy=")
+            || lower.starts_with("nvm_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "nvm_http_proxy"
+                || k_trim == "nvm_https_proxy"
+                || k_trim == "nvm_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_nvm_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_nvm_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_nvm_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_nvm_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_nvm_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_nvm_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -52705,6 +53153,8 @@ pub async fn turn_on(
     rustup: bool,
     fnm: bool,
     volta: bool,
+    pyenv: bool,
+    nvm: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -52978,6 +53428,8 @@ pub async fn turn_on(
     let set_rustup = rustup || all;
     let set_fnm = fnm || all;
     let set_volta = volta || all;
+    let set_pyenv = pyenv || all;
+    let set_nvm = nvm || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -56959,6 +57411,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_pyenv {
+        match set_pyenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ pyenv Python toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update pyenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_nvm {
+        match set_nvm_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ nvm (Node Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update nvm config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -57246,6 +57728,8 @@ pub fn turn_off(
     rustup: bool,
     fnm: bool,
     volta: bool,
+    pyenv: bool,
+    nvm: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -57519,6 +58003,8 @@ pub fn turn_off(
     let unset_rustup = rustup || all;
     let unset_fnm = fnm || all;
     let unset_volta = volta || all;
+    let unset_pyenv = pyenv || all;
+    let unset_nvm = nvm || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -59764,6 +60250,34 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Volta JavaScript toolchain manager proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Volta proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Volta toolchain manager proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pyenv {
+        match unset_pyenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ pyenv Python toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ pyenv Python toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update pyenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_nvm {
+        match unset_nvm_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ nvm Node Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ nvm Node Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update nvm config: {}", "▲".yellow(), e),
         }
     }
 
@@ -66016,6 +66530,40 @@ auth: pass123
         let dropin_updated = apply_volta_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_volta_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pyenv_proxy() {
+        let ini_initial = "pyenv_version = \"3.12.0\"\n";
+        let ini_updated = apply_pyenv_proxy(ini_initial, "http://10.0.0.128:7890");
+        assert!(ini_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (ini_cleaned, ini_removed) = remove_pyenv_proxy(&ini_updated);
+        assert!(ini_removed);
+        assert!(!ini_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/pyenv\n";
+        let dropin_updated = apply_pyenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_pyenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_nvm_proxy() {
+        let json_initial = "{\n  \"default\": \"20\"\n}\n";
+        let json_updated = apply_nvm_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("\"http_proxy\": \"http://10.0.0.128:7890\""));
+        let (json_cleaned, json_removed) = remove_nvm_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/nvm\n";
+        let dropin_updated = apply_nvm_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_nvm_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

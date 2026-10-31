@@ -2718,6 +2718,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "LlamaV-o1 AI CDN",
         "https://github.com/om-ai-lab/LlamaV-o1",
     ),
+    (
+        "pyenv Dev CDN",
+        "https://github.com/pyenv/pyenv",
+    ),
+    (
+        "nvm Dev CDN",
+        "https://github.com/nvm-sh/nvm",
+    ),
+    (
+        "Deep-Research AI CDN",
+        "https://github.com/dzhng/deep-research",
+    ),
+    (
+        "DiffSynth-Studio AI CDN",
+        "https://github.com/modelscope/DiffSynth-Studio",
+    ),
+    (
+        "GRPO-Zero AI CDN",
+        "https://github.com/willccbb/GRPO-Zero",
+    ),
+    (
+        "Sky-Thought AI CDN",
+        "https://github.com/NovaSky-AI/Sky-Thought",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5066,6 +5090,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "LlamaV-o1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "pyenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "nvm Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Deep-Research AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DiffSynth-Studio AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GRPO-Zero AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Sky-Thought AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

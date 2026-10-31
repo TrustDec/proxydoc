@@ -61515,6 +61515,500 @@ pub fn get_volta_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_pyenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("PYENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("settings.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".pyenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".pyenv").join("settings.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("pyenv").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("pyenv").join("configuration.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".pyenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/pyenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/pyenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_config2 = PathBuf::from("/etc/pyenv/configuration.json");
+    if etc_config2.exists() && !paths.contains(&etc_config2) {
+        paths.push(etc_config2);
+    }
+    paths
+}
+
+pub fn get_pyenv_config_path() -> Option<PathBuf> {
+    let paths = get_pyenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_pyenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pyenv_write_path() -> PathBuf {
+    if let Some(p) = get_pyenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("PYENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let pyenv_dir = home.join(".pyenv");
+        if pyenv_dir.is_dir() {
+            return pyenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("pyenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".pyenv").join("config");
+    }
+    PathBuf::from("/etc/pyenv/config")
+}
+
+pub fn parse_pyenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "pyenv_proxy", "pyenv_http_proxy", "python_build_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pyenv_http_proxy"
+                    || k_low == "pyenv_https_proxy"
+                    || k_low == "pyenv_proxy"
+                    || k_low == "python_build_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export pyenv_http_proxy=")
+            || lower.starts_with("export pyenv_https_proxy=")
+            || lower.starts_with("export pyenv_proxy=")
+            || lower.starts_with("export python_build_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("pyenv_http_proxy=")
+            || lower.starts_with("pyenv_https_proxy=")
+            || lower.starts_with("pyenv_proxy=")
+            || lower.starts_with("python_build_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("pyenv_http_proxy")
+            || clean.starts_with("pyenv_https_proxy")
+            || clean.starts_with("pyenv_proxy")
+            || clean.starts_with("python_build_http_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("http-proxy")
+            || clean.starts_with("https-proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pyenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pyenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pyenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PYENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PYENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PYENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PYENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PYTHON_BUILD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PYTHON_BUILD_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_nvm_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("NVM_DIR") {
+        let p = PathBuf::from(dir.trim()).join("settings.nvm");
+        if p.exists() {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("default-packages");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".nvm").join("settings.nvm");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".nvm").join("config.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("nvm").join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("nvm").join("config");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".nvmrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/nvm.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/nvm/config.json");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_config2 = PathBuf::from("/etc/nvm/settings.nvm");
+    if etc_config2.exists() && !paths.contains(&etc_config2) {
+        paths.push(etc_config2);
+    }
+    paths
+}
+
+pub fn get_nvm_config_path() -> Option<PathBuf> {
+    let paths = get_nvm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_nvm_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nvm_write_path() -> PathBuf {
+    if let Some(p) = get_nvm_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("NVM_DIR") {
+        return PathBuf::from(dir.trim()).join("settings.nvm");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let nvm_dir = home.join(".nvm");
+        if nvm_dir.is_dir() {
+            return nvm_dir.join("settings.nvm");
+        }
+        let cfg_dir = home.join(".config").join("nvm");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config.json");
+        }
+        return home.join(".nvm").join("settings.nvm");
+    }
+    PathBuf::from("/etc/nvm/settings.nvm")
+}
+
+pub fn parse_nvm_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "nvm_proxy", "nvm_http_proxy", "node_mirror", "nvm_nodejs_org_mirror"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "nvm_http_proxy"
+                    || k_low == "nvm_https_proxy"
+                    || k_low == "nvm_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export nvm_http_proxy=")
+            || lower.starts_with("export nvm_https_proxy=")
+            || lower.starts_with("export nvm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("nvm_http_proxy=")
+            || lower.starts_with("nvm_https_proxy=")
+            || lower.starts_with("nvm_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("nvm_http_proxy")
+            || clean.starts_with("nvm_https_proxy")
+            || clean.starts_with("nvm_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("http-proxy")
+            || clean.starts_with("https-proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nvm_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_nvm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_nvm_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NVM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NVM_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("NVM_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NVM_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -62327,6 +62821,54 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "● Reachable Mirror".green().to_string()
                 } else {
                     "▲ UNREACHABLE MIRROR! (fnm install fails)".red().bold().to_string()
+                },
+            ));
+        }
+    }
+
+    // pyenv / Python Build Mirror
+    if let Ok(val) = std::env::var("PYTHON_BUILD_MIRROR_URL") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "pyenv mirror variable `PYTHON_BUILD_MIRROR_URL` points to unreachable mirror `{}`! (pyenv install will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "pyenv Mirror",
+                "PYTHON_BUILD_MIRROR_URL (Python build mirror)",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR! (pyenv install fails)".red().bold().to_string()
+                },
+            ));
+        }
+    }
+
+    // nvm / Node.js Distribution Mirror
+    if let Ok(val) = std::env::var("NVM_NODEJS_ORG_MIRROR") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "nvm mirror variable `NVM_NODEJS_ORG_MIRROR` points to unreachable mirror `{}`! (nvm install will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "nvm Mirror",
+                "NVM_NODEJS_ORG_MIRROR (Node.js dist server mirror)",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR! (nvm install fails)".red().bold().to_string()
                 },
             ));
         }
@@ -71208,6 +71750,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Volta Dev Proxy",
             "~/.volta/config.json & ~/.volta/hooks.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // pyenv Python Toolchain & Version Manager Daemon (~/.pyenv/config / ~/.pyenv/settings.toml / ~/.config/pyenv/config / /etc/pyenv/config / /etc/systemd/system/pyenv.service.d/http-proxy.conf)
+    if let Some((pyenv_proxy, pyenv_path)) = get_pyenv_proxy() {
+        let ok = verify_proxy_url(&pyenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "pyenv proxy `{}` in {} is dead! (pyenv toolchain proxy will fail)",
+                pyenv_proxy,
+                pyenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "pyenv Dev Proxy",
+            format!("{}", pyenv_path.display()),
+            pyenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (pyenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "pyenv Dev Proxy",
+            "~/.pyenv/config & ~/.config/pyenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // nvm (Node Version Manager) Toolchain Daemon (~/.nvm/settings.nvm / ~/.nvm/config.json / ~/.config/nvm/config.json / /etc/nvm/config.json / /etc/systemd/system/nvm.service.d/http-proxy.conf)
+    if let Some((nvm_proxy, nvm_path)) = get_nvm_proxy() {
+        let ok = verify_proxy_url(&nvm_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "nvm proxy `{}` in {} is dead! (nvm toolchain proxy will fail)",
+                nvm_proxy,
+                nvm_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "nvm Dev Proxy",
+            format!("{}", nvm_path.display()),
+            nvm_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (nvm fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "nvm Dev Proxy",
+            "~/.nvm/settings.nvm & ~/.nvm/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -81831,5 +82437,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// volta_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_volta_proxy(input_comment), None);
         assert_eq!(parse_volta_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pyenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_pyenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "pyenv_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_pyenv_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_pyenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// pyenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_pyenv_proxy(input_comment), None);
+        assert_eq!(parse_pyenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_nvm_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_nvm_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "nvm_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_nvm_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_nvm_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// nvm_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_nvm_proxy(input_comment), None);
+        assert_eq!(parse_nvm_proxy(""), None);
     }
 }
