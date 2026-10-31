@@ -1926,6 +1926,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Codestral AI CDN",
         "https://mistral.ai/news/codestral/",
     ),
+    (
+        "zrok Tunnel CDN",
+        "https://zrok.io",
+    ),
+    (
+        "n2n Mesh VPN CDN",
+        "https://github.com/ntop/n2n",
+    ),
+    (
+        "Open-Deep-Research AI CDN",
+        "https://github.com/huggingface/open-deep-research",
+    ),
+    (
+        "DiffRhythm AI CDN",
+        "https://github.com/ASLP-lab/DiffRhythm",
+    ),
+    (
+        "Pixtral AI CDN",
+        "https://mistral.ai/news/pixtral-12b/",
+    ),
+    (
+        "MiniMax-01 AI CDN",
+        "https://github.com/MiniMax-AI/MiniMax-01",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3680,6 +3704,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Codestral AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "zrok Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "n2n Mesh VPN CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-Deep-Research AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DiffRhythm AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Pixtral AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MiniMax-01 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

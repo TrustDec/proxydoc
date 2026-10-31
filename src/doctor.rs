@@ -40794,6 +40794,595 @@ pub fn get_inlets_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_zrok_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("ZROK_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("ZROK_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("ZROK_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".zrok").join("config.json"),
+            home.join(".zrok").join("environment.json"),
+            home.join(".config").join("zrok").join("config.json"),
+            home.join(".config").join("zrok").join("zrok.json"),
+            home.join(".config").join("systemd").join("user").join("zrok.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("zrok-share.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/zrok/config.json"),
+        PathBuf::from("/etc/zrok/environment.json"),
+        PathBuf::from("/etc/zrok/zrok.json"),
+        PathBuf::from("/var/lib/zrok/config.json"),
+        PathBuf::from("/usr/local/etc/zrok/config.json"),
+        PathBuf::from("/opt/homebrew/etc/zrok/config.json"),
+        PathBuf::from("/etc/default/zrok"),
+        PathBuf::from("/etc/sysconfig/zrok"),
+        PathBuf::from("/etc/systemd/system/zrok.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/zrok-share.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_zrok = PathBuf::from("/etc/zrok");
+    if etc_zrok.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_zrok) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "conf" || ext == "toml") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_zrok_config_path() -> Option<PathBuf> {
+    let paths = get_zrok_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_zrok_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_zrok_write_path() -> PathBuf {
+    if let Some(p) = get_zrok_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("ZROK_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".zrok");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/zrok");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/zrok.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".zrok").join("config.json");
+    }
+    PathBuf::from("/etc/zrok/config.json")
+}
+
+pub fn parse_zrok_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "zrok_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "zrok_proxy"
+                    || k_low == "zrok_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "zrok_proxy"
+                    || k_low == "zrok_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("zrok_proxy=")
+            || clean.starts_with("zrok_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_zrok_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_zrok_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_zrok_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ZROK_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ZROK_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ZROK_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ZROK_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_n2n_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("N2N_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("N2N_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("N2N_EDGE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("N2N_DIR") {
+        let p = PathBuf::from(dir.trim()).join("edge.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("n2n").join("edge.conf"),
+            home.join(".config").join("n2n").join("supernode.conf"),
+            home.join(".n2n").join("edge.conf"),
+            home.join(".n2n").join("supernode.conf"),
+            home.join(".config").join("systemd").join("user").join("edge.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("n2n.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/n2n/edge.conf"),
+        PathBuf::from("/etc/n2n/supernode.conf"),
+        PathBuf::from("/etc/n2n/n2n.conf"),
+        PathBuf::from("/var/lib/n2n/edge.conf"),
+        PathBuf::from("/usr/local/etc/n2n/edge.conf"),
+        PathBuf::from("/opt/homebrew/etc/n2n/edge.conf"),
+        PathBuf::from("/etc/default/n2n"),
+        PathBuf::from("/etc/sysconfig/n2n"),
+        PathBuf::from("/etc/systemd/system/edge.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/n2n.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_n2n = PathBuf::from("/etc/n2n");
+    if etc_n2n.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_n2n) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "yaml" || ext == "yml" || ext == "json" || ext == "ini") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_n2n_config_path() -> Option<PathBuf> {
+    let paths = get_n2n_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_n2n_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_n2n_write_path() -> PathBuf {
+    if let Some(p) = get_n2n_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("N2N_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("n2n");
+        if dir.is_dir() {
+            return dir.join("edge.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/n2n");
+    if etc_dir.is_dir() {
+        return etc_dir.join("edge.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/edge.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("n2n").join("edge.conf");
+    }
+    PathBuf::from("/etc/n2n/edge.conf")
+}
+
+pub fn parse_n2n_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "n2n_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "n2n_proxy"
+                    || k_low == "n2n_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "n2n_proxy"
+                    || k_low == "n2n_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("-x ") || lower.starts_with("-x=") || lower.starts_with("--proxy ") || lower.starts_with("--proxy=") {
+            let rest = if lower.starts_with("-x ") {
+                &trimmed[3..]
+            } else if lower.starts_with("-x=") {
+                &trimmed[3..]
+            } else if lower.starts_with("--proxy ") {
+                &trimmed[8..]
+            } else {
+                &trimmed[8..]
+            };
+            let val = rest.trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                return Some(if val.starts_with("http://")
+                    || val.starts_with("https://")
+                    || val.starts_with("socks")
+                {
+                    val.to_string()
+                } else {
+                    format!("http://{}", val)
+                });
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("n2n_proxy=")
+            || clean.starts_with("n2n_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_n2n_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_n2n_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_n2n_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("N2N_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:N2N_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("N2N_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:N2N_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -48351,6 +48940,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Inlets Daemon Proxy",
             "~/.config/inlets/config.yaml & /etc/inlets/inlets.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // zrok Peer-to-Peer Sharing & Zero Trust Tunnel Daemon (~/.zrok/config.json / /etc/zrok/config.json / /etc/systemd/system/zrok.service.d/http-proxy.conf)
+    if let Some((zrok_proxy, zrok_path)) = get_zrok_proxy() {
+        let ok = verify_proxy_url(&zrok_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "zrok proxy `{}` in {} is dead! (zrok peer-to-peer sharing and tunneling egress will fail)",
+                zrok_proxy,
+                zrok_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "zrok Daemon Proxy",
+            format!("{}", zrok_path.display()),
+            zrok_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (zrok fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "zrok Daemon Proxy",
+            "~/.zrok/config.json & /etc/zrok/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // n2n Peer-to-Peer Mesh VPN & Supernode Daemon (/etc/n2n/edge.conf / ~/.config/n2n/edge.conf / /etc/systemd/system/edge.service.d/http-proxy.conf)
+    if let Some((n2n_proxy, n2n_path)) = get_n2n_proxy() {
+        let ok = verify_proxy_url(&n2n_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "n2n proxy `{}` in {} is dead! (n2n edge peer-to-peer mesh VPN tunnels will fail)",
+                n2n_proxy,
+                n2n_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "n2n Daemon Proxy",
+            format!("{}", n2n_path.display()),
+            n2n_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (n2n fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "n2n Daemon Proxy",
+            "~/.config/n2n/edge.conf & /etc/n2n/edge.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -56833,5 +57486,53 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy = http://127.0.0.1:7890\n; inlets_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_inlets_proxy(input_comment), None);
         assert_eq!(parse_inlets_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_zrok_proxy() {
+        let zrok_json = r#"{
+  "proxy": "http://127.0.0.1:7890"
+}"#;
+        assert_eq!(
+            parse_zrok_proxy(zrok_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_zrok_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy = http://127.0.0.1:7890\n; zrok_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_zrok_proxy(input_comment), None);
+        assert_eq!(parse_zrok_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_n2n_proxy() {
+        let n2n_conf = r#"
+-x http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_n2n_proxy(n2n_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_n2n_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# -x http://127.0.0.1:7890\n; n2n_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_n2n_proxy(input_comment), None);
+        assert_eq!(parse_n2n_proxy(""), None);
     }
 }
