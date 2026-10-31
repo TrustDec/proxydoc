@@ -63929,6 +63929,516 @@ pub fn get_perlbrew_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_luaver_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("LUAVER_DIR") {
+        let p = PathBuf::from(dir.trim()).join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("default-packages");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("LUAVER_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".luaver").join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".luaver").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("luaver").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("luaver").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".luaverrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/luaver.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/luaver/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_vars = PathBuf::from("/etc/luaver/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_luaver_config_path() -> Option<PathBuf> {
+    let paths = get_luaver_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_luaver_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_luaver_write_path() -> PathBuf {
+    if let Some(p) = get_luaver_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("LUAVER_DIR") {
+        return PathBuf::from(dir.trim()).join("vars");
+    }
+    if let Ok(dir) = std::env::var("LUAVER_ROOT") {
+        return PathBuf::from(dir.trim()).join("vars");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let luaver_dir = home.join(".luaver");
+        if luaver_dir.is_dir() {
+            return luaver_dir.join("vars");
+        }
+        let cfg_dir = home.join(".config").join("luaver");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".luaver").join("vars");
+    }
+    PathBuf::from("/etc/luaver/vars")
+}
+
+pub fn parse_luaver_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "luaver_proxy", "luaver_http_proxy", "luarocks_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "luaver_http_proxy"
+                    || k_low == "luaver_https_proxy"
+                    || k_low == "luaver_proxy"
+                    || k_low == "luarocks_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export luaver_http_proxy=")
+            || lower.starts_with("export luaver_https_proxy=")
+            || lower.starts_with("export luaver_proxy=")
+            || lower.starts_with("export luarocks_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("luaver_http_proxy=")
+            || lower.starts_with("luaver_https_proxy=")
+            || lower.starts_with("luaver_proxy=")
+            || lower.starts_with("luarocks_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("luaver_http_proxy")
+            || clean.starts_with("luaver_https_proxy")
+            || clean.starts_with("luaver_proxy")
+            || clean.starts_with("luarocks_http_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_luaver_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_luaver_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_luaver_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("LUAVER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LUAVER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LUAVER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LUAVER_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_ghcup_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("GHCUP_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("vars");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("GHCUP_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("vars");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".ghcup").join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".ghcup").join("vars");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("ghcup").join("config.yaml");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("ghcup").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".ghcuprc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/ghcup.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/ghcup/config.yaml");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_vars = PathBuf::from("/etc/ghcup/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_ghcup_config_path() -> Option<PathBuf> {
+    let paths = get_ghcup_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_ghcup_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_ghcup_write_path() -> PathBuf {
+    if let Some(p) = get_ghcup_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("GHCUP_DIR") {
+        return PathBuf::from(dir.trim()).join("config.yaml");
+    }
+    if let Ok(dir) = std::env::var("GHCUP_ROOT") {
+        return PathBuf::from(dir.trim()).join("config.yaml");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let ghcup_dir = home.join(".ghcup");
+        if ghcup_dir.is_dir() {
+            return ghcup_dir.join("config.yaml");
+        }
+        let cfg_dir = home.join(".config").join("ghcup");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config.yaml");
+        }
+        return home.join(".ghcup").join("config.yaml");
+    }
+    PathBuf::from("/etc/ghcup/config.yaml")
+}
+
+pub fn parse_ghcup_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "url-proxy", "url_proxy", "ghcup_proxy", "ghcup_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ghcup_http_proxy"
+                    || k_low == "ghcup_https_proxy"
+                    || k_low == "ghcup_proxy"
+                    || k_low == "url_proxy"
+                    || k_low == "url-proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ghcup_http_proxy=")
+            || lower.starts_with("export ghcup_https_proxy=")
+            || lower.starts_with("export ghcup_proxy=")
+            || lower.starts_with("export url_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("ghcup_http_proxy=")
+            || lower.starts_with("ghcup_https_proxy=")
+            || lower.starts_with("ghcup_proxy=")
+            || lower.starts_with("url_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("ghcup_http_proxy")
+            || clean.starts_with("ghcup_https_proxy")
+            || clean.starts_with("ghcup_proxy")
+            || clean.starts_with("url-proxy")
+            || clean.starts_with("url_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_ghcup_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_ghcup_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_ghcup_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GHCUP_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GHCUP_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GHCUP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GHCUP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -74086,6 +74596,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "perlbrew Dev Proxy",
             "~/.perlbrew/vars & ~/.config/perlbrew/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // luaver Lua Toolchain & Version Manager Daemon (~/.luaver/vars / ~/.luaver/config / ~/.config/luaver/config / /etc/luaver/config / /etc/systemd/system/luaver.service.d/http-proxy.conf)
+    if let Some((luaver_proxy, luaver_path)) = get_luaver_proxy() {
+        let ok = verify_proxy_url(&luaver_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "luaver proxy `{}` in {} is dead! (luaver toolchain proxy will fail)",
+                luaver_proxy,
+                luaver_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "luaver Dev Proxy",
+            format!("{}", luaver_path.display()),
+            luaver_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (luaver fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "luaver Dev Proxy",
+            "~/.luaver/vars & ~/.config/luaver/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // ghcup Haskell Toolchain & Version Manager Daemon (~/.ghcup/config.yaml / ~/.config/ghcup/config.yaml / /etc/ghcup/config.yaml / /etc/systemd/system/ghcup.service.d/http-proxy.conf)
+    if let Some((ghcup_proxy, ghcup_path)) = get_ghcup_proxy() {
+        let ok = verify_proxy_url(&ghcup_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "ghcup proxy `{}` in {} is dead! (ghcup toolchain proxy will fail)",
+                ghcup_proxy,
+                ghcup_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "ghcup Dev Proxy",
+            format!("{}", ghcup_path.display()),
+            ghcup_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (ghcup fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "ghcup Dev Proxy",
+            "~/.ghcup/config.yaml & ~/.config/ghcup/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -84959,5 +85533,61 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// perlbrew_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_perlbrew_proxy(input_comment), None);
         assert_eq!(parse_perlbrew_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_luaver_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_luaver_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "luaver_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_luaver_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_luaver_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// luaver_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_luaver_proxy(input_comment), None);
+        assert_eq!(parse_luaver_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_ghcup_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_ghcup_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let yaml_config = "url-proxy: \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_ghcup_proxy(yaml_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "ghcup_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_ghcup_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_ghcup_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// ghcup_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_ghcup_proxy(input_comment), None);
+        assert_eq!(parse_ghcup_proxy(""), None);
     }
 }

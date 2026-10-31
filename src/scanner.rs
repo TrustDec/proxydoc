@@ -205,6 +205,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (47474, false, "phpenv (PHP Version Manager) Toolchain Manager Daemon (HTTP/API)"),
     (48484, false, "swiftenv (Swift Version Manager) Toolchain Manager Daemon (HTTP/API)"),
     (49494, false, "perlbrew (Perl Environment Manager) Toolchain Manager Daemon (HTTP/API)"),
+    (50505, false, "luaver (Lua Version Manager) Toolchain Manager Daemon (HTTP/API)"),
+    (51515, false, "ghcup (Haskell Toolchain Installer & Manager) Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

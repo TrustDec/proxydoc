@@ -54715,6 +54715,474 @@ pub fn unset_perlbrew_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_luaver_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "luaver_http_proxy"
+                    || k_low == "luaver_https_proxy"
+                    || k_low == "luaver_proxy"
+                    || k_low == "luarocks_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"LUAVER_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export luaver_http_proxy=")
+            || lower.starts_with("export luaver_https_proxy=")
+            || lower.starts_with("export luaver_proxy=")
+            || lower.starts_with("export luarocks_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("luaver_http_proxy=")
+            || lower.starts_with("luaver_https_proxy=")
+            || lower.starts_with("luaver_proxy=")
+            || lower.starts_with("luarocks_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export LUAVER_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "luaver_http_proxy"
+                || k_trim == "luaver_https_proxy"
+                || k_trim == "luaver_proxy"
+                || k_trim == "luarocks_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("luaver_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"LUAVER_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("luaver_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_luaver_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "luaver_proxy", "luaver_http_proxy", "luarocks_http_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "luaver_http_proxy"
+                    || k_low == "luaver_https_proxy"
+                    || k_low == "luaver_proxy"
+                    || k_low == "luarocks_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export luaver_http_proxy=")
+            || lower.starts_with("export luaver_https_proxy=")
+            || lower.starts_with("export luaver_proxy=")
+            || lower.starts_with("export luarocks_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("luaver_http_proxy=")
+            || lower.starts_with("luaver_https_proxy=")
+            || lower.starts_with("luaver_proxy=")
+            || lower.starts_with("luarocks_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "luaver_http_proxy"
+                || k_trim == "luaver_https_proxy"
+                || k_trim == "luaver_proxy"
+                || k_trim == "luarocks_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_luaver_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_luaver_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_luaver_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_luaver_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_luaver_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_luaver_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_ghcup_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ghcup_http_proxy"
+                    || k_low == "ghcup_https_proxy"
+                    || k_low == "ghcup_proxy"
+                    || k_low == "url_proxy"
+                    || k_low == "url-proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"GHCUP_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ghcup_http_proxy=")
+            || lower.starts_with("export ghcup_https_proxy=")
+            || lower.starts_with("export ghcup_proxy=")
+            || lower.starts_with("export url_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("ghcup_http_proxy=")
+            || lower.starts_with("ghcup_https_proxy=")
+            || lower.starts_with("ghcup_proxy=")
+            || lower.starts_with("url_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export GHCUP_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "url-proxy"
+                || k_trim == "url_proxy"
+                || k_trim == "ghcup_http_proxy"
+                || k_trim == "ghcup_https_proxy"
+                || k_trim == "ghcup_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("url-proxy: \"{}\"", proxy_url));
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("ghcup_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"GHCUP_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("url-proxy: \"{}\"", proxy_url));
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("ghcup_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_ghcup_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "url-proxy", "url_proxy", "ghcup_proxy", "ghcup_http_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ghcup_http_proxy"
+                    || k_low == "ghcup_https_proxy"
+                    || k_low == "ghcup_proxy"
+                    || k_low == "url_proxy"
+                    || k_low == "url-proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ghcup_http_proxy=")
+            || lower.starts_with("export ghcup_https_proxy=")
+            || lower.starts_with("export ghcup_proxy=")
+            || lower.starts_with("export url_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("ghcup_http_proxy=")
+            || lower.starts_with("ghcup_https_proxy=")
+            || lower.starts_with("ghcup_proxy=")
+            || lower.starts_with("url_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "url-proxy"
+                || k_trim == "url_proxy"
+                || k_trim == "ghcup_http_proxy"
+                || k_trim == "ghcup_https_proxy"
+                || k_trim == "ghcup_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_ghcup_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_ghcup_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_ghcup_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_ghcup_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_ghcup_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_ghcup_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -54999,6 +55467,8 @@ pub async fn turn_on(
     phpenv: bool,
     swiftenv: bool,
     perlbrew: bool,
+    luaver: bool,
+    ghcup: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -55282,6 +55752,8 @@ pub async fn turn_on(
     let set_phpenv = phpenv || all;
     let set_swiftenv = swiftenv || all;
     let set_perlbrew = perlbrew || all;
+    let set_luaver = luaver || all;
+    let set_ghcup = ghcup || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -59413,6 +59885,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_luaver {
+        match set_luaver_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ luaver (Lua Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update luaver config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_ghcup {
+        match set_ghcup_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ ghcup (Haskell Toolchain Manager) daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update ghcup config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -59710,6 +60212,8 @@ pub fn turn_off(
     phpenv: bool,
     swiftenv: bool,
     perlbrew: bool,
+    luaver: bool,
+    ghcup: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -59993,6 +60497,8 @@ pub fn turn_off(
     let unset_phpenv = phpenv || all;
     let unset_swiftenv = swiftenv || all;
     let unset_perlbrew = perlbrew || all;
+    let unset_luaver = luaver || all;
+    let unset_ghcup = ghcup || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -62378,6 +62884,34 @@ pub fn turn_off(
                 "○ perlbrew Perl Environment Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update perlbrew config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_luaver {
+        match unset_luaver_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ luaver Lua Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ luaver Lua Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update luaver config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_ghcup {
+        match unset_ghcup_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ ghcup Haskell Toolchain Manager daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ ghcup Haskell Toolchain Manager daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update ghcup config: {}", "▲".yellow(), e),
         }
     }
 
@@ -68800,6 +69334,40 @@ auth: pass123
         let dropin_updated = apply_perlbrew_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_perlbrew_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_luaver_proxy() {
+        let ini_initial = "luaver_version = \"5.4.6\"\n";
+        let ini_updated = apply_luaver_proxy(ini_initial, "http://10.0.0.128:7890");
+        assert!(ini_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (ini_cleaned, ini_removed) = remove_luaver_proxy(&ini_updated);
+        assert!(ini_removed);
+        assert!(!ini_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/luaver\n";
+        let dropin_updated = apply_luaver_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_luaver_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_ghcup_proxy() {
+        let yaml_initial = "url-proxy: \"\"\nghcup_version: \"0.1.30.0\"\n";
+        let yaml_updated = apply_ghcup_proxy(yaml_initial, "http://10.0.0.128:7890");
+        assert!(yaml_updated.contains("url-proxy: \"http://10.0.0.128:7890\""));
+        let (yaml_cleaned, yaml_removed) = remove_ghcup_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/ghcup\n";
+        let dropin_updated = apply_ghcup_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_ghcup_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }
