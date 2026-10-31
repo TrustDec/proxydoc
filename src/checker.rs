@@ -2262,6 +2262,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "PRIME Reasoning AI CDN",
         "https://github.com/PRIME-RL/PRIME",
     ),
+    (
+        "upterm Tunnel CDN",
+        "https://github.com/owenthereal/upterm",
+    ),
+    (
+        "NATAPP Tunnel CDN",
+        "https://github.com/natapp/natapp",
+    ),
+    (
+        "DeepSeek-LLM AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-LLM",
+    ),
+    (
+        "Qwen2.5 AI CDN",
+        "https://github.com/QwenLM/Qwen2.5",
+    ),
+    (
+        "Baichuan2 AI CDN",
+        "https://github.com/baichuan-inc/Baichuan2",
+    ),
+    (
+        "ChatGLM3 AI CDN",
+        "https://github.com/THUDM/ChatGLM3",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4268,6 +4292,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "PRIME Reasoning AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "upterm Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "NATAPP Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-LLM AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Qwen2.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Baichuan2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ChatGLM3 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

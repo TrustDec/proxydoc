@@ -44034,6 +44034,417 @@ pub fn unset_tmate_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_upterm_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "upterm_proxy"
+                    || k_low == "upterm_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"UPTERM_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export upterm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("upterm_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export UPTERM_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("upterm_proxy:")
+            || clean.starts_with("upterm-proxy:")
+            || clean.starts_with("upterm_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+        {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            lines.push(format!("{}proxy: \"{}\"", indent, proxy_url));
+            lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"UPTERM_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy: \"{}\"", proxy_url));
+            lines.push(format!("http_proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_upterm_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "upterm_proxy",
+                "upterm-proxy",
+                "upterm_http_proxy",
+                "tunnel_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "upterm_proxy"
+                    || k_low == "upterm_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export upterm_proxy=")
+            || lower.starts_with("export upterm_http_proxy=")
+            || lower.starts_with("export tunnel_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("upterm_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("upterm_proxy:")
+            || clean.starts_with("upterm-proxy:")
+            || clean.starts_with("upterm_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_upterm_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_upterm_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_upterm_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_upterm_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_upterm_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_upterm_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_natapp_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "natapp_proxy"
+                    || k_low == "natapp_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"NATAPP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export natapp_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("natapp_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export NATAPP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("natapp_proxy=")
+            || clean.starts_with("natapp_proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            lines.push(format!("{}http_proxy={}", indent, proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"NATAPP_PROXY={}\"", proxy_url));
+        } else if content.contains("[default]") {
+            lines.push(format!("http_proxy={}", proxy_url));
+        } else {
+            lines.push("[default]".to_string());
+            lines.push(format!("http_proxy={}", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_natapp_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "natapp_proxy",
+                "natapp_http_proxy",
+                "tunnel_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "natapp_proxy"
+                    || k_low == "natapp_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export natapp_proxy=")
+            || lower.starts_with("export natapp_http_proxy=")
+            || lower.starts_with("export tunnel_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("natapp_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("natapp_proxy=")
+            || clean.starts_with("natapp_proxy:")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proxy_url:")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_natapp_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_natapp_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_natapp_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_natapp_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_natapp_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_natapp_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -44270,6 +44681,8 @@ pub async fn turn_on(
     pgrok: bool,
     cpolar: bool,
     tmate: bool,
+    upterm: bool,
+    natapp: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -44505,6 +44918,8 @@ pub async fn turn_on(
     let set_pgrok = pgrok || all;
     let set_cpolar = cpolar || all;
     let set_tmate = tmate || all;
+    let set_upterm = upterm || all;
+    let set_natapp = natapp || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -47916,6 +48331,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_upterm {
+        match set_upterm_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ upterm daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update upterm daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_natapp {
+        match set_natapp_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ NATAPP daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update NATAPP daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -48165,6 +48610,8 @@ pub fn turn_off(
     pgrok: bool,
     cpolar: bool,
     tmate: bool,
+    upterm: bool,
+    natapp: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -48400,6 +48847,8 @@ pub fn turn_off(
     let unset_pgrok = pgrok || all;
     let unset_cpolar = cpolar || all;
     let unset_tmate = tmate || all;
+    let unset_upterm = upterm || all;
+    let unset_natapp = natapp || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -50341,6 +50790,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ tmate daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ tmate proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset tmate daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_upterm {
+        match unset_upterm_proxy() {
+            Ok(true) => eprintln!("{}", "✔ upterm daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ upterm proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset upterm daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_natapp {
+        match unset_natapp_proxy() {
+            Ok(true) => eprintln!("{}", "✔ NATAPP daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ NATAPP proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset NATAPP daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -55873,5 +56338,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("TMATE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_upterm_proxy() {
+        let upterm_initial = "proxy: \"http://127.0.0.1:1080\"\n";
+        let upterm_updated = apply_upterm_proxy(upterm_initial, "http://10.0.0.128:7890");
+        assert!(upterm_updated.contains("http://10.0.0.128:7890"));
+        let (upterm_cleaned, upterm_removed) = remove_upterm_proxy(&upterm_updated);
+        assert!(upterm_removed);
+        assert!(!upterm_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_upterm_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"UPTERM_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_upterm_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("UPTERM_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_natapp_proxy() {
+        let natapp_initial = "[default]\nauthtoken=test12345\nhttp_proxy=http://127.0.0.1:1080\n";
+        let natapp_updated = apply_natapp_proxy(natapp_initial, "http://10.0.0.128:7890");
+        assert!(natapp_updated.contains("http://10.0.0.128:7890"));
+        let (natapp_cleaned, natapp_removed) = remove_natapp_proxy(&natapp_updated);
+        assert!(natapp_removed);
+        assert!(!natapp_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_natapp_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"NATAPP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_natapp_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("NATAPP_PROXY="));
     }
 }

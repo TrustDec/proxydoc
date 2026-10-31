@@ -49176,6 +49176,620 @@ pub fn get_tmate_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_upterm_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("UPTERM_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("UPTERM_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("UPTERM_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("upterm").join("config.yml"),
+            home.join(".config").join("upterm").join("config.yaml"),
+            home.join(".upterm").join("config.yml"),
+            home.join(".upterm").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("upterm.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/upterm/config.yml"),
+        PathBuf::from("/etc/upterm/config.yaml"),
+        PathBuf::from("/etc/upterm.yml"),
+        PathBuf::from("/var/lib/upterm/config.yml"),
+        PathBuf::from("/usr/local/etc/upterm/config.yml"),
+        PathBuf::from("/opt/homebrew/etc/upterm/config.yml"),
+        PathBuf::from("/etc/default/upterm"),
+        PathBuf::from("/etc/sysconfig/upterm"),
+        PathBuf::from("/etc/systemd/system/upterm.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/uptermd.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_upterm = PathBuf::from("/etc/upterm");
+    if etc_upterm.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_upterm) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yml" || ext == "yaml" || ext == "toml" || ext == "json" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_upterm_config_path() -> Option<PathBuf> {
+    let paths = get_upterm_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_upterm_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_upterm_write_path() -> PathBuf {
+    if let Some(p) = get_upterm_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("UPTERM_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("UPTERM_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("upterm");
+        if dir.is_dir() {
+            return dir.join("config.yml");
+        }
+        let dir2 = home.join(".upterm");
+        if dir2.is_dir() {
+            return dir2.join("config.yml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/upterm");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/upterm.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("upterm").join("config.yml");
+    }
+    PathBuf::from("/etc/upterm/config.yml")
+}
+
+pub fn parse_upterm_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "upterm_proxy",
+                "upterm_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "upterm_proxy"
+                    || k_low == "upterm_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "upterm_proxy"
+                    || k_low == "upterm_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "upterm_proxy"
+                || k_low == "upterm_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "upterm_proxy"
+                || k_low == "upterm_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_upterm_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_upterm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_upterm_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("UPTERM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:UPTERM_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("UPTERM_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:UPTERM_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_natapp_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("NATAPP_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("NATAPP_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("NATAPP_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.ini");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("natapp").join("config.ini"),
+            home.join(".natapp").join("config.ini"),
+            home.join(".natapp").join("natapp.ini"),
+            home.join(".config").join("systemd").join("user").join("natapp.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/natapp/config.ini"),
+        PathBuf::from("/etc/natapp.ini"),
+        PathBuf::from("/var/lib/natapp/config.ini"),
+        PathBuf::from("/usr/local/etc/natapp/config.ini"),
+        PathBuf::from("/opt/homebrew/etc/natapp/config.ini"),
+        PathBuf::from("/etc/default/natapp"),
+        PathBuf::from("/etc/sysconfig/natapp"),
+        PathBuf::from("/etc/systemd/system/natapp.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/natapp-service.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_natapp = PathBuf::from("/etc/natapp");
+    if etc_natapp.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_natapp) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "ini" || ext == "conf" || ext == "cfg" || ext == "json" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_natapp_config_path() -> Option<PathBuf> {
+    let paths = get_natapp_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_natapp_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_natapp_write_path() -> PathBuf {
+    if let Some(p) = get_natapp_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("NATAPP_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("NATAPP_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("natapp");
+        if dir.is_dir() {
+            return dir.join("config.ini");
+        }
+        let dir2 = home.join(".natapp");
+        if dir2.is_dir() {
+            return dir2.join("config.ini");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/natapp");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.ini");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/natapp.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".natapp").join("config.ini");
+    }
+    PathBuf::from("/etc/natapp/config.ini")
+}
+
+pub fn parse_natapp_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "http_proxy",
+                "http-proxy",
+                "proxy",
+                "proxy_url",
+                "https_proxy",
+                "natapp_proxy",
+                "natapp_http_proxy",
+                "tunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "natapp_proxy"
+                    || k_low == "natapp_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "natapp_proxy"
+                    || k_low == "natapp_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                    || k_low == "proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "natapp_proxy"
+                || k_low == "natapp_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "natapp_proxy"
+                || k_low == "natapp_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_natapp_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_natapp_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_natapp_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NATAPP_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NATAPP_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("NATAPP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NATAPP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -57629,6 +58243,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "tmate Daemon Proxy",
             "~/.tmate.conf & /etc/tmate.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // upterm Terminal Sharing & SSH Reverse Tunnel Daemon (~/.config/upterm/config.yml / /etc/upterm/config.yml / /etc/systemd/system/upterm.service.d/http-proxy.conf)
+    if let Some((upterm_proxy, upterm_path)) = get_upterm_proxy() {
+        let ok = verify_proxy_url(&upterm_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "upterm proxy `{}` in {} is dead! (upterm terminal sharing and SSH reverse tunnel will fail)",
+                upterm_proxy,
+                upterm_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "upterm Daemon Proxy",
+            format!("{}", upterm_path.display()),
+            upterm_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (upterm fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "upterm Daemon Proxy",
+            "~/.config/upterm/config.yml & /etc/upterm/config.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // NATAPP Localhost Reverse Tunnel & Web UI Daemon (~/.natapp/config.ini / /etc/natapp/config.ini / /etc/systemd/system/natapp.service.d/http-proxy.conf)
+    if let Some((natapp_proxy, natapp_path)) = get_natapp_proxy() {
+        let ok = verify_proxy_url(&natapp_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "NATAPP proxy `{}` in {} is dead! (NATAPP localhost reverse tunnel and forwarding will fail)",
+                natapp_proxy,
+                natapp_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "NATAPP Daemon Proxy",
+            format!("{}", natapp_path.display()),
+            natapp_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (NATAPP fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "NATAPP Daemon Proxy",
+            "~/.natapp/config.ini & /etc/natapp/config.ini",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -67007,5 +67685,75 @@ Environment="TMATE_PROXY=http://127.0.0.1:7890"
         let input_comment = "# set -g tmate-proxy \"http://127.0.0.1:7890\"\n; tmate_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_tmate_proxy(input_comment), None);
         assert_eq!(parse_tmate_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_upterm_proxy() {
+        let upterm_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_upterm_proxy(upterm_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let upterm_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_upterm_proxy(upterm_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="UPTERM_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_upterm_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; upterm_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_upterm_proxy(input_comment), None);
+        assert_eq!(parse_upterm_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_natapp_proxy() {
+        let natapp_ini = r#"
+[default]
+authtoken=testtoken123
+http_proxy=http://127.0.0.1:7890
+"#;
+        assert_eq!(
+            parse_natapp_proxy(natapp_ini),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let natapp_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_natapp_proxy(natapp_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="NATAPP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_natapp_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy=http://127.0.0.1:7890\n; natapp_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_natapp_proxy(input_comment), None);
+        assert_eq!(parse_natapp_proxy(""), None);
     }
 }

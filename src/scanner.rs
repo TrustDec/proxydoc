@@ -157,6 +157,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (3320, false, "pgrok Localhost Reverse Proxy & Tunnel Daemon (Control/Tunnel)"),
     (9200, false, "cpolar Localhost Reverse Tunnel & Web UI Daemon (HTTP/Web)"),
     (2222, false, "tmate Terminal Sharing & SSH Reverse Tunnel Daemon (SSH/Tunnel)"),
+    (2323, false, "upterm Terminal Sharing & SSH Reverse Tunnel Daemon (Control/Tunnel)"),
+    (3993, false, "NATAPP Localhost Reverse Tunnel & Web UI Daemon (HTTP/Web)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
