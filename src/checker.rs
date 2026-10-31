@@ -2406,6 +2406,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Command-R AI CDN",
         "https://github.com/cohere-ai/cohere-developer-experience",
     ),
+    (
+        "devspace Tunnel CDN",
+        "https://github.com/loft-sh/devspace",
+    ),
+    (
+        "geph Tunnel CDN",
+        "https://github.com/geph-official/geph4",
+    ),
+    (
+        "Llama-3 AI CDN",
+        "https://github.com/meta-llama/llama3",
+    ),
+    (
+        "Command-R-Plus AI CDN",
+        "https://github.com/cohere-ai/cohere-developer-experience",
+    ),
+    (
+        "Mistral-Large AI CDN",
+        "https://github.com/mistralai/mistral-common",
+    ),
+    (
+        "Gemma-2 AI CDN",
+        "https://github.com/google-deepmind/gemma",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4520,6 +4544,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Command-R AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "devspace Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "geph Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Llama-3 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Command-R-Plus AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Mistral-Large AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Gemma-2 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

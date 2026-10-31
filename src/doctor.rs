@@ -53166,6 +53166,680 @@ pub fn get_kt_connect_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_devspace_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DEVSPACE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DEVSPACE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVSPACE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("devspace.yaml"),
+        PathBuf::from("devspace.yml"),
+        PathBuf::from(".devspace.yaml"),
+    ];
+    for p in local_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".devspace").join("config.json"),
+            home.join(".devspace").join("config.yaml"),
+            home.join(".config").join("devspace").join("config.json"),
+            home.join(".devspace.json"),
+            home.join(".config").join("systemd").join("user").join("devspace.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/devspace/config.json"),
+        PathBuf::from("/etc/devspace/config.yaml"),
+        PathBuf::from("/etc/devspace.json"),
+        PathBuf::from("/var/lib/devspace/config.json"),
+        PathBuf::from("/usr/local/etc/devspace/config.json"),
+        PathBuf::from("/opt/homebrew/etc/devspace/config.json"),
+        PathBuf::from("/etc/default/devspace"),
+        PathBuf::from("/etc/sysconfig/devspace"),
+        PathBuf::from("/etc/systemd/system/devspace.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_devspace = PathBuf::from("/etc/devspace");
+    if etc_devspace.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_devspace) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_devspace_config_path() -> Option<PathBuf> {
+    let paths = get_devspace_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_devspace_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_devspace_write_path() -> PathBuf {
+    if let Some(p) = get_devspace_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DEVSPACE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".devspace");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("devspace");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/devspace");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/devspace.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".devspace").join("config.json");
+    }
+    PathBuf::from("/etc/devspace/config.json")
+}
+
+pub fn parse_devspace_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "devspace_proxy",
+                "devspace_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+            if let Some(dev) = obj.get("dev").and_then(|d| d.as_object()) {
+                for key in ["proxy", "http_proxy", "proxy_url"] {
+                    if let Some(v) = dev.get(key) {
+                        if let Some(s) = v.as_str() {
+                            let trim = s.trim();
+                            if !trim.is_empty() {
+                                return Some(if trim.starts_with("http://")
+                                    || trim.starts_with("https://")
+                                    || trim.starts_with("socks")
+                                {
+                                    trim.to_string()
+                                } else {
+                                    format!("http://{}", trim)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devspace_proxy"
+                    || k_low == "devspace_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devspace_proxy"
+                    || k_low == "devspace_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "devspace_proxy"
+                || k_low == "devspace_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "devspace_proxy"
+                || k_low == "devspace_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_devspace_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_devspace_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_devspace_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DEVSPACE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVSPACE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVSPACE_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVSPACE_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVSPACE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVSPACE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_geph_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("GEPH_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("GEPH_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("GEPH_DIR") {
+        let p = PathBuf::from(dir.trim()).join("geph4.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("geph4").join("geph4.json"),
+            home.join(".config").join("geph5").join("geph5.json"),
+            home.join(".config").join("geph").join("config.json"),
+            home.join(".geph4").join("config.json"),
+            home.join(".geph").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("geph4.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("geph.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/geph4/geph4.json"),
+        PathBuf::from("/etc/geph4/geph4.conf"),
+        PathBuf::from("/etc/geph/config.json"),
+        PathBuf::from("/etc/geph.json"),
+        PathBuf::from("/var/lib/geph4/geph4.json"),
+        PathBuf::from("/usr/local/etc/geph4/geph4.json"),
+        PathBuf::from("/opt/homebrew/etc/geph4/geph4.json"),
+        PathBuf::from("/etc/default/geph4"),
+        PathBuf::from("/etc/sysconfig/geph4"),
+        PathBuf::from("/etc/systemd/system/geph4.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/geph.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    for dir in [PathBuf::from("/etc/geph4"), PathBuf::from("/etc/geph")] {
+        if dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(ext) = path.extension() {
+                        if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                            paths.push(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_geph_config_path() -> Option<PathBuf> {
+    let paths = get_geph_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_geph_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_geph_write_path() -> PathBuf {
+    if let Some(p) = get_geph_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("GEPH_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("geph4");
+        if dir.is_dir() {
+            return dir.join("geph4.json");
+        }
+        let dir2 = home.join(".geph4");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/geph4");
+    if etc_dir.is_dir() {
+        return etc_dir.join("geph4.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/geph4.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("geph4").join("geph4.json");
+    }
+    PathBuf::from("/etc/geph4/geph4.json")
+}
+
+pub fn parse_geph_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "geph_proxy",
+                "geph_http_proxy",
+                "socks5_proxy",
+                "listen_http",
+                "tunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "geph_proxy"
+                    || k_low == "geph_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "geph_proxy"
+                    || k_low == "geph_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "geph_proxy"
+                || k_low == "geph_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "geph_proxy"
+                || k_low == "geph_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_geph_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_geph_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_geph_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GEPH_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GEPH_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GEPH_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GEPH_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GEPH_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GEPH_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -62003,6 +62677,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "kt-connect Daemon Proxy",
             "~/.ktctl/config.json & /etc/ktctl/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // DevSpace Cloud-Native Kubernetes Dev Proxy & UI Client (~/.devspace/config.json / devspace.yaml / /etc/devspace/config.json / /etc/systemd/system/devspace.service.d/http-proxy.conf)
+    if let Some((devspace_proxy, devspace_path)) = get_devspace_proxy() {
+        let ok = verify_proxy_url(&devspace_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "DevSpace proxy `{}` in {} is dead! (DevSpace Kubernetes dev syncing, port-forwarding and proxying will fail)",
+                devspace_proxy,
+                devspace_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "DevSpace Daemon Proxy",
+            format!("{}", devspace_path.display()),
+            devspace_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (DevSpace fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "DevSpace Daemon Proxy",
+            "~/.devspace/config.json & /etc/devspace/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Geph Censorship-Resistant Proxy & Reverse Tunnel Client (~/.config/geph4/geph4.json / /etc/geph4/geph4.json / /etc/systemd/system/geph4.service.d/http-proxy.conf)
+    if let Some((geph_proxy, geph_path)) = get_geph_proxy() {
+        let ok = verify_proxy_url(&geph_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Geph proxy `{}` in {} is dead! (Geph censorship-resistant reverse proxy and tunnel will fail)",
+                geph_proxy,
+                geph_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Geph Daemon Proxy",
+            format!("{}", geph_path.display()),
+            geph_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Geph fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Geph Daemon Proxy",
+            "~/.config/geph4/geph4.json & /etc/geph4/geph4.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -71797,5 +72535,73 @@ Environment="KTCTL_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; ktctl_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_kt_connect_proxy(input_comment), None);
         assert_eq!(parse_kt_connect_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_devspace_proxy() {
+        let devspace_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_devspace_proxy(devspace_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let devspace_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_devspace_proxy(devspace_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="DEVSPACE_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_devspace_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; devspace_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_devspace_proxy(input_comment), None);
+        assert_eq!(parse_devspace_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_geph_proxy() {
+        let geph_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_geph_proxy(geph_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let geph_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_geph_proxy(geph_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="GEPH_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_geph_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; geph_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_geph_proxy(input_comment), None);
+        assert_eq!(parse_geph_proxy(""), None);
     }
 }

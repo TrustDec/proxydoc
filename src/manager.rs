@@ -46672,6 +46672,450 @@ pub fn unset_kt_connect_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_devspace_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devspace_proxy"
+                    || k_low == "devspace_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"DEVSPACE_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export devspace_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("devspace_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export DEVSPACE_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "devspace_proxy"
+                || k_trim == "devspace_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"DEVSPACE_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_devspace_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "devspace_proxy",
+                "devspace-proxy",
+                "devspace_http_proxy",
+                "tunnel_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devspace_proxy"
+                    || k_low == "devspace_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export devspace_proxy=")
+            || lower.starts_with("export devspace_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("devspace_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "devspace_proxy"
+                || k_trim == "devspace_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_devspace_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_devspace_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_devspace_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_devspace_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_devspace_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_devspace_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_geph_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "geph_proxy"
+                    || k_low == "geph_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"GEPH_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export geph_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("geph_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export GEPH_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "geph_proxy"
+                || k_trim == "geph_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"GEPH_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_geph_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "geph_proxy",
+                "geph-proxy",
+                "geph_http_proxy",
+                "tunnel_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "geph_proxy"
+                    || k_low == "geph_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export geph_proxy=")
+            || lower.starts_with("export geph_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("geph_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "geph_proxy"
+                || k_trim == "geph_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_geph_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_geph_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_geph_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_geph_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_geph_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_geph_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -46920,6 +47364,8 @@ pub async fn turn_on(
     rport: bool,
     mirrord: bool,
     kt_connect: bool,
+    devspace: bool,
+    geph: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -47167,6 +47613,8 @@ pub async fn turn_on(
     let set_rport = rport || all;
     let set_mirrord = mirrord || all;
     let set_kt_connect = kt_connect || all;
+    let set_devspace = devspace || all;
+    let set_geph = geph || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -50758,6 +51206,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_devspace {
+        match set_devspace_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ DevSpace daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update DevSpace daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_geph {
+        match set_geph_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Geph daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Geph daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -51019,6 +51497,8 @@ pub fn turn_off(
     rport: bool,
     mirrord: bool,
     kt_connect: bool,
+    devspace: bool,
+    geph: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -51266,6 +51746,8 @@ pub fn turn_off(
     let unset_rport = rport || all;
     let unset_mirrord = mirrord || all;
     let unset_kt_connect = kt_connect || all;
+    let unset_devspace = devspace || all;
+    let unset_geph = geph || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -53303,6 +53785,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ kt-connect daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ kt-connect proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset kt-connect daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_devspace {
+        match unset_devspace_proxy() {
+            Ok(true) => eprintln!("{}", "✔ DevSpace daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ DevSpace proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset DevSpace daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_geph {
+        match unset_geph_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Geph daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Geph proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Geph daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -59063,5 +59561,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("KTCTL_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_devspace_proxy() {
+        let json_initial = "{\n  \"http_proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let json_updated = apply_devspace_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("10.0.0.128:7890"));
+        let (json_cleaned, json_removed) = remove_devspace_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_devspace_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"DEVSPACE_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_devspace_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("DEVSPACE_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_geph_proxy() {
+        let json_initial = "{\n  \"http_proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let json_updated = apply_geph_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("10.0.0.128:7890"));
+        let (json_cleaned, json_removed) = remove_geph_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_geph_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"GEPH_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_geph_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("GEPH_PROXY="));
     }
 }

@@ -169,6 +169,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (9990, false, "rport Remote Management & Reverse Tunnel Client Daemon (HTTP/Tunnel)"),
     (3030, false, "mirrord Kubernetes Dev Traffic Mirror & Reverse Proxy Daemon (HTTP/Admin)"),
     (2223, false, "kt-connect Kubernetes Dev Tunnel & SOCKS5 Proxy Daemon (SSH/Tunnel)"),
+    (8090, false, "DevSpace Cloud-Native Kubernetes Dev Proxy & UI Daemon (HTTP/Web)"),
+    (9909, false, "Geph Censorship-Resistant Proxy & Reverse Tunnel Client Daemon (HTTP/SOCKS5)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
