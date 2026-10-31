@@ -48538,6 +48538,644 @@ pub fn get_pgrok_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_cpolar_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CPOLAR_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("CPOLAR_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("CPOLAR_DIR") {
+        let p = PathBuf::from(dir.trim()).join("cpolar.yml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".cpolar").join("cpolar.yml"),
+            home.join(".config").join("cpolar").join("cpolar.yml"),
+            home.join(".cpolar").join("config.yml"),
+            home.join(".config").join("cpolar").join("config.yml"),
+            home.join(".config").join("systemd").join("user").join("cpolar.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/cpolar/cpolar.yml"),
+        PathBuf::from("/etc/cpolar/config.yml"),
+        PathBuf::from("/etc/cpolar.yml"),
+        PathBuf::from("/var/lib/cpolar/cpolar.yml"),
+        PathBuf::from("/usr/local/etc/cpolar/cpolar.yml"),
+        PathBuf::from("/opt/homebrew/etc/cpolar/cpolar.yml"),
+        PathBuf::from("/etc/default/cpolar"),
+        PathBuf::from("/etc/sysconfig/cpolar"),
+        PathBuf::from("/etc/systemd/system/cpolar.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/cpolar-service.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_cpolar = PathBuf::from("/etc/cpolar");
+    if etc_cpolar.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_cpolar) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yml" || ext == "yaml" || ext == "toml" || ext == "json" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_cpolar_config_path() -> Option<PathBuf> {
+    let paths = get_cpolar_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_cpolar_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_cpolar_write_path() -> PathBuf {
+    if let Some(p) = get_cpolar_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CPOLAR_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("CPOLAR_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".cpolar");
+        if dir.is_dir() {
+            return dir.join("cpolar.yml");
+        }
+        let dir2 = home.join(".config").join("cpolar");
+        if dir2.is_dir() {
+            return dir2.join("cpolar.yml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/cpolar");
+    if etc_dir.is_dir() {
+        return etc_dir.join("cpolar.yml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/cpolar.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".cpolar").join("cpolar.yml");
+    }
+    PathBuf::from("/etc/cpolar/cpolar.yml")
+}
+
+pub fn parse_cpolar_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "cpolar_proxy",
+                "cpolar_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cpolar_proxy"
+                    || k_low == "cpolar_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cpolar_proxy"
+                    || k_low == "cpolar_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "cpolar_proxy"
+                || k_low == "cpolar_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "cpolar_proxy"
+                || k_low == "cpolar_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_cpolar_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_cpolar_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_cpolar_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CPOLAR_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CPOLAR_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CPOLAR_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CPOLAR_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_tmate_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("TMATE_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("TMATE_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("TMATE_DIR") {
+        let p = PathBuf::from(dir.trim()).join(".tmate.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".tmate.conf"),
+            home.join(".config").join("tmate").join("tmate.conf"),
+            home.join(".tmate").join("tmate.conf"),
+            home.join(".config").join("systemd").join("user").join("tmate.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/tmate.conf"),
+        PathBuf::from("/etc/tmate/tmate.conf"),
+        PathBuf::from("/usr/local/etc/tmate.conf"),
+        PathBuf::from("/opt/homebrew/etc/tmate.conf"),
+        PathBuf::from("/etc/default/tmate"),
+        PathBuf::from("/etc/sysconfig/tmate"),
+        PathBuf::from("/etc/systemd/system/tmate.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/tmate-ssh-server.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_tmate = PathBuf::from("/etc/tmate");
+    if etc_tmate.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_tmate) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "toml" || ext == "json" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_tmate_config_path() -> Option<PathBuf> {
+    let paths = get_tmate_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_tmate_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_tmate_write_path() -> PathBuf {
+    if let Some(p) = get_tmate_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("TMATE_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("TMATE_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("tmate");
+        if dir.is_dir() {
+            return dir.join("tmate.conf");
+        }
+        let dir2 = home.join(".tmate");
+        if dir2.is_dir() {
+            return dir2.join("tmate.conf");
+        }
+        return home.join(".tmate.conf");
+    }
+    let etc_dir = PathBuf::from("/etc/tmate");
+    if etc_dir.is_dir() {
+        return etc_dir.join("tmate.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/tmate.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".tmate.conf");
+    }
+    PathBuf::from("/etc/tmate.conf")
+}
+
+pub fn parse_tmate_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "tmate_proxy",
+                "tmate-proxy",
+                "tmate_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tmate_proxy"
+                    || k_low == "tmate_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        // Handle tmux / tmate style config: `set -g tmate-proxy "http://..."` or `set-option -g tmate-proxy ...`
+        if lower.starts_with("set ") || lower.starts_with("set-option ") {
+            let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+            for (idx, &token) in tokens.iter().enumerate() {
+                let tok_low = token.to_ascii_lowercase();
+                if (tok_low == "tmate-proxy" || tok_low == "tmate_proxy" || tok_low == "proxy") && idx + 1 < tokens.len() {
+                    let val = tokens[idx + 1].trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tmate_proxy"
+                    || k_low == "tmate_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "tmate_proxy"
+                || k_low == "tmate-proxy"
+                || k_low == "tmate_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "tmate_proxy"
+                || k_low == "tmate-proxy"
+                || k_low == "tmate_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_tmate_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tmate_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tmate_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TMATE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TMATE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TMATE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TMATE_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -56927,6 +57565,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "pgrok Daemon Proxy",
             "~/.pgrok/pgrok.yml & /etc/pgrok/pgrok.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // cpolar Localhost Reverse Tunnel & Web UI Daemon (~/.cpolar/cpolar.yml / /etc/cpolar/cpolar.yml / /etc/systemd/system/cpolar.service.d/http-proxy.conf)
+    if let Some((cpolar_proxy, cpolar_path)) = get_cpolar_proxy() {
+        let ok = verify_proxy_url(&cpolar_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "cpolar proxy `{}` in {} is dead! (cpolar localhost reverse tunnel and forwarding will fail)",
+                cpolar_proxy,
+                cpolar_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "cpolar Daemon Proxy",
+            format!("{}", cpolar_path.display()),
+            cpolar_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (cpolar fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "cpolar Daemon Proxy",
+            "~/.cpolar/cpolar.yml & /etc/cpolar/cpolar.yml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // tmate Terminal Sharing & SSH Reverse Tunnel Daemon (~/.tmate.conf / /etc/tmate.conf / /etc/systemd/system/tmate.service.d/http-proxy.conf)
+    if let Some((tmate_proxy, tmate_path)) = get_tmate_proxy() {
+        let ok = verify_proxy_url(&tmate_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "tmate proxy `{}` in {} is dead! (tmate terminal sharing and SSH reverse tunnel will fail)",
+                tmate_proxy,
+                tmate_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "tmate Daemon Proxy",
+            format!("{}", tmate_path.display()),
+            tmate_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tmate fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "tmate Daemon Proxy",
+            "~/.tmate.conf & /etc/tmate.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -66237,5 +66939,73 @@ Environment="PGROK_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; pgrok_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_pgrok_proxy(input_comment), None);
         assert_eq!(parse_pgrok_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_cpolar_proxy() {
+        let cpolar_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_cpolar_proxy(cpolar_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let cpolar_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_cpolar_proxy(cpolar_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="CPOLAR_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_cpolar_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; cpolar_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_cpolar_proxy(input_comment), None);
+        assert_eq!(parse_cpolar_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tmate_proxy() {
+        let tmate_conf = r#"
+set -g tmate-proxy "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tmate_proxy(tmate_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let tmate_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_tmate_proxy(tmate_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="TMATE_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_tmate_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# set -g tmate-proxy \"http://127.0.0.1:7890\"\n; tmate_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_tmate_proxy(input_comment), None);
+        assert_eq!(parse_tmate_proxy(""), None);
     }
 }
