@@ -2742,6 +2742,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Sky-Thought AI CDN",
         "https://github.com/NovaSky-AI/Sky-Thought",
     ),
+    (
+        "rbenv Dev CDN",
+        "https://github.com/rbenv/rbenv",
+    ),
+    (
+        "gvm Dev CDN",
+        "https://github.com/moovweb/gvm",
+    ),
+    (
+        "Open-Thoughts AI CDN",
+        "https://github.com/open-thoughts/open-thoughts",
+    ),
+    (
+        "Kimi-k1.5 AI CDN",
+        "https://github.com/MoonshotAI/Kimi-k1.5",
+    ),
+    (
+        "Mini-Omni2 AI CDN",
+        "https://github.com/gpt-omni/mini-omni2",
+    ),
+    (
+        "Fast-Detect-GPT AI CDN",
+        "https://github.com/BaoBaInterest/Fast-Detect-GPT",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5108,6 +5132,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Sky-Thought AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "rbenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "gvm Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-Thoughts AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Kimi-k1.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Mini-Omni2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fast-Detect-GPT AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

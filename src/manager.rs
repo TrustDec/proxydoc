@@ -52879,6 +52879,462 @@ pub fn unset_nvm_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_rbenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rbenv_http_proxy"
+                    || k_low == "rbenv_https_proxy"
+                    || k_low == "rbenv_proxy"
+                    || k_low == "ruby_build_http_client"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"RBENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export rbenv_http_proxy=")
+            || lower.starts_with("export rbenv_https_proxy=")
+            || lower.starts_with("export rbenv_proxy=")
+            || lower.starts_with("export ruby_build_http_client=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("rbenv_http_proxy=")
+            || lower.starts_with("rbenv_https_proxy=")
+            || lower.starts_with("rbenv_proxy=")
+            || lower.starts_with("ruby_build_http_client=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export RBENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "rbenv_http_proxy"
+                || k_trim == "rbenv_https_proxy"
+                || k_trim == "rbenv_proxy"
+                || k_trim == "ruby_build_http_client"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains(':') && !line.contains('=') {
+                lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"RBENV_HTTP_PROXY={}\"", proxy_url));
+        } else if content.trim().starts_with('{') {
+            lines.push(format!("  \"http_proxy\": \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_rbenv_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for k in &["http_proxy", "https_proxy", "proxy", "rbenv_proxy", "rbenv_http_proxy", "ruby_build_http_client"] {
+                if obj.remove(*k).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rbenv_http_proxy"
+                    || k_low == "rbenv_https_proxy"
+                    || k_low == "rbenv_proxy"
+                    || k_low == "ruby_build_http_client"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export rbenv_http_proxy=")
+            || lower.starts_with("export rbenv_https_proxy=")
+            || lower.starts_with("export rbenv_proxy=")
+            || lower.starts_with("export ruby_build_http_client=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("rbenv_http_proxy=")
+            || lower.starts_with("rbenv_https_proxy=")
+            || lower.starts_with("rbenv_proxy=")
+            || lower.starts_with("ruby_build_http_client=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "rbenv_http_proxy"
+                || k_trim == "rbenv_https_proxy"
+                || k_trim == "rbenv_proxy"
+                || k_trim == "ruby_build_http_client"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_rbenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_rbenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_rbenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_rbenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_rbenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_rbenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_gvm_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "gvm_http_proxy"
+                    || k_low == "gvm_https_proxy"
+                    || k_low == "gvm_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"GVM_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export gvm_http_proxy=")
+            || lower.starts_with("export gvm_https_proxy=")
+            || lower.starts_with("export gvm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("gvm_http_proxy=")
+            || lower.starts_with("gvm_https_proxy=")
+            || lower.starts_with("gvm_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export GVM_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "gvm_http_proxy"
+                || k_trim == "gvm_https_proxy"
+                || k_trim == "gvm_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains(':') && !line.contains('=') {
+                lines.push(format!("{}http_proxy: \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http_proxy = \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"GVM_HTTP_PROXY={}\"", proxy_url));
+        } else if content.trim().starts_with('{') {
+            lines.push(format!("  \"http_proxy\": \"{}\"", proxy_url));
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_gvm_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for k in &["http_proxy", "https_proxy", "proxy", "gvm_proxy", "gvm_http_proxy"] {
+                if obj.remove(*k).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "gvm_http_proxy"
+                    || k_low == "gvm_https_proxy"
+                    || k_low == "gvm_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export gvm_http_proxy=")
+            || lower.starts_with("export gvm_https_proxy=")
+            || lower.starts_with("export gvm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("gvm_http_proxy=")
+            || lower.starts_with("gvm_https_proxy=")
+            || lower.starts_with("gvm_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "gvm_http_proxy"
+                || k_trim == "gvm_https_proxy"
+                || k_trim == "gvm_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_gvm_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_gvm_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_gvm_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_gvm_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_gvm_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_gvm_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -53155,6 +53611,8 @@ pub async fn turn_on(
     volta: bool,
     pyenv: bool,
     nvm: bool,
+    rbenv: bool,
+    gvm: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -53430,6 +53888,8 @@ pub async fn turn_on(
     let set_volta = volta || all;
     let set_pyenv = pyenv || all;
     let set_nvm = nvm || all;
+    let set_rbenv = rbenv || all;
+    let set_gvm = gvm || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -57441,6 +57901,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_rbenv {
+        match set_rbenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ rbenv Ruby toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update rbenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_gvm {
+        match set_gvm_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ gvm (Go Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update gvm config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -57730,6 +58220,8 @@ pub fn turn_off(
     volta: bool,
     pyenv: bool,
     nvm: bool,
+    rbenv: bool,
+    gvm: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -58005,6 +58497,8 @@ pub fn turn_off(
     let unset_volta = volta || all;
     let unset_pyenv = pyenv || all;
     let unset_nvm = nvm || all;
+    let unset_rbenv = rbenv || all;
+    let unset_gvm = gvm || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -60278,6 +60772,34 @@ pub fn turn_off(
                 "○ nvm Node Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update nvm config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_rbenv {
+        match unset_rbenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ rbenv Ruby toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ rbenv Ruby toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update rbenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_gvm {
+        match unset_gvm_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ gvm Go Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ gvm Go Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update gvm config: {}", "▲".yellow(), e),
         }
     }
 
@@ -66564,6 +67086,40 @@ auth: pass123
         let dropin_updated = apply_nvm_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_nvm_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_rbenv_proxy() {
+        let ini_initial = "rbenv_version = \"3.3.0\"\n";
+        let ini_updated = apply_rbenv_proxy(ini_initial, "http://10.0.0.128:7890");
+        assert!(ini_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (ini_cleaned, ini_removed) = remove_rbenv_proxy(&ini_updated);
+        assert!(ini_removed);
+        assert!(!ini_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/rbenv\n";
+        let dropin_updated = apply_rbenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_rbenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_gvm_proxy() {
+        let json_initial = "{\n  \"default\": \"go1.22.0\"\n}\n";
+        let json_updated = apply_gvm_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("\"http_proxy\": \"http://10.0.0.128:7890\""));
+        let (json_cleaned, json_removed) = remove_gvm_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/gvm\n";
+        let dropin_updated = apply_gvm_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_gvm_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

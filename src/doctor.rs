@@ -62009,6 +62009,486 @@ pub fn get_nvm_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_rbenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("RBENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("default-gems");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".rbenv").join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".rbenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("rbenv").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("rbenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".rbenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/rbenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/rbenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_vars = PathBuf::from("/etc/rbenv/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_rbenv_config_path() -> Option<PathBuf> {
+    let paths = get_rbenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_rbenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_rbenv_write_path() -> PathBuf {
+    if let Some(p) = get_rbenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("RBENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("vars");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let rbenv_dir = home.join(".rbenv");
+        if rbenv_dir.is_dir() {
+            return rbenv_dir.join("vars");
+        }
+        let cfg_dir = home.join(".config").join("rbenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".rbenv").join("vars");
+    }
+    PathBuf::from("/etc/rbenv/vars")
+}
+
+pub fn parse_rbenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "rbenv_proxy", "rbenv_http_proxy", "ruby_build_http_client"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "rbenv_http_proxy"
+                    || k_low == "rbenv_https_proxy"
+                    || k_low == "rbenv_proxy"
+                    || k_low == "ruby_build_http_client"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export rbenv_http_proxy=")
+            || lower.starts_with("export rbenv_https_proxy=")
+            || lower.starts_with("export rbenv_proxy=")
+            || lower.starts_with("export ruby_build_http_client=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("rbenv_http_proxy=")
+            || lower.starts_with("rbenv_https_proxy=")
+            || lower.starts_with("rbenv_proxy=")
+            || lower.starts_with("ruby_build_http_client=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("rbenv_http_proxy")
+            || clean.starts_with("rbenv_https_proxy")
+            || clean.starts_with("rbenv_proxy")
+            || clean.starts_with("ruby_build_http_client")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("http-proxy")
+            || clean.starts_with("https-proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_rbenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_rbenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_rbenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("RBENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RBENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("RBENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:RBENV_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_gvm_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("GVM_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("environments").join("default");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".gvm").join("environments").join("default");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".gvm").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("gvm").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("gvm").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".gvmrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/gvm.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/gvm/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_env = PathBuf::from("/etc/gvm/environments/default");
+    if etc_env.exists() && !paths.contains(&etc_env) {
+        paths.push(etc_env);
+    }
+    paths
+}
+
+pub fn get_gvm_config_path() -> Option<PathBuf> {
+    let paths = get_gvm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_gvm_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_gvm_write_path() -> PathBuf {
+    if let Some(p) = get_gvm_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("GVM_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let gvm_dir = home.join(".gvm");
+        if gvm_dir.is_dir() {
+            return gvm_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("gvm");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".gvm").join("config");
+    }
+    PathBuf::from("/etc/gvm/config")
+}
+
+pub fn parse_gvm_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "gvm_proxy", "gvm_http_proxy", "goproxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "gvm_http_proxy"
+                    || k_low == "gvm_https_proxy"
+                    || k_low == "gvm_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export gvm_http_proxy=")
+            || lower.starts_with("export gvm_https_proxy=")
+            || lower.starts_with("export gvm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("gvm_http_proxy=")
+            || lower.starts_with("gvm_https_proxy=")
+            || lower.starts_with("gvm_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("gvm_http_proxy")
+            || clean.starts_with("gvm_https_proxy")
+            || clean.starts_with("gvm_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("http-proxy")
+            || clean.starts_with("https-proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_gvm_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_gvm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_gvm_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GVM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GVM_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GVM_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GVM_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -62869,6 +63349,54 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "● Reachable Mirror".green().to_string()
                 } else {
                     "▲ UNREACHABLE MIRROR! (nvm install fails)".red().bold().to_string()
+                },
+            ));
+        }
+    }
+
+    // rbenv / ruby-build Mirror
+    if let Ok(val) = std::env::var("RUBY_BUILD_MIRROR_URL") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "rbenv mirror variable `RUBY_BUILD_MIRROR_URL` points to unreachable mirror `{}`! (rbenv install will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "rbenv Mirror",
+                "RUBY_BUILD_MIRROR_URL (ruby-build mirror)",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR! (rbenv install fails)".red().bold().to_string()
+                },
+            ));
+        }
+    }
+
+    // gvm / Go Source Mirror
+    if let Ok(val) = std::env::var("GVM_SOURCE_MIRROR") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "gvm mirror variable `GVM_SOURCE_MIRROR` points to unreachable mirror `{}`! (gvm install will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "gvm Mirror",
+                "GVM_SOURCE_MIRROR (Go source download mirror)",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR! (gvm install fails)".red().bold().to_string()
                 },
             ));
         }
@@ -71814,6 +72342,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "nvm Dev Proxy",
             "~/.nvm/settings.nvm & ~/.nvm/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // rbenv Ruby Toolchain & Version Manager Daemon (~/.rbenv/vars / ~/.rbenv/config / ~/.config/rbenv/config / /etc/rbenv/config / /etc/systemd/system/rbenv.service.d/http-proxy.conf)
+    if let Some((rbenv_proxy, rbenv_path)) = get_rbenv_proxy() {
+        let ok = verify_proxy_url(&rbenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "rbenv proxy `{}` in {} is dead! (rbenv toolchain proxy will fail)",
+                rbenv_proxy,
+                rbenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "rbenv Dev Proxy",
+            format!("{}", rbenv_path.display()),
+            rbenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (rbenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "rbenv Dev Proxy",
+            "~/.rbenv/vars & ~/.config/rbenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // gvm (Go Version Manager) Toolchain Daemon (~/.gvm/environments/default / ~/.gvm/config / ~/.config/gvm/config / /etc/gvm/config / /etc/systemd/system/gvm.service.d/http-proxy.conf)
+    if let Some((gvm_proxy, gvm_path)) = get_gvm_proxy() {
+        let ok = verify_proxy_url(&gvm_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "gvm proxy `{}` in {} is dead! (gvm toolchain proxy will fail)",
+                gvm_proxy,
+                gvm_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "gvm Dev Proxy",
+            format!("{}", gvm_path.display()),
+            gvm_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (gvm fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "gvm Dev Proxy",
+            "~/.gvm/config & ~/.gvm/environments/default",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -82487,5 +83079,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// nvm_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_nvm_proxy(input_comment), None);
         assert_eq!(parse_nvm_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_rbenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_rbenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "rbenv_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_rbenv_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_rbenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// rbenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_rbenv_proxy(input_comment), None);
+        assert_eq!(parse_rbenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_gvm_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_gvm_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "gvm_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_gvm_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_gvm_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// gvm_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_gvm_proxy(input_comment), None);
+        assert_eq!(parse_gvm_proxy(""), None);
     }
 }

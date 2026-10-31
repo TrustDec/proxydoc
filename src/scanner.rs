@@ -197,6 +197,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (39393, false, "Volta JavaScript Toolchain Manager Daemon (HTTP/API)"),
     (40404, false, "pyenv Python Toolchain & Version Manager Daemon (HTTP/API)"),
     (41414, false, "nvm (Node Version Manager) Toolchain Manager Daemon (HTTP/API)"),
+    (42424, false, "rbenv Ruby Toolchain & Version Manager Daemon (HTTP/API)"),
+    (43434, false, "gvm (Go Version Manager) Toolchain Manager Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
