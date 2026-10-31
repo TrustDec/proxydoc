@@ -64,6 +64,7 @@ use crate::doctor::{
     get_openp2p_proxy, get_rport_proxy,
     get_mirrord_proxy, get_kt_connect_proxy,
     get_devspace_proxy, get_geph_proxy,
+    get_okteto_proxy, get_skaffold_proxy,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bazel_proxy, unset_bun_proxy,
@@ -124,6 +125,7 @@ use crate::manager::{
     unset_openp2p_proxy, unset_rport_proxy,
     unset_mirrord_proxy, unset_kt_connect_proxy,
     unset_devspace_proxy, unset_geph_proxy,
+    unset_okteto_proxy, unset_skaffold_proxy,
 };
 use crate::scanner;
 
@@ -6315,7 +6317,7 @@ pub async fn run() -> Result<()> {
     if let Some((packetriot_proxy, packetriot_path)) = get_packetriot_proxy() {
         if !verify_proxy_url(&packetriot_proxy).await {
             println!(
-                "  [227/255] Found dead Packetriot proxy (`{}` in {}), cleaning with backup...",
+                "  [227/257] Found dead Packetriot proxy (`{}` in {}), cleaning with backup...",
                 packetriot_proxy.yellow(),
                 packetriot_path.display()
             );
@@ -6332,17 +6334,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [227/255] Packetriot proxy: {}", "Reachable".green());
+            println!("  [227/257] Packetriot proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [227/255] Packetriot proxy: {}", "Clean or not set".dimmed());
+        println!("  [227/257] Packetriot proxy: {}", "Clean or not set".dimmed());
     }
 
     // 228. Clean dead sish HTTP/TCP Localhost Tunnel & Reverse Proxy daemon in config / systemd
     if let Some((sish_proxy, sish_path)) = get_sish_proxy() {
         if !verify_proxy_url(&sish_proxy).await {
             println!(
-                "  [228/255] Found dead sish proxy (`{}` in {}), cleaning with backup...",
+                "  [228/257] Found dead sish proxy (`{}` in {}), cleaning with backup...",
                 sish_proxy.yellow(),
                 sish_path.display()
             );
@@ -6359,17 +6361,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [228/255] sish proxy: {}", "Reachable".green());
+            println!("  [228/257] sish proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [228/255] sish proxy: {}", "Clean or not set".dimmed());
+        println!("  [228/257] sish proxy: {}", "Clean or not set".dimmed());
     }
 
     // 229. Clean dead Pinggy HTTP/TCP Localhost Tunnel & Reverse Proxy daemon in config / systemd
     if let Some((pinggy_proxy, pinggy_path)) = get_pinggy_proxy() {
         if !verify_proxy_url(&pinggy_proxy).await {
             println!(
-                "  [229/255] Found dead Pinggy proxy (`{}` in {}), cleaning with backup...",
+                "  [229/257] Found dead Pinggy proxy (`{}` in {}), cleaning with backup...",
                 pinggy_proxy.yellow(),
                 pinggy_path.display()
             );
@@ -6386,17 +6388,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [229/255] Pinggy proxy: {}", "Reachable".green());
+            println!("  [229/257] Pinggy proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [229/255] Pinggy proxy: {}", "Clean or not set".dimmed());
+        println!("  [229/257] Pinggy proxy: {}", "Clean or not set".dimmed());
     }
 
     // 230. Clean dead Loophole E2EE Localhost Reverse Proxy & Tunnel daemon in config / systemd
     if let Some((loophole_proxy, loophole_path)) = get_loophole_proxy() {
         if !verify_proxy_url(&loophole_proxy).await {
             println!(
-                "  [230/255] Found dead Loophole proxy (`{}` in {}), cleaning with backup...",
+                "  [230/257] Found dead Loophole proxy (`{}` in {}), cleaning with backup...",
                 loophole_proxy.yellow(),
                 loophole_path.display()
             );
@@ -6413,17 +6415,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [230/255] Loophole proxy: {}", "Reachable".green());
+            println!("  [230/257] Loophole proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [230/255] Loophole proxy: {}", "Clean or not set".dimmed());
+        println!("  [230/257] Loophole proxy: {}", "Clean or not set".dimmed());
     }
 
     // 231. Clean dead Tunnelmole Localhost Reverse Proxy & Tunnel daemon in config / systemd
     if let Some((tunnelmole_proxy, tunnelmole_path)) = get_tunnelmole_proxy() {
         if !verify_proxy_url(&tunnelmole_proxy).await {
             println!(
-                "  [231/255] Found dead Tunnelmole proxy (`{}` in {}), cleaning with backup...",
+                "  [231/257] Found dead Tunnelmole proxy (`{}` in {}), cleaning with backup...",
                 tunnelmole_proxy.yellow(),
                 tunnelmole_path.display()
             );
@@ -6440,17 +6442,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [231/255] Tunnelmole proxy: {}", "Reachable".green());
+            println!("  [231/257] Tunnelmole proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [231/255] Tunnelmole proxy: {}", "Clean or not set".dimmed());
+        println!("  [231/257] Tunnelmole proxy: {}", "Clean or not set".dimmed());
     }
 
     // 232. Clean dead Expose Localhost Reverse Proxy & Tunnel daemon in config / systemd
     if let Some((expose_proxy, expose_path)) = get_expose_proxy() {
         if !verify_proxy_url(&expose_proxy).await {
             println!(
-                "  [232/255] Found dead Expose proxy (`{}` in {}), cleaning with backup...",
+                "  [232/257] Found dead Expose proxy (`{}` in {}), cleaning with backup...",
                 expose_proxy.yellow(),
                 expose_path.display()
             );
@@ -6467,17 +6469,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [232/255] Expose proxy: {}", "Reachable".green());
+            println!("  [232/257] Expose proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [232/255] Expose proxy: {}", "Clean or not set".dimmed());
+        println!("  [232/257] Expose proxy: {}", "Clean or not set".dimmed());
     }
 
     // 233. Clean dead Playit Localhost Reverse Proxy & Tunnel daemon in config / systemd
     if let Some((playit_proxy, playit_path)) = get_playit_proxy() {
         if !verify_proxy_url(&playit_proxy).await {
             println!(
-                "  [233/255] Found dead Playit proxy (`{}` in {}), cleaning with backup...",
+                "  [233/257] Found dead Playit proxy (`{}` in {}), cleaning with backup...",
                 playit_proxy.yellow(),
                 playit_path.display()
             );
@@ -6494,17 +6496,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [233/255] Playit proxy: {}", "Reachable".green());
+            println!("  [233/257] Playit proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [233/255] Playit proxy: {}", "Clean or not set".dimmed());
+        println!("  [233/257] Playit proxy: {}", "Clean or not set".dimmed());
     }
 
     // 234. Clean dead pgrok Localhost Reverse Proxy & Tunnel daemon in config / systemd
     if let Some((pgrok_proxy, pgrok_path)) = get_pgrok_proxy() {
         if !verify_proxy_url(&pgrok_proxy).await {
             println!(
-                "  [234/255] Found dead pgrok proxy (`{}` in {}), cleaning with backup...",
+                "  [234/257] Found dead pgrok proxy (`{}` in {}), cleaning with backup...",
                 pgrok_proxy.yellow(),
                 pgrok_path.display()
             );
@@ -6521,17 +6523,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [234/255] pgrok proxy: {}", "Reachable".green());
+            println!("  [234/257] pgrok proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [234/255] pgrok proxy: {}", "Clean or not set".dimmed());
+        println!("  [234/257] pgrok proxy: {}", "Clean or not set".dimmed());
     }
 
     // 235. Clean dead cpolar Localhost Reverse Tunnel & Web UI daemon in config / systemd
     if let Some((cpolar_proxy, cpolar_path)) = get_cpolar_proxy() {
         if !verify_proxy_url(&cpolar_proxy).await {
             println!(
-                "  [235/255] Found dead cpolar proxy (`{}` in {}), cleaning with backup...",
+                "  [235/257] Found dead cpolar proxy (`{}` in {}), cleaning with backup...",
                 cpolar_proxy.yellow(),
                 cpolar_path.display()
             );
@@ -6548,17 +6550,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [235/255] cpolar proxy: {}", "Reachable".green());
+            println!("  [235/257] cpolar proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [235/255] cpolar proxy: {}", "Clean or not set".dimmed());
+        println!("  [235/257] cpolar proxy: {}", "Clean or not set".dimmed());
     }
 
     // 236. Clean dead tmate Terminal Sharing & SSH Reverse Tunnel daemon in config / systemd
     if let Some((tmate_proxy, tmate_path)) = get_tmate_proxy() {
         if !verify_proxy_url(&tmate_proxy).await {
             println!(
-                "  [236/255] Found dead tmate proxy (`{}` in {}), cleaning with backup...",
+                "  [236/257] Found dead tmate proxy (`{}` in {}), cleaning with backup...",
                 tmate_proxy.yellow(),
                 tmate_path.display()
             );
@@ -6575,17 +6577,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [236/255] tmate proxy: {}", "Reachable".green());
+            println!("  [236/257] tmate proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [236/255] tmate proxy: {}", "Clean or not set".dimmed());
+        println!("  [236/257] tmate proxy: {}", "Clean or not set".dimmed());
     }
 
     // 237. Clean dead upterm Terminal Sharing & SSH Reverse Tunnel daemon in config / systemd
     if let Some((upterm_proxy, upterm_path)) = get_upterm_proxy() {
         if !verify_proxy_url(&upterm_proxy).await {
             println!(
-                "  [237/255] Found dead upterm proxy (`{}` in {}), cleaning with backup...",
+                "  [237/257] Found dead upterm proxy (`{}` in {}), cleaning with backup...",
                 upterm_proxy.yellow(),
                 upterm_path.display()
             );
@@ -6602,17 +6604,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [237/255] upterm proxy: {}", "Reachable".green());
+            println!("  [237/257] upterm proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [237/255] upterm proxy: {}", "Clean or not set".dimmed());
+        println!("  [237/257] upterm proxy: {}", "Clean or not set".dimmed());
     }
 
     // 238. Clean dead NATAPP Localhost Reverse Tunnel & Web UI daemon in config / systemd
     if let Some((natapp_proxy, natapp_path)) = get_natapp_proxy() {
         if !verify_proxy_url(&natapp_proxy).await {
             println!(
-                "  [238/255] Found dead NATAPP proxy (`{}` in {}), cleaning with backup...",
+                "  [238/257] Found dead NATAPP proxy (`{}` in {}), cleaning with backup...",
                 natapp_proxy.yellow(),
                 natapp_path.display()
             );
@@ -6629,17 +6631,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [238/255] NATAPP proxy: {}", "Reachable".green());
+            println!("  [238/257] NATAPP proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [238/255] NATAPP proxy: {}", "Clean or not set".dimmed());
+        println!("  [238/257] NATAPP proxy: {}", "Clean or not set".dimmed());
     }
 
     // 239. Clean dead lanproxy Intranet Penetration & Reverse Tunnel Client in config / systemd
     if let Some((lanproxy_proxy, lanproxy_path)) = get_lanproxy_proxy() {
         if !verify_proxy_url(&lanproxy_proxy).await {
             println!(
-                "  [239/255] Found dead lanproxy proxy (`{}` in {}), cleaning with backup...",
+                "  [239/257] Found dead lanproxy proxy (`{}` in {}), cleaning with backup...",
                 lanproxy_proxy.yellow(),
                 lanproxy_path.display()
             );
@@ -6656,17 +6658,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [239/255] lanproxy proxy: {}", "Reachable".green());
+            println!("  [239/257] lanproxy proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [239/255] lanproxy proxy: {}", "Clean or not set".dimmed());
+        println!("  [239/257] lanproxy proxy: {}", "Clean or not set".dimmed());
     }
 
     // 240. Clean dead teleconsole Terminal Sharing & SSH Reverse Tunnel daemon in config / systemd
     if let Some((teleconsole_proxy, teleconsole_path)) = get_teleconsole_proxy() {
         if !verify_proxy_url(&teleconsole_proxy).await {
             println!(
-                "  [240/255] Found dead teleconsole proxy (`{}` in {}), cleaning with backup...",
+                "  [240/257] Found dead teleconsole proxy (`{}` in {}), cleaning with backup...",
                 teleconsole_proxy.yellow(),
                 teleconsole_path.display()
             );
@@ -6683,17 +6685,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [240/255] teleconsole proxy: {}", "Reachable".green());
+            println!("  [240/257] teleconsole proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [240/255] teleconsole proxy: {}", "Clean or not set".dimmed());
+        println!("  [240/257] teleconsole proxy: {}", "Clean or not set".dimmed());
     }
 
     // 241. Clean dead tunnelto Localhost Reverse Proxy & Public Tunnel Client in config / systemd
     if let Some((tunnelto_proxy, tunnelto_path)) = get_tunnelto_proxy() {
         if !verify_proxy_url(&tunnelto_proxy).await {
             println!(
-                "  [241/255] Found dead tunnelto proxy (`{}` in {}), cleaning with backup...",
+                "  [241/257] Found dead tunnelto proxy (`{}` in {}), cleaning with backup...",
                 tunnelto_proxy.yellow(),
                 tunnelto_path.display()
             );
@@ -6710,17 +6712,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [241/255] tunnelto proxy: {}", "Reachable".green());
+            println!("  [241/257] tunnelto proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [241/255] tunnelto proxy: {}", "Clean or not set".dimmed());
+        println!("  [241/257] tunnelto proxy: {}", "Clean or not set".dimmed());
     }
 
     // 242. Clean dead Webhook Relay Localhost Tunnel & Webhook Forwarding Daemon in config / systemd
     if let Some((webhookrelay_proxy, webhookrelay_path)) = get_webhookrelay_proxy() {
         if !verify_proxy_url(&webhookrelay_proxy).await {
             println!(
-                "  [242/255] Found dead Webhook Relay proxy (`{}` in {}), cleaning with backup...",
+                "  [242/257] Found dead Webhook Relay proxy (`{}` in {}), cleaning with backup...",
                 webhookrelay_proxy.yellow(),
                 webhookrelay_path.display()
             );
@@ -6737,10 +6739,10 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [242/255] Webhook Relay proxy: {}", "Reachable".green());
+            println!("  [242/257] Webhook Relay proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [242/255] Webhook Relay proxy: {}", "Clean or not set".dimmed());
+        println!("  [242/257] Webhook Relay proxy: {}", "Clean or not set".dimmed());
     }
 
 
@@ -6748,7 +6750,7 @@ pub async fn run() -> Result<()> {
     if let Some((jprq_proxy, jprq_path)) = get_jprq_proxy() {
         if !verify_proxy_url(&jprq_proxy).await {
             println!(
-                "  [243/255] Found dead jprq proxy (`{}` in {}), cleaning with backup...",
+                "  [243/257] Found dead jprq proxy (`{}` in {}), cleaning with backup...",
                 jprq_proxy.yellow(),
                 jprq_path.display()
             );
@@ -6765,17 +6767,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [243/255] jprq proxy: {}", "Reachable".green());
+            println!("  [243/257] jprq proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [243/255] jprq proxy: {}", "Clean or not set".dimmed());
+        println!("  [243/257] jprq proxy: {}", "Clean or not set".dimmed());
     }
 
     // 244. Clean dead mysocketctl Localhost Reverse Tunnel & Zero-Trust daemon in config / systemd
     if let Some((mysocketctl_proxy, mysocketctl_path)) = get_mysocketctl_proxy() {
         if !verify_proxy_url(&mysocketctl_proxy).await {
             println!(
-                "  [244/255] Found dead mysocketctl proxy (`{}` in {}), cleaning with backup...",
+                "  [244/257] Found dead mysocketctl proxy (`{}` in {}), cleaning with backup...",
                 mysocketctl_proxy.yellow(),
                 mysocketctl_path.display()
             );
@@ -6792,17 +6794,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [244/255] mysocketctl proxy: {}", "Reachable".green());
+            println!("  [244/257] mysocketctl proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [244/255] mysocketctl proxy: {}", "Clean or not set".dimmed());
+        println!("  [244/257] mysocketctl proxy: {}", "Clean or not set".dimmed());
     }
 
     // 245. Clean dead openp2p Localhost Reverse Tunnel & Port Forwarding daemon in config / systemd
     if let Some((openp2p_proxy, openp2p_path)) = get_openp2p_proxy() {
         if !verify_proxy_url(&openp2p_proxy).await {
             println!(
-                "  [245/255] Found dead openp2p proxy (`{}` in {}), cleaning with backup...",
+                "  [245/257] Found dead openp2p proxy (`{}` in {}), cleaning with backup...",
                 openp2p_proxy.yellow(),
                 openp2p_path.display()
             );
@@ -6819,17 +6821,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [245/255] openp2p proxy: {}", "Reachable".green());
+            println!("  [245/257] openp2p proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [245/255] openp2p proxy: {}", "Clean or not set".dimmed());
+        println!("  [245/257] openp2p proxy: {}", "Clean or not set".dimmed());
     }
 
     // 246. Clean dead rport Remote Management & Reverse Tunnel client daemon in config / systemd
     if let Some((rport_proxy, rport_path)) = get_rport_proxy() {
         if !verify_proxy_url(&rport_proxy).await {
             println!(
-                "  [246/255] Found dead rport proxy (`{}` in {}), cleaning with backup...",
+                "  [246/257] Found dead rport proxy (`{}` in {}), cleaning with backup...",
                 rport_proxy.yellow(),
                 rport_path.display()
             );
@@ -6846,17 +6848,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [246/255] rport proxy: {}", "Reachable".green());
+            println!("  [246/257] rport proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [246/255] rport proxy: {}", "Clean or not set".dimmed());
+        println!("  [246/257] rport proxy: {}", "Clean or not set".dimmed());
     }
 
     // 247. Clean dead mirrord Kubernetes Dev Traffic Mirror & Reverse Proxy daemon in config / systemd
     if let Some((mirrord_proxy, mirrord_path)) = get_mirrord_proxy() {
         if !verify_proxy_url(&mirrord_proxy).await {
             println!(
-                "  [247/255] Found dead mirrord proxy (`{}` in {}), cleaning with backup...",
+                "  [247/257] Found dead mirrord proxy (`{}` in {}), cleaning with backup...",
                 mirrord_proxy.yellow(),
                 mirrord_path.display()
             );
@@ -6873,17 +6875,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [247/255] mirrord proxy: {}", "Reachable".green());
+            println!("  [247/257] mirrord proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [247/255] mirrord proxy: {}", "Clean or not set".dimmed());
+        println!("  [247/257] mirrord proxy: {}", "Clean or not set".dimmed());
     }
 
     // 248. Clean dead kt-connect Kubernetes Dev Tunnel & SOCKS5 Proxy daemon in config / systemd
     if let Some((kt_connect_proxy, kt_connect_path)) = get_kt_connect_proxy() {
         if !verify_proxy_url(&kt_connect_proxy).await {
             println!(
-                "  [248/255] Found dead kt-connect proxy (`{}` in {}), cleaning with backup...",
+                "  [248/257] Found dead kt-connect proxy (`{}` in {}), cleaning with backup...",
                 kt_connect_proxy.yellow(),
                 kt_connect_path.display()
             );
@@ -6900,17 +6902,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [248/255] kt-connect proxy: {}", "Reachable".green());
+            println!("  [248/257] kt-connect proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [248/255] kt-connect proxy: {}", "Clean or not set".dimmed());
+        println!("  [248/257] kt-connect proxy: {}", "Clean or not set".dimmed());
     }
 
     // 249. Clean dead DevSpace Cloud-Native Kubernetes Dev Proxy daemon in config / systemd
     if let Some((devspace_proxy, devspace_path)) = get_devspace_proxy() {
         if !verify_proxy_url(&devspace_proxy).await {
             println!(
-                "  [249/255] Found dead DevSpace proxy (`{}` in {}), cleaning with backup...",
+                "  [249/257] Found dead DevSpace proxy (`{}` in {}), cleaning with backup...",
                 devspace_proxy.yellow(),
                 devspace_path.display()
             );
@@ -6927,17 +6929,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [249/255] DevSpace proxy: {}", "Reachable".green());
+            println!("  [249/257] DevSpace proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [249/255] DevSpace proxy: {}", "Clean or not set".dimmed());
+        println!("  [249/257] DevSpace proxy: {}", "Clean or not set".dimmed());
     }
 
     // 250. Clean dead Geph Censorship-Resistant Proxy & Reverse Tunnel daemon in config / systemd
     if let Some((geph_proxy, geph_path)) = get_geph_proxy() {
         if !verify_proxy_url(&geph_proxy).await {
             println!(
-                "  [250/255] Found dead Geph proxy (`{}` in {}), cleaning with backup...",
+                "  [250/257] Found dead Geph proxy (`{}` in {}), cleaning with backup...",
                 geph_proxy.yellow(),
                 geph_path.display()
             );
@@ -6954,13 +6956,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [250/255] Geph proxy: {}", "Reachable".green());
+            println!("  [250/257] Geph proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [250/255] Geph proxy: {}", "Clean or not set".dimmed());
+        println!("  [250/257] Geph proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 251. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 251. Clean dead Okteto Cloud-Native Kubernetes Dev Reverse Tunnel & SSH daemon in config / systemd
+    if let Some((okteto_proxy, okteto_path)) = get_okteto_proxy() {
+        if !verify_proxy_url(&okteto_proxy).await {
+            println!(
+                "  [251/257] Found dead Okteto proxy (`{}` in {}), cleaning with backup...",
+                okteto_proxy.yellow(),
+                okteto_path.display()
+            );
+            if okteto_path.exists() {
+                let backup = okteto_path.with_extension("bak");
+                let _ = std::fs::copy(&okteto_path, &backup);
+            }
+            if let Ok(true) = unset_okteto_proxy() {
+                println!(
+                    "  {} Cleared broken Okteto proxy in {} (backup saved)",
+                    "✔".green(),
+                    okteto_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [251/257] Okteto proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [251/257] Okteto proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 252. Clean dead Skaffold Cloud-Native Kubernetes Dev Port-Forward & Control daemon in config / systemd
+    if let Some((skaffold_proxy, skaffold_path)) = get_skaffold_proxy() {
+        if !verify_proxy_url(&skaffold_proxy).await {
+            println!(
+                "  [252/257] Found dead Skaffold proxy (`{}` in {}), cleaning with backup...",
+                skaffold_proxy.yellow(),
+                skaffold_path.display()
+            );
+            if skaffold_path.exists() {
+                let backup = skaffold_path.with_extension("bak");
+                let _ = std::fs::copy(&skaffold_path, &backup);
+            }
+            if let Ok(true) = unset_skaffold_proxy() {
+                println!(
+                    "  {} Cleared broken Skaffold proxy in {} (backup saved)",
+                    "✔".green(),
+                    skaffold_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [252/257] Skaffold proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [252/257] Skaffold proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 253. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -6974,7 +7030,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [251/255] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [253/257] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -6991,17 +7047,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [251/255] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [253/257] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [251/255] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [253/257] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [251/255] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [253/257] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 252. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 254. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -7015,7 +7071,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [252/255] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [254/257] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -7033,17 +7089,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [252/255] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [254/257] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [252/255] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [254/257] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [252/255] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [254/257] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 253. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 255. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -7057,7 +7113,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [253/255] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [255/257] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -7075,17 +7131,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [253/255] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [255/257] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [253/255] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [255/257] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [253/255] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [255/257] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 254. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 256. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -7104,7 +7160,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [254/255] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [256/257] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -7132,12 +7188,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [254/255] No active local proxy client found. Ensure your proxy software is open."
+            "  [256/257] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 255. Flush local DNS cache
-    println!("  [255/255] Flushing local DNS cache to fix resolution stalls...");
+    // 257. Flush local DNS cache
+    println!("  [257/257] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

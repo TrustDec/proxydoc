@@ -53840,6 +53840,656 @@ pub fn get_geph_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_okteto_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("OKTETO_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("OKTETO_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("OKTETO_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("okteto.yaml"),
+        PathBuf::from("okteto.yml"),
+        PathBuf::from(".okteto.yaml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".okteto").join("config.json"),
+            home.join(".okteto").join("config.yaml"),
+            home.join(".config").join("okteto").join("config.json"),
+            home.join(".okteto.json"),
+            home.join(".config").join("systemd").join("user").join("okteto.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/okteto/config.json"),
+        PathBuf::from("/etc/okteto/config.yaml"),
+        PathBuf::from("/etc/okteto.json"),
+        PathBuf::from("/var/lib/okteto/config.json"),
+        PathBuf::from("/usr/local/etc/okteto/config.json"),
+        PathBuf::from("/opt/homebrew/etc/okteto/config.json"),
+        PathBuf::from("/etc/default/okteto"),
+        PathBuf::from("/etc/sysconfig/okteto"),
+        PathBuf::from("/etc/systemd/system/okteto.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_okteto = PathBuf::from("/etc/okteto");
+    if etc_okteto.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_okteto) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_okteto_config_path() -> Option<PathBuf> {
+    let paths = get_okteto_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_okteto_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_okteto_write_path() -> PathBuf {
+    if let Some(p) = get_okteto_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("OKTETO_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".okteto");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("okteto");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/okteto");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/okteto.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".okteto").join("config.json");
+    }
+    PathBuf::from("/etc/okteto/config.json")
+}
+
+pub fn parse_okteto_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "okteto_proxy",
+                "okteto_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "okteto_proxy"
+                    || k_low == "okteto_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export okteto_proxy=")
+            || lower.starts_with("export okteto_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("okteto_proxy=")
+            || lower.starts_with("okteto_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("okteto_proxy=")
+            || clean.starts_with("okteto_http_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("okteto_proxy:")
+            || clean.starts_with("okteto_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_okteto_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_okteto_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_okteto_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("OKTETO_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OKTETO_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("OKTETO_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OKTETO_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("OKTETO_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:OKTETO_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_skaffold_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("SKAFFOLD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("SKAFFOLD_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("SKAFFOLD_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("skaffold.yaml"),
+        PathBuf::from("skaffold.yml"),
+        PathBuf::from(".skaffold.yaml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".skaffold").join("config"),
+            home.join(".skaffold").join("config.yaml"),
+            home.join(".config").join("skaffold").join("config.yaml"),
+            home.join(".skaffold.json"),
+            home.join(".config").join("systemd").join("user").join("skaffold.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/skaffold/config"),
+        PathBuf::from("/etc/skaffold/config.yaml"),
+        PathBuf::from("/etc/skaffold.json"),
+        PathBuf::from("/var/lib/skaffold/config.yaml"),
+        PathBuf::from("/usr/local/etc/skaffold/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/skaffold/config.yaml"),
+        PathBuf::from("/etc/default/skaffold"),
+        PathBuf::from("/etc/sysconfig/skaffold"),
+        PathBuf::from("/etc/systemd/system/skaffold.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_skaffold = PathBuf::from("/etc/skaffold");
+    if etc_skaffold.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_skaffold) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_skaffold_config_path() -> Option<PathBuf> {
+    let paths = get_skaffold_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_skaffold_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_skaffold_write_path() -> PathBuf {
+    if let Some(p) = get_skaffold_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("SKAFFOLD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".skaffold");
+        if dir.is_dir() {
+            return dir.join("config");
+        }
+        let dir2 = home.join(".config").join("skaffold");
+        if dir2.is_dir() {
+            return dir2.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/skaffold");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/skaffold.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".skaffold").join("config");
+    }
+    PathBuf::from("/etc/skaffold/config.yaml")
+}
+
+pub fn parse_skaffold_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "skaffold_proxy",
+                "skaffold_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "skaffold_proxy"
+                    || k_low == "skaffold_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export skaffold_proxy=")
+            || lower.starts_with("export skaffold_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("skaffold_proxy=")
+            || lower.starts_with("skaffold_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("skaffold_proxy=")
+            || clean.starts_with("skaffold_http_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("skaffold_proxy:")
+            || clean.starts_with("skaffold_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_skaffold_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_skaffold_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_skaffold_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SKAFFOLD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SKAFFOLD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SKAFFOLD_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SKAFFOLD_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SKAFFOLD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SKAFFOLD_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -62741,6 +63391,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Geph Daemon Proxy",
             "~/.config/geph4/geph4.json & /etc/geph4/geph4.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Okteto Cloud-Native Kubernetes Dev Reverse Tunnel & SSH Daemon (~/.okteto/config.json / okteto.yaml / /etc/okteto/config.json / /etc/systemd/system/okteto.service.d/http-proxy.conf)
+    if let Some((okteto_proxy, okteto_path)) = get_okteto_proxy() {
+        let ok = verify_proxy_url(&okteto_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Okteto proxy `{}` in {} is dead! (Okteto cloud-native Kubernetes dev tunnel will fail)",
+                okteto_proxy,
+                okteto_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Okteto Daemon Proxy",
+            format!("{}", okteto_path.display()),
+            okteto_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Okteto fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Okteto Daemon Proxy",
+            "~/.okteto/config.json & /etc/okteto/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Skaffold Cloud-Native Kubernetes Dev Port-Forward & Control Daemon (~/.skaffold/config / skaffold.yaml / /etc/skaffold/config.yaml / /etc/systemd/system/skaffold.service.d/http-proxy.conf)
+    if let Some((skaffold_proxy, skaffold_path)) = get_skaffold_proxy() {
+        let ok = verify_proxy_url(&skaffold_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Skaffold proxy `{}` in {} is dead! (Skaffold cloud-native Kubernetes dev port-forwarding will fail)",
+                skaffold_proxy,
+                skaffold_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Skaffold Daemon Proxy",
+            format!("{}", skaffold_path.display()),
+            skaffold_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Skaffold fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Skaffold Daemon Proxy",
+            "~/.skaffold/config & /etc/skaffold/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -72603,5 +73317,73 @@ Environment="GEPH_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; geph_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_geph_proxy(input_comment), None);
         assert_eq!(parse_geph_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_okteto_proxy() {
+        let okteto_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_okteto_proxy(okteto_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let okteto_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_okteto_proxy(okteto_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="OKTETO_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_okteto_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; okteto_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_okteto_proxy(input_comment), None);
+        assert_eq!(parse_okteto_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_skaffold_proxy() {
+        let skaffold_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_skaffold_proxy(skaffold_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let skaffold_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_skaffold_proxy(skaffold_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="SKAFFOLD_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_skaffold_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; skaffold_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_skaffold_proxy(input_comment), None);
+        assert_eq!(parse_skaffold_proxy(""), None);
     }
 }

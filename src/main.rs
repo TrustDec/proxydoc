@@ -809,7 +809,13 @@ enum Commands {
         /// Also configure Geph censorship-resistant proxy & reverse tunnel client daemon (~/.config/geph4/geph4.json / /etc/geph4/geph4.json / /etc/systemd/system/geph4.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "geph-proxy", visible_alias = "geph-tunnel", visible_alias = "geph4", visible_alias = "geph5")]
         geph: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, and geph proxy
+        /// Also configure Okteto Cloud-Native Kubernetes dev reverse tunnel & SSH daemon (~/.okteto/config.json / okteto.yaml / /etc/okteto/config.json / /etc/systemd/system/okteto.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "okteto-proxy", visible_alias = "okteto-tunnel", visible_alias = "okteto-daemon")]
+        okteto: bool,
+        /// Also configure Skaffold Cloud-Native Kubernetes dev port forward & control daemon (~/.skaffold/config / skaffold.yaml / /etc/skaffold/config.yaml / /etc/systemd/system/skaffold.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "skaffold-proxy", visible_alias = "skaffold-port-forward", visible_alias = "skaffold-daemon")]
+        skaffold: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, and skaffold proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1562,7 +1568,13 @@ enum Commands {
         /// Also unset Geph censorship-resistant proxy & reverse tunnel client daemon (~/.config/geph4/geph4.json / /etc/geph4/geph4.json / /etc/systemd/system/geph4.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "geph-proxy", visible_alias = "geph-tunnel", visible_alias = "geph4", visible_alias = "geph5")]
         geph: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, and geph proxy
+        /// Also unset Okteto Cloud-Native Kubernetes dev reverse tunnel & SSH daemon (~/.okteto/config.json / okteto.yaml / /etc/okteto/config.json / /etc/systemd/system/okteto.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "okteto-proxy", visible_alias = "okteto-tunnel", visible_alias = "okteto-daemon")]
+        okteto: bool,
+        /// Also unset Skaffold Cloud-Native Kubernetes dev port forward & control daemon (~/.skaffold/config / skaffold.yaml / /etc/skaffold/config.yaml / /etc/systemd/system/skaffold.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "skaffold-proxy", visible_alias = "skaffold-port-forward", visible_alias = "skaffold-daemon")]
+        skaffold: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, and skaffold proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1854,6 +1866,8 @@ async fn main() -> Result<()> {
             kt_connect,
             devspace,
             geph,
+            okteto,
+            skaffold,
             all,
             shell,
         }) => {
@@ -2107,6 +2121,8 @@ async fn main() -> Result<()> {
                 kt_connect,
                 devspace,
                 geph,
+                okteto,
+                skaffold,
                 all,
                 shell.as_deref(),
             )
@@ -2361,6 +2377,8 @@ async fn main() -> Result<()> {
             kt_connect,
             devspace,
             geph,
+            okteto,
+            skaffold,
             all,
             shell,
         }) => {
@@ -2613,6 +2631,8 @@ async fn main() -> Result<()> {
                 kt_connect,
                 devspace,
                 geph,
+                okteto,
+                skaffold,
                 all,
                 shell.as_deref(),
             )?;
@@ -10739,6 +10759,98 @@ mod tests {
         match cli.command {
             Some(Commands::Off { geph, .. }) => {
                 assert!(geph);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_okteto() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--okteto"]).unwrap();
+        match cli.command {
+            Some(Commands::On { okteto, .. }) => {
+                assert!(okteto);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--okteto-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { okteto, .. }) => {
+                assert!(okteto);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--okteto-tunnel"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { okteto, .. }) => {
+                assert!(okteto);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--okteto-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { okteto, .. }) => {
+                assert!(okteto);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_okteto() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--okteto"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { okteto, .. }) => {
+                assert!(okteto);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_skaffold() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--skaffold"]).unwrap();
+        match cli.command {
+            Some(Commands::On { skaffold, .. }) => {
+                assert!(skaffold);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--skaffold-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { skaffold, .. }) => {
+                assert!(skaffold);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--skaffold-port-forward"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { skaffold, .. }) => {
+                assert!(skaffold);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--skaffold-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { skaffold, .. }) => {
+                assert!(skaffold);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_skaffold() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--skaffold"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { skaffold, .. }) => {
+                assert!(skaffold);
             }
             _ => panic!("Expected Off command"),
         }
