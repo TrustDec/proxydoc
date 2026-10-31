@@ -173,6 +173,8 @@
   - 智能诊断 **Garden (云原生 Kubernetes 远程环境编排与端口转发客户端 garden) 代理**（`~/.garden/config.yaml`、`garden.yaml`、`/etc/garden/config.yaml`、`/etc/systemd/system/garden.service.d/http-proxy.conf`、`GARDEN_PROXY`），排查 Kubernetes 环境编排、测试流水线与端口映射因死代理中断；
   - 智能诊断 **Daytona (开源开发环境管理器与工作区隧道守护进程 daytona) 代理**（`~/.config/daytona/config.json`、`daytona.yaml`、`/etc/daytona/config.json`、`/etc/systemd/system/daytona.service.d/http-proxy.conf`、`DAYTONA_PROXY`），排查开发环境工作区隧道与端口转发因死代理中断；
   - 智能诊断 **vcluster (虚拟 Kubernetes 集群控制面与同步器代理 vcluster) 代理**（`~/.vcluster/config.yaml`、`vcluster.yaml`、`/etc/vcluster/config.yaml`、`/etc/systemd/system/vcluster.service.d/http-proxy.conf`、`VCLUSTER_PROXY`），排查虚拟 Kubernetes 集群双向同步与控制面 API 因死代理失败；
+  - 智能诊断 **Coder (开源云端开发环境与工作区守护进程 coder) 代理**（`~/.config/coderv2/config.json`、`~/.config/coder/config.json`、`/etc/coder/coder.yaml`、`/etc/systemd/system/coder.service.d/http-proxy.conf`、`CODER_PROXY`），排查远程开发工作区隧道与环境同步因死代理中断；
+  - 智能诊断 **DevPod (纯客户端开源开发环境管理器与容器守护进程 devpod) 代理**（`~/.devpod/config.json`、`~/.config/devpod/config.json`、`/etc/devpod/config.json`、`/etc/systemd/system/devpod.service.d/http-proxy.conf`、`DEVPOD_PROXY`），排查开发容器启动与环境提供商因死代理失败；
   - 智能诊断 **Ollama (本地 AI 模型服务守护进程) 代理**（`/etc/systemd/system/ollama.service.d/http-proxy.conf`、`~/.ollama/environment`、`~/Library/LaunchAgents/com.ollama.ollama.plist`），排查 `ollama pull` 与 `ollama run` 因守护进程死代理超时卡死；
   - 智能诊断 **Alpine Linux apk 包管理器仓库与镜像源**（`/etc/apk/repositories`），排查 `apk add` 与 `apk update` 因死镜像源阻塞；
   - 智能诊断 **Flatpak (Linux 桌面应用包管理器与运行环境) 仓库代理**（`~/.local/share/flatpak/repo/config`、`/var/lib/flatpak/repo/config`、`/etc/flatpak/remotes.d/`），排查 `flatpak install` 与应用更新因死代理失败；

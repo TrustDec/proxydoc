@@ -55802,6 +55802,708 @@ pub fn get_vcluster_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_coder_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("CODER_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("CODER_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("CODER_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("CODER_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("coder.yaml"),
+        PathBuf::from("coder.yml"),
+        PathBuf::from("coder.json"),
+        PathBuf::from(".coder.yaml"),
+        PathBuf::from(".coder.yml"),
+        PathBuf::from(".coder.json"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("coderv2").join("config.json"),
+            home.join(".config").join("coder").join("config.json"),
+            home.join(".config").join("coder").join("config.yaml"),
+            home.join(".coder").join("config.json"),
+            home.join(".coder").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("coder.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/coder.d/coder.yaml"),
+        PathBuf::from("/etc/coder/coder.yaml"),
+        PathBuf::from("/etc/coder/config.yaml"),
+        PathBuf::from("/etc/coder/config.json"),
+        PathBuf::from("/etc/coder.yaml"),
+        PathBuf::from("/etc/coder.json"),
+        PathBuf::from("/var/lib/coder/config.yaml"),
+        PathBuf::from("/var/lib/coder/config.json"),
+        PathBuf::from("/usr/local/etc/coder/config.yaml"),
+        PathBuf::from("/usr/local/etc/coder/config.json"),
+        PathBuf::from("/opt/homebrew/etc/coder/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/coder/config.json"),
+        PathBuf::from("/etc/default/coder"),
+        PathBuf::from("/etc/sysconfig/coder"),
+        PathBuf::from("/etc/systemd/system/coder.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_coder = PathBuf::from("/etc/coder");
+    if etc_coder.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_coder) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    let etc_coder_d = PathBuf::from("/etc/coder.d");
+    if etc_coder_d.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_coder_d) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_coder_config_path() -> Option<PathBuf> {
+    let paths = get_coder_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_coder_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_coder_write_path() -> PathBuf {
+    if let Some(p) = get_coder_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("CODER_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("coderv2");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("coder");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+        let dir3 = home.join(".coder");
+        if dir3.is_dir() {
+            return dir3.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/coder");
+    if etc_dir.is_dir() {
+        return etc_dir.join("coder.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/coder.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("coderv2").join("config.json");
+    }
+    PathBuf::from("/etc/coder/coder.yaml")
+}
+
+pub fn parse_coder_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "coder_proxy",
+                "coder_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+                "workspace_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "coder_proxy"
+                    || k_low == "coder_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                    || k_low == "workspace_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export coder_proxy=")
+            || lower.starts_with("export coder_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("coder_proxy=")
+            || lower.starts_with("coder_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("coder_proxy=")
+            || clean.starts_with("coder_http_proxy=")
+            || clean.starts_with("workspace_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("coder_proxy:")
+            || clean.starts_with("coder_http_proxy:")
+            || clean.starts_with("workspace_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_coder_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_coder_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_coder_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CODER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CODER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CODER_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CODER_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CODER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CODER_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_devpod_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DEVPOD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DEVPOD_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVPOD_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVPOD_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("devpod.yaml"),
+        PathBuf::from("devpod.yml"),
+        PathBuf::from("devpod.json"),
+        PathBuf::from(".devpod.yaml"),
+        PathBuf::from(".devpod.yml"),
+        PathBuf::from(".devpod.json"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".devpod").join("config.json"),
+            home.join(".devpod").join("contexts").join("default.json"),
+            home.join(".config").join("devpod").join("config.json"),
+            home.join(".config").join("devpod").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("devpod.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/devpod/config.yaml"),
+        PathBuf::from("/etc/devpod/config.json"),
+        PathBuf::from("/etc/devpod/devpod.yaml"),
+        PathBuf::from("/etc/devpod.yaml"),
+        PathBuf::from("/etc/devpod.json"),
+        PathBuf::from("/var/lib/devpod/config.json"),
+        PathBuf::from("/usr/local/etc/devpod/config.json"),
+        PathBuf::from("/opt/homebrew/etc/devpod/config.json"),
+        PathBuf::from("/etc/default/devpod"),
+        PathBuf::from("/etc/sysconfig/devpod"),
+        PathBuf::from("/etc/systemd/system/devpod.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_devpod = PathBuf::from("/etc/devpod");
+    if etc_devpod.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_devpod) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_devpod_config_path() -> Option<PathBuf> {
+    let paths = get_devpod_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_devpod_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_devpod_write_path() -> PathBuf {
+    if let Some(p) = get_devpod_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DEVPOD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".devpod");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("devpod");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/devpod");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/devpod.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".devpod").join("config.json");
+    }
+    PathBuf::from("/etc/devpod/config.json")
+}
+
+pub fn parse_devpod_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "devpod_proxy",
+                "devpod_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+                "provider_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devpod_proxy"
+                    || k_low == "devpod_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                    || k_low == "provider_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export devpod_proxy=")
+            || lower.starts_with("export devpod_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("devpod_proxy=")
+            || lower.starts_with("devpod_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("devpod_proxy=")
+            || clean.starts_with("devpod_http_proxy=")
+            || clean.starts_with("provider_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("devpod_proxy:")
+            || clean.starts_with("devpod_http_proxy:")
+            || clean.starts_with("provider_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_devpod_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_devpod_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_devpod_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DEVPOD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVPOD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVPOD_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVPOD_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVPOD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVPOD_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -64895,6 +65597,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "vcluster Daemon Proxy",
             "~/.vcluster/config.yaml & /etc/vcluster/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Coder Open-Source Cloud Development Environment & Workspace Daemon (~/.config/coderv2/config.json / /etc/coder/coder.yaml / /etc/systemd/system/coder.service.d/http-proxy.conf)
+    if let Some((coder_proxy, coder_path)) = get_coder_proxy() {
+        let ok = verify_proxy_url(&coder_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Coder proxy `{}` in {} is dead! (Coder cloud dev environment workspace proxy will fail)",
+                coder_proxy,
+                coder_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Coder Daemon Proxy",
+            format!("{}", coder_path.display()),
+            coder_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Coder fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Coder Daemon Proxy",
+            "~/.config/coderv2/config.json & /etc/coder/coder.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // DevPod Client-Only Dev Environment Manager & Container Daemon (~/.devpod/config.json / /etc/devpod/config.json / /etc/systemd/system/devpod.service.d/http-proxy.conf)
+    if let Some((devpod_proxy, devpod_path)) = get_devpod_proxy() {
+        let ok = verify_proxy_url(&devpod_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "DevPod proxy `{}` in {} is dead! (DevPod dev environment manager & container daemon proxy will fail)",
+                devpod_proxy,
+                devpod_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "DevPod Daemon Proxy",
+            format!("{}", devpod_path.display()),
+            devpod_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (DevPod fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "DevPod Daemon Proxy",
+            "~/.devpod/config.json & /etc/devpod/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -74961,5 +75727,73 @@ Environment="VCLUSTER_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; vcluster_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_vcluster_proxy(input_comment), None);
         assert_eq!(parse_vcluster_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_coder_proxy() {
+        let coder_json = r#"
+{
+  "proxy_url": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_coder_proxy(coder_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let coder_yaml = r#"
+workspace_proxy: "http://10.0.0.2:8888"
+"#;
+        assert_eq!(
+            parse_coder_proxy(coder_yaml),
+            Some("http://10.0.0.2:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="CODER_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_coder_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; coder_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_coder_proxy(input_comment), None);
+        assert_eq!(parse_coder_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_devpod_proxy() {
+        let devpod_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_devpod_proxy(devpod_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let devpod_yaml = r#"
+provider_proxy: "http://10.0.0.3:8888"
+"#;
+        assert_eq!(
+            parse_devpod_proxy(devpod_yaml),
+            Some("http://10.0.0.3:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="DEVPOD_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_devpod_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; devpod_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_devpod_proxy(input_comment), None);
+        assert_eq!(parse_devpod_proxy(""), None);
     }
 }

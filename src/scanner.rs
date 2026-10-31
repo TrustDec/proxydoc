@@ -177,6 +177,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (9777, false, "Garden Cloud-Native Kubernetes Dev Environment & Console Daemon (HTTP/Web)"),
     (3986, false, "Daytona Open-Source Dev Environment Manager & Workspace Tunnel Daemon (HTTP/API)"),
     (8443, false, "vcluster Virtual Kubernetes Cluster Control Plane & Syncer Proxy Daemon (HTTPS/API)"),
+    (7080, false, "Coder Open-Source Cloud Development Environment & Workspace Daemon (HTTP/API)"),
+    (25252, false, "DevPod Client-Only Dev Environment Manager & Container Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

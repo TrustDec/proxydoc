@@ -2502,6 +2502,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Granite-3.1 AI CDN",
         "https://github.com/ibm-granite/granite-3.1-language-models",
     ),
+    (
+        "coder Tunnel CDN",
+        "https://github.com/coder/coder",
+    ),
+    (
+        "devpod Tunnel CDN",
+        "https://github.com/loft-sh/devpod",
+    ),
+    (
+        "InternVL2.5 AI CDN",
+        "https://github.com/OpenGVLab/InternVL",
+    ),
+    (
+        "CosyVoice2 AI CDN",
+        "https://github.com/FunAudioLLM/CosyVoice2",
+    ),
+    (
+        "DeepSeek-R1-Distill AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-R1",
+    ),
+    (
+        "QwQ-32B AI CDN",
+        "https://github.com/QwenLM/QwQ",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4688,6 +4712,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Granite-3.1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "coder Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "devpod Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InternVL2.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CosyVoice2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-R1-Distill AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "QwQ-32B AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
