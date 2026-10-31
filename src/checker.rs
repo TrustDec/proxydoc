@@ -2790,6 +2790,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "OmniHuman AI CDN",
         "https://github.com/bytedance/OmniHuman",
     ),
+    (
+        "goenv Dev CDN",
+        "https://github.com/go-nv/goenv",
+    ),
+    (
+        "phpenv Dev CDN",
+        "https://github.com/phpenv/phpenv",
+    ),
+    (
+        "LLaDA AI CDN",
+        "https://github.com/ML-Bench/LLaDA",
+    ),
+    (
+        "Open-Reasoner-Zero AI CDN",
+        "https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero",
+    ),
+    (
+        "Reasoning-Gym AI CDN",
+        "https://github.com/open-thought/reasoning-gym",
+    ),
+    (
+        "Open-Sora-Plan AI CDN",
+        "https://github.com/PKU-YuanGroup/Open-Sora-Plan",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5192,6 +5216,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "OmniHuman AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "goenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "phpenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LLaDA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-Reasoner-Zero AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Reasoning-Gym AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Open-Sora-Plan AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
