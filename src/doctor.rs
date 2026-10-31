@@ -52444,6 +52444,728 @@ pub fn get_rport_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_mirrord_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MIRRORD_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MIRRORD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MIRRORD_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("MIRRORD_DIR") {
+        let p = PathBuf::from(dir.trim()).join("mirrord.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".mirrord").join("mirrord.json"),
+            home.join(".config").join("mirrord").join("mirrord.json"),
+            home.join(".mirrord.json"),
+            home.join(".mirrord").join("mirrord.yaml"),
+            home.join(".config").join("systemd").join("user").join("mirrord.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/mirrord/mirrord.json"),
+        PathBuf::from("/etc/mirrord/mirrord.yaml"),
+        PathBuf::from("/etc/mirrord.json"),
+        PathBuf::from("/var/lib/mirrord/mirrord.json"),
+        PathBuf::from("/usr/local/etc/mirrord/mirrord.json"),
+        PathBuf::from("/opt/homebrew/etc/mirrord/mirrord.json"),
+        PathBuf::from("/etc/default/mirrord"),
+        PathBuf::from("/etc/sysconfig/mirrord"),
+        PathBuf::from("/etc/systemd/system/mirrord.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/mirrordd.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_mirrord = PathBuf::from("/etc/mirrord");
+    if etc_mirrord.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_mirrord) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_mirrord_config_path() -> Option<PathBuf> {
+    let paths = get_mirrord_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_mirrord_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_mirrord_write_path() -> PathBuf {
+    if let Some(p) = get_mirrord_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MIRRORD_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("MIRRORD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".mirrord");
+        if dir.is_dir() {
+            return dir.join("mirrord.json");
+        }
+        let dir2 = home.join(".config").join("mirrord");
+        if dir2.is_dir() {
+            return dir2.join("mirrord.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/mirrord");
+    if etc_dir.is_dir() {
+        return etc_dir.join("mirrord.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/mirrord.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".mirrord").join("mirrord.json");
+    }
+    PathBuf::from("/etc/mirrord/mirrord.json")
+}
+
+pub fn parse_mirrord_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "mirrord_proxy",
+                "mirrord_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+            if let Some(network) = obj.get("network").and_then(|n| n.as_object()) {
+                for key in ["proxy", "http_proxy", "proxy_url"] {
+                    if let Some(v) = network.get(key) {
+                        if let Some(s) = v.as_str() {
+                            let trim = s.trim();
+                            if !trim.is_empty() {
+                                return Some(if trim.starts_with("http://")
+                                    || trim.starts_with("https://")
+                                    || trim.starts_with("socks")
+                                {
+                                    trim.to_string()
+                                } else {
+                                    format!("http://{}", trim)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(agent) = obj.get("agent").and_then(|a| a.as_object()) {
+                for key in ["proxy", "http_proxy", "proxy_url"] {
+                    if let Some(v) = agent.get(key) {
+                        if let Some(s) = v.as_str() {
+                            let trim = s.trim();
+                            if !trim.is_empty() {
+                                return Some(if trim.starts_with("http://")
+                                    || trim.starts_with("https://")
+                                    || trim.starts_with("socks")
+                                {
+                                    trim.to_string()
+                                } else {
+                                    format!("http://{}", trim)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "mirrord_proxy"
+                    || k_low == "mirrord_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "mirrord_proxy"
+                    || k_low == "mirrord_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "mirrord_proxy"
+                || k_low == "mirrord_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "mirrord_proxy"
+                || k_low == "mirrord_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_mirrord_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_mirrord_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_mirrord_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MIRRORD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MIRRORD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MIRRORD_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MIRRORD_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MIRRORD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MIRRORD_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_kt_connect_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("KTCTL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("KTCONNECT_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("KTCTL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("KTCTL_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".ktctl").join("config.json"),
+            home.join(".ktctl").join("config.yaml"),
+            home.join(".config").join("ktctl").join("config.json"),
+            home.join(".ktctl.json"),
+            home.join(".config").join("systemd").join("user").join("ktctl.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("kt-connect.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/ktctl/config.json"),
+        PathBuf::from("/etc/ktctl/config.yaml"),
+        PathBuf::from("/etc/kt-connect/config.json"),
+        PathBuf::from("/etc/kt-connect/config.yaml"),
+        PathBuf::from("/var/lib/ktctl/config.json"),
+        PathBuf::from("/usr/local/etc/ktctl/config.json"),
+        PathBuf::from("/opt/homebrew/etc/ktctl/config.json"),
+        PathBuf::from("/etc/default/ktctl"),
+        PathBuf::from("/etc/sysconfig/ktctl"),
+        PathBuf::from("/etc/systemd/system/ktctl.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/kt-connect.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    for dir in [PathBuf::from("/etc/ktctl"), PathBuf::from("/etc/kt-connect")] {
+        if dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(ext) = path.extension() {
+                        if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                            paths.push(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_kt_connect_config_path() -> Option<PathBuf> {
+    let paths = get_kt_connect_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_kt_connect_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_kt_connect_write_path() -> PathBuf {
+    if let Some(p) = get_kt_connect_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("KTCTL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".ktctl");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("ktctl");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/ktctl");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/ktctl.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".ktctl").join("config.json");
+    }
+    PathBuf::from("/etc/ktctl/config.json")
+}
+
+pub fn parse_kt_connect_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "ktctl_proxy",
+                "ktctl_http_proxy",
+                "kt_connect_proxy",
+                "ktconnect_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ktctl_proxy"
+                    || k_low == "ktctl_http_proxy"
+                    || k_low == "kt_connect_proxy"
+                    || k_low == "ktconnect_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ktctl_proxy"
+                    || k_low == "ktctl_http_proxy"
+                    || k_low == "kt_connect_proxy"
+                    || k_low == "ktconnect_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "ktctl_proxy"
+                || k_low == "ktctl_http_proxy"
+                || k_low == "kt_connect_proxy"
+                || k_low == "ktconnect_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "ktctl_proxy"
+                || k_low == "ktctl_http_proxy"
+                || k_low == "kt_connect_proxy"
+                || k_low == "ktconnect_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_kt_connect_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_kt_connect_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_kt_connect_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("KTCTL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KTCTL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("KTCTL_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KTCTL_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("KTCTL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KTCTL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("KTCONNECT_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KTCONNECT_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -61217,6 +61939,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "rport Daemon Proxy",
             "~/.rport/rport.conf & /etc/rport/rport.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // mirrord Kubernetes Dev Traffic Mirror & Reverse Proxy Client (~/.mirrord/mirrord.json / /etc/mirrord/mirrord.json / /etc/systemd/system/mirrord.service.d/http-proxy.conf)
+    if let Some((mirrord_proxy, mirrord_path)) = get_mirrord_proxy() {
+        let ok = verify_proxy_url(&mirrord_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "mirrord proxy `{}` in {} is dead! (mirrord Kubernetes dev traffic mirroring and proxying will fail)",
+                mirrord_proxy,
+                mirrord_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "mirrord Daemon Proxy",
+            format!("{}", mirrord_path.display()),
+            mirrord_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (mirrord fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "mirrord Daemon Proxy",
+            "~/.mirrord/mirrord.json & /etc/mirrord/mirrord.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // kt-connect Kubernetes Dev Tunnel & SOCKS5 Proxy Client (~/.ktctl/config.json / /etc/ktctl/config.json / /etc/systemd/system/ktctl.service.d/http-proxy.conf)
+    if let Some((kt_connect_proxy, kt_connect_path)) = get_kt_connect_proxy() {
+        let ok = verify_proxy_url(&kt_connect_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "kt-connect proxy `{}` in {} is dead! (kt-connect Kubernetes dev reverse tunneling and proxying will fail)",
+                kt_connect_proxy,
+                kt_connect_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "kt-connect Daemon Proxy",
+            format!("{}", kt_connect_path.display()),
+            kt_connect_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (kt-connect fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "kt-connect Daemon Proxy",
+            "~/.ktctl/config.json & /etc/ktctl/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -70939,5 +71725,77 @@ Environment="RPORT_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; rport_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_rport_proxy(input_comment), None);
         assert_eq!(parse_rport_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_mirrord_proxy() {
+        let mirrord_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_mirrord_proxy(mirrord_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let mirrord_nested = r#"
+{
+  "network": {
+    "proxy": "http://127.0.0.1:7890"
+  }
+}
+"#;
+        assert_eq!(
+            parse_mirrord_proxy(mirrord_nested),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="MIRRORD_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mirrord_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; mirrord_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_mirrord_proxy(input_comment), None);
+        assert_eq!(parse_mirrord_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_kt_connect_proxy() {
+        let kt_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_kt_connect_proxy(kt_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kt_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_kt_connect_proxy(kt_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="KTCTL_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_kt_connect_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; ktctl_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_kt_connect_proxy(input_comment), None);
+        assert_eq!(parse_kt_connect_proxy(""), None);
     }
 }

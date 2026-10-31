@@ -167,6 +167,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8022, false, "mysocketctl Localhost Reverse Tunnel & Border0 Daemon (SSH/Tunnel)"),
     (27183, false, "openp2p Decentralized P2P Reverse Tunnel & Port Forwarding Daemon (HTTP/RPC)"),
     (9990, false, "rport Remote Management & Reverse Tunnel Client Daemon (HTTP/Tunnel)"),
+    (3030, false, "mirrord Kubernetes Dev Traffic Mirror & Reverse Proxy Daemon (HTTP/Admin)"),
+    (2223, false, "kt-connect Kubernetes Dev Tunnel & SOCKS5 Proxy Daemon (SSH/Tunnel)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
