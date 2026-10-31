@@ -179,6 +179,8 @@
   - 智能诊断 **Dev Container (开源开发容器规范 CLI 与容器守护进程 devcontainer) 代理**（`~/.devcontainer/config.json`、`.devcontainer/devcontainer.json`、`/etc/devcontainer/config.json`、`/etc/systemd/system/devcontainer.service.d/http-proxy.conf`、`DEVCONTAINER_PROXY`），排查开发容器构建、特性安装与工作区容器化因死代理失败；
   - 智能诊断 **Mise (多语言多版本工具管理器与开发环境 CLI mise) 代理**（`~/.config/mise/config.toml`、`~/.config/mise/settings.toml`、`.mise.toml`、`/etc/mise/config.toml`、`/etc/systemd/system/mise.service.d/http-proxy.conf`、`MISE_HTTP_PROXY`），排查多语言运行时下载与开发环境初始化因死代理中断；
   - 智能诊断 **Pixi (超快 Conda 跨平台开发环境与包管理器 pixi) 代理**（`~/.config/pixi/config.toml`、`pixi.toml`、`/etc/pixi/config.toml`、`/etc/systemd/system/pixi.service.d/http-proxy.conf`、`PIXI_HTTP_PROXY`），排查 Conda 包拉取、依赖锁定与隔离环境构建因死代理卡死；
+  - 智能诊断 **Proto (下一代多语言工具链管理器与开发环境 proto) 代理**（`~/.proto/config.toml`、`~/.proto/settings.json`、`.prototools`、`/etc/proto/config.toml`、`/etc/systemd/system/proto.service.d/http-proxy.conf`、`PROTO_HTTP_PROXY`），排查工具链二进制下载、插件获取与工作区执行因死代理失败；
+  - 智能诊断 **Flox (基于 Nix 的轻量虚拟开发环境与包管理器 flox) 代理**（`~/.config/flox/config.toml`、`flox.toml`、`.flox/env/manifest.toml`、`/etc/flox/config.toml`、`/etc/systemd/system/flox.service.d/http-proxy.conf`、`FLOX_HTTP_PROXY`），排查软件包解析、依赖安装与虚拟环境构建因死代理卡死；
   - 智能诊断 **Ollama (本地 AI 模型服务守护进程) 代理**（`/etc/systemd/system/ollama.service.d/http-proxy.conf`、`~/.ollama/environment`、`~/Library/LaunchAgents/com.ollama.ollama.plist`），排查 `ollama pull` 与 `ollama run` 因守护进程死代理超时卡死；
   - 智能诊断 **Alpine Linux apk 包管理器仓库与镜像源**（`/etc/apk/repositories`），排查 `apk add` 与 `apk update` 因死镜像源阻塞；
   - 智能诊断 **Flatpak (Linux 桌面应用包管理器与运行环境) 仓库代理**（`~/.local/share/flatpak/repo/config`、`/var/lib/flatpak/repo/config`、`/etc/flatpak/remotes.d/`），排查 `flatpak install` 与应用更新因死代理失败；

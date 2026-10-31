@@ -2574,6 +2574,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Fish-Speech-1.5 AI CDN",
         "https://github.com/fishaudio/fish-speech",
     ),
+    (
+        "proto Dev CDN",
+        "https://github.com/moonrepo/proto",
+    ),
+    (
+        "flox Dev CDN",
+        "https://github.com/flox/flox",
+    ),
+    (
+        "Sky-T1 AI CDN",
+        "https://github.com/NovaSky-AI/SkyThought",
+    ),
+    (
+        "LLaVA-OneVision AI CDN",
+        "https://github.com/LLaVA-VL/LLaVA-NeXT",
+    ),
+    (
+        "PaliGemma-2 AI CDN",
+        "https://github.com/google-research/big_vision",
+    ),
+    (
+        "InternVideo2.5 AI CDN",
+        "https://github.com/OpenGVLab/InternVideo",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4814,6 +4838,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Fish-Speech-1.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "proto Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "flox Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Sky-T1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LLaVA-OneVision AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "PaliGemma-2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InternVideo2.5 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

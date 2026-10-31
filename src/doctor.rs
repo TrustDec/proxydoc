@@ -57835,6 +57835,686 @@ pub fn get_pixi_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_proto_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PROTO_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PROTO_SETTINGS_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PROTO_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PROTO_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PROTO_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from(".prototools"),
+        PathBuf::from(".prototools.toml"),
+        PathBuf::from(".proto.toml"),
+        PathBuf::from("proto.toml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".proto").join("config.toml"),
+            home.join(".proto").join("settings.json"),
+            home.join(".config").join("proto").join("config.toml"),
+            home.join(".config").join("proto").join("settings.json"),
+            home.join(".config").join("systemd").join("user").join("proto.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/proto/config.toml"),
+        PathBuf::from("/etc/proto/settings.json"),
+        PathBuf::from("/etc/proto.toml"),
+        PathBuf::from("/usr/local/etc/proto/config.toml"),
+        PathBuf::from("/opt/homebrew/etc/proto/config.toml"),
+        PathBuf::from("/etc/default/proto"),
+        PathBuf::from("/etc/sysconfig/proto"),
+        PathBuf::from("/etc/systemd/system/proto.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_proto = PathBuf::from("/etc/proto");
+    if etc_proto.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_proto) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "toml" || ext == "json" || ext == "yaml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_proto_config_path() -> Option<PathBuf> {
+    let paths = get_proto_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_proto_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_proto_write_path() -> PathBuf {
+    if let Some(p) = get_proto_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PROTO_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".proto");
+        if dir.is_dir() {
+            return dir.join("config.toml");
+        }
+        let dir2 = home.join(".config").join("proto");
+        if dir2.is_dir() {
+            return dir2.join("config.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/proto");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/proto.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".proto").join("config.toml");
+    }
+    PathBuf::from("/etc/proto/config.toml")
+}
+
+pub fn parse_proto_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "proto_proxy", "proto_http_proxy"] {
+                if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+                    let trim = s.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "proto_proxy"
+                    || k_low == "proto_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export proto_proxy=")
+            || lower.starts_with("export proto_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("proto_proxy=")
+            || lower.starts_with("proto_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy =")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https-proxy =")
+            || clean.starts_with("https-proxy=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("proto_proxy =")
+            || clean.starts_with("proto_proxy=")
+            || clean.starts_with("proto_http_proxy =")
+            || clean.starts_with("proto_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https-proxy:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proto_proxy:")
+            || clean.starts_with("proto_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_proto_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_proto_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_proto_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PROTO_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PROTO_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PROTO_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PROTO_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PROTO_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PROTO_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PROTO_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PROTO_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_flox_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("FLOX_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("FLOX_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("FLOX_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("FLOX_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("FLOX_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("flox.toml"),
+        PathBuf::from(".flox/env/manifest.toml"),
+        PathBuf::from(".flox/config.toml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("flox").join("config.toml"),
+            home.join(".flox").join("config.toml"),
+            home.join(".config").join("systemd").join("user").join("flox.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/flox/config.toml"),
+        PathBuf::from("/etc/flox.toml"),
+        PathBuf::from("/usr/local/etc/flox/config.toml"),
+        PathBuf::from("/opt/homebrew/etc/flox/config.toml"),
+        PathBuf::from("/etc/default/flox"),
+        PathBuf::from("/etc/sysconfig/flox"),
+        PathBuf::from("/etc/systemd/system/flox.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_flox = PathBuf::from("/etc/flox");
+    if etc_flox.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_flox) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "toml" || ext == "yaml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_flox_config_path() -> Option<PathBuf> {
+    let paths = get_flox_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_flox_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_flox_write_path() -> PathBuf {
+    if let Some(p) = get_flox_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("FLOX_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("flox");
+        if dir.is_dir() {
+            return dir.join("config.toml");
+        }
+        let dir2 = home.join(".flox");
+        if dir2.is_dir() {
+            return dir2.join("config.toml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/flox");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.toml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/flox.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("flox").join("config.toml");
+    }
+    PathBuf::from("/etc/flox/config.toml")
+}
+
+pub fn parse_flox_proxy(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "flox_proxy"
+                    || k_low == "flox_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export flox_proxy=")
+            || lower.starts_with("export flox_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("flox_proxy=")
+            || lower.starts_with("flox_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy =")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http =")
+            || clean.starts_with("http=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https-proxy =")
+            || clean.starts_with("https-proxy=")
+            || clean.starts_with("https =")
+            || clean.starts_with("https=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("flox_proxy =")
+            || clean.starts_with("flox_proxy=")
+            || clean.starts_with("flox_http_proxy =")
+            || clean.starts_with("flox_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https-proxy:")
+            || clean.starts_with("https:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("flox_proxy:")
+            || clean.starts_with("flox_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_flox_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_flox_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_flox_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("FLOX_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FLOX_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("FLOX_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FLOX_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("FLOX_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FLOX_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("FLOX_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FLOX_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -67120,6 +67800,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Pixi Dev Proxy",
             "~/.config/pixi/config.toml & /etc/pixi/config.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Proto Polyglot Toolchain Manager & Dev Environment Daemon (~/.proto/config.toml / ~/.proto/settings.json / /etc/proto/config.toml / /etc/systemd/system/proto.service.d/http-proxy.conf)
+    if let Some((proto_proxy, proto_path)) = get_proto_proxy() {
+        let ok = verify_proxy_url(&proto_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Proto proxy `{}` in {} is dead! (Proto polyglot toolchain & dev environment proxy will fail)",
+                proto_proxy,
+                proto_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Proto Dev Proxy",
+            format!("{}", proto_path.display()),
+            proto_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Proto fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Proto Dev Proxy",
+            "~/.proto/config.toml & /etc/proto/config.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Flox Nix-Based Virtual Dev Environment & Package Manager Daemon (~/.config/flox/config.toml / /etc/flox/config.toml / /etc/systemd/system/flox.service.d/http-proxy.conf)
+    if let Some((flox_proxy, flox_path)) = get_flox_proxy() {
+        let ok = verify_proxy_url(&flox_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Flox proxy `{}` in {} is dead! (Flox nix dev environment & package manager proxy will fail)",
+                flox_proxy,
+                flox_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Flox Dev Proxy",
+            format!("{}", flox_path.display()),
+            flox_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Flox fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Flox Dev Proxy",
+            "~/.config/flox/config.toml & /etc/flox/config.toml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -77390,5 +78134,74 @@ Environment="PIXI_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n; pixi_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_pixi_proxy(input_comment), None);
         assert_eq!(parse_pixi_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_proto_proxy() {
+        let toml_settings = r#"
+[settings]
+http-proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_proto_proxy(toml_settings),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let json_settings = r#"
+{
+  "http-proxy": "http://10.0.0.5:8888"
+}
+"#;
+        assert_eq!(
+            parse_proto_proxy(json_settings),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="PROTO_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_proto_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http-proxy = \"http://127.0.0.1:7890\"\n; proto_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_proto_proxy(input_comment), None);
+        assert_eq!(parse_proto_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_flox_proxy() {
+        let toml_network = r#"
+[network]
+http-proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_flox_proxy(toml_network),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let toml_proxy = r#"
+[proxy]
+http = "http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_flox_proxy(toml_proxy),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="FLOX_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_flox_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http-proxy = \"http://127.0.0.1:7890\"\n; flox_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_flox_proxy(input_comment), None);
+        assert_eq!(parse_flox_proxy(""), None);
     }
 }

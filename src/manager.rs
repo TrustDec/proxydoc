@@ -49763,6 +49763,439 @@ pub fn unset_pixi_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_proto_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http-proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "proto_proxy"
+                    || k_low == "proto_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"PROTO_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export proto_proxy=")
+            || lower.starts_with("export proto_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("proto_proxy=")
+            || lower.starts_with("proto_http_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export PROTO_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "proto_proxy"
+                || k_trim == "proto_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}http-proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http-proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"PROTO_HTTP_PROXY={}\"", proxy_url));
+        } else if content.contains("[settings]") {
+            lines.push(format!("http-proxy = \"{}\"", proxy_url));
+        } else {
+            lines.push("[settings]".to_string());
+            lines.push(format!("http-proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_proto_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "proto_proxy", "proto_http_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "proto_proxy"
+                    || k_low == "proto_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export proto_proxy=")
+            || lower.starts_with("export proto_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("proto_proxy=")
+            || lower.starts_with("proto_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "proto_proxy"
+                || k_trim == "proto_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_proto_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_proto_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_proto_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_proto_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_proto_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_proto_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_flox_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "flox_proxy"
+                    || k_low == "flox_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"FLOX_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export flox_proxy=")
+            || lower.starts_with("export flox_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("flox_proxy=")
+            || lower.starts_with("flox_http_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export FLOX_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http"
+                || k_trim == "https"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "flox_proxy"
+                || k_trim == "flox_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}http-proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}http-proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"FLOX_HTTP_PROXY={}\"", proxy_url));
+        } else if content.contains("[network]") {
+            lines.push(format!("http-proxy = \"{}\"", proxy_url));
+        } else if content.contains("[proxy]") {
+            lines.push(format!("http = \"{}\"", proxy_url));
+        } else {
+            lines.push("[network]".to_string());
+            lines.push(format!("http-proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_flox_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "flox_proxy"
+                    || k_low == "flox_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export flox_proxy=")
+            || lower.starts_with("export flox_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("flox_proxy=")
+            || lower.starts_with("flox_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http"
+                || k_trim == "https"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "all_proxy"
+                || k_trim == "flox_proxy"
+                || k_trim == "flox_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_flox_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_flox_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_flox_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_flox_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_flox_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_flox_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -50025,6 +50458,8 @@ pub async fn turn_on(
     devcontainer: bool,
     mise: bool,
     pixi: bool,
+    proto: bool,
+    flox: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -50286,6 +50721,8 @@ pub async fn turn_on(
     let set_devcontainer = devcontainer || all;
     let set_mise = mise || all;
     let set_pixi = pixi || all;
+    let set_proto = proto || all;
+    let set_flox = flox || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -54087,6 +54524,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_proto {
+        match set_proto_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Proto dev environment ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Proto config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_flox {
+        match set_flox_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Flox dev environment ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Flox config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -54362,6 +54829,8 @@ pub fn turn_off(
     devcontainer: bool,
     mise: bool,
     pixi: bool,
+    proto: bool,
+    flox: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -54623,6 +55092,8 @@ pub fn turn_off(
     let unset_devcontainer = devcontainer || all;
     let unset_mise = mise || all;
     let unset_pixi = pixi || all;
+    let unset_proto = proto || all;
+    let unset_flox = flox || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -56772,6 +57243,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Pixi dev environment proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Pixi proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Pixi dev environment proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_proto {
+        match unset_proto_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Proto dev environment proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Proto proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Proto dev environment proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_flox {
+        match unset_flox_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Flox dev environment proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Flox proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Flox dev environment proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -62792,6 +63279,47 @@ auth: pass123
         let dropin_updated = apply_pixi_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_pixi_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_proto_proxy() {
+        let toml_initial = "[settings]\nauto-clean = true\n";
+        let toml_updated = apply_proto_proxy(toml_initial, "http://10.0.0.128:7890");
+        assert!(toml_updated.contains("http-proxy = \"http://10.0.0.128:7890\""));
+        let (toml_cleaned, toml_removed) = remove_proto_proxy(&toml_updated);
+        assert!(toml_removed);
+        assert!(!toml_cleaned.contains("10.0.0.128"));
+
+        let json_initial = "{\n  \"auto-clean\": true\n}\n";
+        let json_updated = apply_proto_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("10.0.0.128:7890"));
+        let (json_cleaned, json_removed) = remove_proto_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/proto\n";
+        let dropin_updated = apply_proto_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_proto_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_flox_proxy() {
+        let toml_initial = "[network]\n";
+        let toml_updated = apply_flox_proxy(toml_initial, "http://10.0.0.128:7890");
+        assert!(toml_updated.contains("http-proxy = \"http://10.0.0.128:7890\""));
+        let (toml_cleaned, toml_removed) = remove_flox_proxy(&toml_updated);
+        assert!(toml_removed);
+        assert!(!toml_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/flox\n";
+        let dropin_updated = apply_flox_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_flox_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }
