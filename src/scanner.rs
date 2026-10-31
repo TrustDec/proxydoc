@@ -133,6 +133,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (5644, false, "n2n Peer-to-Peer Mesh VPN & Supernode Daemon (UDP/Tunnel)"),
     (9999, false, "Hyprspace Peer-to-Peer Mesh VPN Daemon (libp2p/RPC)"),
     (10000, false, "Fastd Secure Tunneling & Mesh VPN Daemon (Status/Tunnel)"),
+    (9000, false, "EdgeVPN Decentralized Immutable P2P Mesh VPN Daemon (libp2p/API)"),
+    (9443, false, "boringproxy Reverse Proxy & Automated Tunnel Daemon (HTTPS/Tunnel)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

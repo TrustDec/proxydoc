@@ -41964,6 +41964,564 @@ pub fn get_fastd_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_edgevpn_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("EDGEVPN_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("EDGEVPN_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("EDGEVPN_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("edgevpn").join("config.yaml"),
+            home.join(".config").join("edgevpn").join("edgevpn.yaml"),
+            home.join(".config").join("edgevpn").join("config.yml"),
+            home.join(".edgevpn").join("config.yaml"),
+            home.join(".edgevpn").join("edgevpn.yaml"),
+            home.join(".config").join("systemd").join("user").join("edgevpn.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/edgevpn/config.yaml"),
+        PathBuf::from("/etc/edgevpn/edgevpn.yaml"),
+        PathBuf::from("/etc/edgevpn/config.yml"),
+        PathBuf::from("/var/lib/edgevpn/config.yaml"),
+        PathBuf::from("/usr/local/etc/edgevpn/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/edgevpn/config.yaml"),
+        PathBuf::from("/etc/default/edgevpn"),
+        PathBuf::from("/etc/sysconfig/edgevpn"),
+        PathBuf::from("/etc/systemd/system/edgevpn.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_edgevpn = PathBuf::from("/etc/edgevpn");
+    if etc_edgevpn.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_edgevpn) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "json" || ext == "conf" || ext == "toml") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_edgevpn_config_path() -> Option<PathBuf> {
+    let paths = get_edgevpn_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_edgevpn_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_edgevpn_write_path() -> PathBuf {
+    if let Some(p) = get_edgevpn_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("EDGEVPN_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("edgevpn");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/edgevpn");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/edgevpn.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("edgevpn").join("config.yaml");
+    }
+    PathBuf::from("/etc/edgevpn/config.yaml")
+}
+
+pub fn parse_edgevpn_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "edgevpn_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "edgevpn_proxy"
+                    || k_low == "edgevpn_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "edgevpn_proxy"
+                    || k_low == "edgevpn_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("edgevpn_proxy:")
+            || clean.starts_with("edgevpn_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_edgevpn_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_edgevpn_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_edgevpn_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("EDGEVPN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:EDGEVPN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("EDGEVPN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:EDGEVPN_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_boringproxy_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("BORINGPROXY_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("BORINGPROXY_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("BORINGPROXY_DIR") {
+        let p = PathBuf::from(dir.trim()).join("boringproxy.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("boringproxy").join("boringproxy.json"),
+            home.join(".config").join("boringproxy").join("client.json"),
+            home.join(".config").join("boringproxy").join("config.json"),
+            home.join(".boringproxy").join("boringproxy.json"),
+            home.join(".boringproxy").join("client.json"),
+            home.join(".config").join("systemd").join("user").join("boringproxy.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/boringproxy/boringproxy.json"),
+        PathBuf::from("/etc/boringproxy/client.json"),
+        PathBuf::from("/etc/boringproxy/config.json"),
+        PathBuf::from("/var/lib/boringproxy/boringproxy.json"),
+        PathBuf::from("/usr/local/etc/boringproxy/boringproxy.json"),
+        PathBuf::from("/opt/homebrew/etc/boringproxy/boringproxy.json"),
+        PathBuf::from("/etc/default/boringproxy"),
+        PathBuf::from("/etc/sysconfig/boringproxy"),
+        PathBuf::from("/etc/systemd/system/boringproxy.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_boringproxy = PathBuf::from("/etc/boringproxy");
+    if etc_boringproxy.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_boringproxy) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "conf" || ext == "toml") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_boringproxy_config_path() -> Option<PathBuf> {
+    let paths = get_boringproxy_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_boringproxy_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_boringproxy_write_path() -> PathBuf {
+    if let Some(p) = get_boringproxy_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("BORINGPROXY_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("boringproxy");
+        if dir.is_dir() {
+            return dir.join("boringproxy.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/boringproxy");
+    if etc_dir.is_dir() {
+        return etc_dir.join("boringproxy.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/boringproxy.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("boringproxy").join("boringproxy.json");
+    }
+    PathBuf::from("/etc/boringproxy/boringproxy.json")
+}
+
+pub fn parse_boringproxy_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "httpProxy",
+                "socksProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "boringproxy_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "boringproxy_proxy"
+                    || k_low == "boringproxy_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "boringproxy_proxy"
+                    || k_low == "boringproxy_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("boringproxy_proxy:")
+            || clean.starts_with("boringproxy_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_boringproxy_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_boringproxy_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_boringproxy_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("BORINGPROXY_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BORINGPROXY_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BORINGPROXY_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BORINGPROXY_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -49649,6 +50207,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Fastd Daemon Proxy",
             "~/.config/fastd/fastd.conf & /etc/fastd/fastd.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // EdgeVPN Decentralized Immutable P2P Mesh VPN Daemon (~/.config/edgevpn/config.yaml / /etc/edgevpn/config.yaml / /etc/systemd/system/edgevpn.service.d/http-proxy.conf)
+    if let Some((edgevpn_proxy, edgevpn_path)) = get_edgevpn_proxy() {
+        let ok = verify_proxy_url(&edgevpn_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "EdgeVPN proxy `{}` in {} is dead! (EdgeVPN peer-to-peer libp2p mesh discovery and tunneling will fail)",
+                edgevpn_proxy,
+                edgevpn_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "EdgeVPN Daemon Proxy",
+            format!("{}", edgevpn_path.display()),
+            edgevpn_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (EdgeVPN fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "EdgeVPN Daemon Proxy",
+            "~/.config/edgevpn/config.yaml & /etc/edgevpn/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // boringproxy Reverse Proxy & Automated Tunnel Daemon (~/.config/boringproxy/boringproxy.json / /etc/boringproxy/boringproxy.json / /etc/systemd/system/boringproxy.service.d/http-proxy.conf)
+    if let Some((boringproxy_proxy, boringproxy_path)) = get_boringproxy_proxy() {
+        let ok = verify_proxy_url(&boringproxy_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "boringproxy proxy `{}` in {} is dead! (boringproxy reverse tunnels and client connectivity will fail)",
+                boringproxy_proxy,
+                boringproxy_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "boringproxy Daemon Proxy",
+            format!("{}", boringproxy_path.display()),
+            boringproxy_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (boringproxy fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "boringproxy Daemon Proxy",
+            "~/.config/boringproxy/boringproxy.json & /etc/boringproxy/boringproxy.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -58227,5 +58849,55 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy \"http://127.0.0.1:7890\";\n; fastd_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_fastd_proxy(input_comment), None);
         assert_eq!(parse_fastd_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_edgevpn_proxy() {
+        let edgevpn_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_edgevpn_proxy(edgevpn_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_edgevpn_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; edgevpn_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_edgevpn_proxy(input_comment), None);
+        assert_eq!(parse_edgevpn_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_boringproxy_proxy() {
+        let boringproxy_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_boringproxy_proxy(boringproxy_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_boringproxy_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; boringproxy_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_boringproxy_proxy(input_comment), None);
+        assert_eq!(parse_boringproxy_proxy(""), None);
     }
 }

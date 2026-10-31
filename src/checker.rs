@@ -1974,6 +1974,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Megatron-LM AI CDN",
         "https://github.com/NVIDIA/Megatron-LM",
     ),
+    (
+        "EdgeVPN Mesh CDN",
+        "https://github.com/mudler/edgevpn",
+    ),
+    (
+        "boringproxy Tunnel CDN",
+        "https://github.com/boringproxy/boringproxy",
+    ),
+    (
+        "Step-Video-T2V AI CDN",
+        "https://github.com/stepfun-ai/Step-Video-T2V",
+    ),
+    (
+        "GLM-4-Voice AI CDN",
+        "https://github.com/THUDM/GLM-4-Voice",
+    ),
+    (
+        "SkyReels-V1 AI CDN",
+        "https://github.com/SkyworkAI/SkyReels-V1",
+    ),
+    (
+        "Emu3 AI CDN",
+        "https://github.com/baaivision/Emu3",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3764,6 +3788,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Megatron-LM AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "EdgeVPN Mesh CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "boringproxy Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Step-Video-T2V AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GLM-4-Voice AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SkyReels-V1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Emu3 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
