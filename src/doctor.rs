@@ -44235,6 +44235,591 @@ pub fn get_sshuttle_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_psiphon_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("PSIPHON_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("PSIPHON_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("PSIPHON_DIR") {
+        let p = PathBuf::from(dir.trim()).join("psiphon.config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("psiphon").join("psiphon.config"),
+            home.join(".config").join("psiphon").join("config.json"),
+            home.join(".psiphon").join("psiphon.config"),
+            home.join(".psiphon").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("psiphon.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/psiphon/psiphon.config"),
+        PathBuf::from("/etc/psiphon/config.json"),
+        PathBuf::from("/var/lib/psiphon/psiphon.config"),
+        PathBuf::from("/usr/local/etc/psiphon/psiphon.config"),
+        PathBuf::from("/opt/homebrew/etc/psiphon/psiphon.config"),
+        PathBuf::from("/etc/default/psiphon"),
+        PathBuf::from("/etc/sysconfig/psiphon"),
+        PathBuf::from("/etc/systemd/system/psiphon.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_psiphon = PathBuf::from("/etc/psiphon");
+    if etc_psiphon.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_psiphon) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "config" || ext == "json" || ext == "conf" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_psiphon_config_path() -> Option<PathBuf> {
+    let paths = get_psiphon_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_psiphon_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_psiphon_write_path() -> PathBuf {
+    if let Some(p) = get_psiphon_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("PSIPHON_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("PSIPHON_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("psiphon");
+        if dir.is_dir() {
+            return dir.join("psiphon.config");
+        }
+        let dir2 = home.join(".psiphon");
+        if dir2.is_dir() {
+            return dir2.join("psiphon.config");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/psiphon");
+    if etc_dir.is_dir() {
+        return etc_dir.join("psiphon.config");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/psiphon.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("psiphon").join("psiphon.config");
+    }
+    PathBuf::from("/etc/psiphon/psiphon.config")
+}
+
+pub fn parse_psiphon_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "upstream_proxy_url",
+                "upstreamProxyUrl",
+                "upstream_proxy",
+                "upstreamProxy",
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "psiphon_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "psiphon_proxy"
+                    || k_low == "psiphon_http_proxy"
+                    || k_low == "upstream_proxy_url"
+                    || k_low == "upstream_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "psiphon_proxy"
+                    || k_low == "psiphon_http_proxy"
+                    || k_low == "upstream_proxy_url"
+                    || k_low == "upstream_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("upstream_proxy_url:")
+            || clean.starts_with("upstream_proxy_url=")
+            || clean.starts_with("upstream_proxy:")
+            || clean.starts_with("upstream_proxy=")
+            || clean.starts_with("psiphon_proxy:")
+            || clean.starts_with("psiphon_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_psiphon_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_psiphon_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_psiphon_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PSIPHON_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PSIPHON_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PSIPHON_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PSIPHON_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_localtunnel_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("LOCALTUNNEL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("LOCALTUNNEL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("LOCALTUNNEL_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".localtunnelrc"),
+            home.join(".config").join("localtunnel").join("config.json"),
+            home.join(".config").join("localtunnel").join("localtunnel.json"),
+            home.join(".localtunnel").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("localtunnel.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/localtunnel/config.json"),
+        PathBuf::from("/etc/localtunnel/localtunnel.conf"),
+        PathBuf::from("/var/lib/localtunnel/config.json"),
+        PathBuf::from("/usr/local/etc/localtunnel/config.json"),
+        PathBuf::from("/opt/homebrew/etc/localtunnel/config.json"),
+        PathBuf::from("/etc/default/localtunnel"),
+        PathBuf::from("/etc/sysconfig/localtunnel"),
+        PathBuf::from("/etc/systemd/system/localtunnel.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_localtunnel = PathBuf::from("/etc/localtunnel");
+    if etc_localtunnel.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_localtunnel) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "conf" || ext == "rc" || ext == "yaml" || ext == "yml" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_localtunnel_config_path() -> Option<PathBuf> {
+    let paths = get_localtunnel_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_localtunnel_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_localtunnel_write_path() -> PathBuf {
+    if let Some(p) = get_localtunnel_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("LOCALTUNNEL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Ok(file) = std::env::var("LOCALTUNNEL_CONF") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("localtunnel");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".localtunnel");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/localtunnel");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/localtunnel.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".localtunnelrc");
+    }
+    PathBuf::from("/etc/localtunnel/config.json")
+}
+
+pub fn parse_localtunnel_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "localtunnel_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "localtunnel_proxy"
+                    || k_low == "localtunnel_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "localtunnel_proxy"
+                    || k_low == "localtunnel_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("localtunnel_proxy:")
+            || clean.starts_with("localtunnel_proxy=")
+            || clean.starts_with("tunnel_proxy:")
+            || clean.starts_with("tunnel_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_localtunnel_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_localtunnel_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_localtunnel_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("LOCALTUNNEL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LOCALTUNNEL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LOCALTUNNEL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LOCALTUNNEL_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -52176,6 +52761,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Sshuttle Daemon Proxy",
             "~/.config/sshuttle/sshuttle.conf & /etc/sshuttle/sshuttle.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Psiphon Censorship Circumvention Daemon (~/.config/psiphon/psiphon.config / /etc/psiphon/psiphon.config / /etc/systemd/system/psiphon.service.d/http-proxy.conf)
+    if let Some((psiphon_proxy, psiphon_path)) = get_psiphon_proxy() {
+        let ok = verify_proxy_url(&psiphon_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Psiphon proxy `{}` in {} is dead! (Psiphon circumvention and tunnel routing will fail)",
+                psiphon_proxy,
+                psiphon_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Psiphon Daemon Proxy",
+            format!("{}", psiphon_path.display()),
+            psiphon_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Psiphon fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Psiphon Daemon Proxy",
+            "~/.config/psiphon/psiphon.config & /etc/psiphon/psiphon.config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Localtunnel Localhost Reverse Tunnel Daemon (~/.localtunnelrc / ~/.config/localtunnel/config.json / /etc/localtunnel/config.json / /etc/systemd/system/localtunnel.service.d/http-proxy.conf)
+    if let Some((localtunnel_proxy, localtunnel_path)) = get_localtunnel_proxy() {
+        let ok = verify_proxy_url(&localtunnel_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Localtunnel proxy `{}` in {} is dead! (Localtunnel reverse tunnel forwarding will fail)",
+                localtunnel_proxy,
+                localtunnel_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Localtunnel Daemon Proxy",
+            format!("{}", localtunnel_path.display()),
+            localtunnel_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Localtunnel fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Localtunnel Daemon Proxy",
+            "~/.localtunnelrc & /etc/localtunnel/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -61003,5 +61652,75 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; sshuttle_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_sshuttle_proxy(input_comment), None);
         assert_eq!(parse_sshuttle_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_psiphon_proxy() {
+        let psiphon_json = r#"
+{
+  "upstream_proxy_url": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_psiphon_proxy(psiphon_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let psiphon_conf = r#"
+# Psiphon configuration
+upstream_proxy_url = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_psiphon_proxy(psiphon_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_psiphon_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; upstream_proxy_url = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_psiphon_proxy(input_comment), None);
+        assert_eq!(parse_psiphon_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_localtunnel_proxy() {
+        let localtunnel_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_localtunnel_proxy(localtunnel_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let localtunnel_conf = r#"
+# Localtunnel configuration
+localtunnel_proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_localtunnel_proxy(localtunnel_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_localtunnel_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; localtunnel_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_localtunnel_proxy(input_comment), None);
+        assert_eq!(parse_localtunnel_proxy(""), None);
     }
 }

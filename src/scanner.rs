@@ -141,6 +141,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8787, false, "Lantern Censorship Circumvention Proxy Daemon (HTTP)"),
     (51821, false, "TunSafe WireGuard VPN Client Daemon (Control/Tunnel)"),
     (12300, false, "Sshuttle Transparent SSH Proxy Daemon (Forward/Control)"),
+    (8081, false, "Psiphon Censorship Circumvention Daemon (HTTP/Tunnel)"),
+    (3999, false, "Localtunnel Localhost Reverse Tunnel Daemon (Client/Control)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

@@ -2070,6 +2070,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Llama-Mesh AI CDN",
         "https://github.com/BrianPugh/llama-mesh",
     ),
+    (
+        "Psiphon Circumvention CDN",
+        "https://github.com/Psiphon-Labs/psiphon-tunnel-core",
+    ),
+    (
+        "Localtunnel Reverse Proxy CDN",
+        "https://github.com/localtunnel/localtunnel",
+    ),
+    (
+        "LivePortrait AI CDN",
+        "https://github.com/KwaiVGI/LivePortrait",
+    ),
+    (
+        "StoryDiffusion AI CDN",
+        "https://github.com/HVision-NKU/StoryDiffusion",
+    ),
+    (
+        "SWE-bench AI CDN",
+        "https://github.com/princeton-nlp/SWE-bench",
+    ),
+    (
+        "Llama-Omni AI CDN",
+        "https://github.com/ictnlp/Llama-Omni",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3932,6 +3956,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Llama-Mesh AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Psiphon Circumvention CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Localtunnel Reverse Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LivePortrait AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "StoryDiffusion AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SWE-bench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Llama-Omni AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
