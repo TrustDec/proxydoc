@@ -62489,6 +62489,482 @@ pub fn get_gvm_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_nodenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("NODENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("default-packages");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".nodenv").join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".nodenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("nodenv").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("nodenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".nodenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/nodenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/nodenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_vars = PathBuf::from("/etc/nodenv/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_nodenv_config_path() -> Option<PathBuf> {
+    let paths = get_nodenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_nodenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nodenv_write_path() -> PathBuf {
+    if let Some(p) = get_nodenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("NODENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("vars");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let nodenv_dir = home.join(".nodenv");
+        if nodenv_dir.is_dir() {
+            return nodenv_dir.join("vars");
+        }
+        let cfg_dir = home.join(".config").join("nodenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".nodenv").join("vars");
+    }
+    PathBuf::from("/etc/nodenv/vars")
+}
+
+pub fn parse_nodenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "nodenv_proxy", "nodenv_http_proxy", "node_build_http_client"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "nodenv_http_proxy"
+                    || k_low == "nodenv_https_proxy"
+                    || k_low == "nodenv_proxy"
+                    || k_low == "node_build_http_client"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export nodenv_http_proxy=")
+            || lower.starts_with("export nodenv_https_proxy=")
+            || lower.starts_with("export nodenv_proxy=")
+            || lower.starts_with("export node_build_http_client=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("nodenv_http_proxy=")
+            || lower.starts_with("nodenv_https_proxy=")
+            || lower.starts_with("nodenv_proxy=")
+            || lower.starts_with("node_build_http_client=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("nodenv_http_proxy")
+            || clean.starts_with("nodenv_https_proxy")
+            || clean.starts_with("nodenv_proxy")
+            || clean.starts_with("node_build_http_client")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_nodenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_nodenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_nodenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("NODENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NODENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("NODENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:NODENV_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_jenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("JENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".jenv").join("vars");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".jenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("jenv").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("jenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".jenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/jenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/jenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_vars = PathBuf::from("/etc/jenv/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_jenv_config_path() -> Option<PathBuf> {
+    let paths = get_jenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_jenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_jenv_write_path() -> PathBuf {
+    if let Some(p) = get_jenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("JENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("vars");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let jenv_dir = home.join(".jenv");
+        if jenv_dir.is_dir() {
+            return jenv_dir.join("vars");
+        }
+        let cfg_dir = home.join(".config").join("jenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".jenv").join("vars");
+    }
+    PathBuf::from("/etc/jenv/vars")
+}
+
+pub fn parse_jenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "jenv_proxy", "jenv_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "jenv_http_proxy"
+                    || k_low == "jenv_https_proxy"
+                    || k_low == "jenv_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export jenv_http_proxy=")
+            || lower.starts_with("export jenv_https_proxy=")
+            || lower.starts_with("export jenv_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("jenv_http_proxy=")
+            || lower.starts_with("jenv_https_proxy=")
+            || lower.starts_with("jenv_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("jenv_http_proxy")
+            || clean.starts_with("jenv_https_proxy")
+            || clean.starts_with("jenv_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_jenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_jenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_jenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("JENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("JENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JENV_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -63397,6 +63873,54 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
                     "● Reachable Mirror".green().to_string()
                 } else {
                     "▲ UNREACHABLE MIRROR! (gvm install fails)".red().bold().to_string()
+                },
+            ));
+        }
+    }
+
+    // nodenv / Node-Build Mirror
+    if let Ok(val) = std::env::var("NODE_BUILD_MIRROR_URL") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "nodenv mirror variable `NODE_BUILD_MIRROR_URL` points to unreachable mirror `{}`! (nodenv install will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "nodenv Mirror",
+                "NODE_BUILD_MIRROR_URL (node-build mirror)",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR! (nodenv install fails)".red().bold().to_string()
+                },
+            ));
+        }
+    }
+
+    // jenv Source Mirror
+    if let Ok(val) = std::env::var("JENV_SOURCE_MIRROR") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let ok = verify_proxy_url(trim).await;
+            if !ok {
+                root_issues.push(format!(
+                    "jenv mirror variable `JENV_SOURCE_MIRROR` points to unreachable mirror `{}`! (jenv install will fail)",
+                    trim
+                ));
+            }
+            items.push(DiagItem::new(
+                "jenv Mirror",
+                "JENV_SOURCE_MIRROR (Java environment mirror)",
+                trim.to_string(),
+                if ok {
+                    "● Reachable Mirror".green().to_string()
+                } else {
+                    "▲ UNREACHABLE MIRROR! (jenv install fails)".red().bold().to_string()
                 },
             ));
         }
@@ -72406,6 +72930,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "gvm Dev Proxy",
             "~/.gvm/config & ~/.gvm/environments/default",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // nodenv Node.js Toolchain & Version Manager Daemon (~/.nodenv/vars / ~/.nodenv/config / ~/.config/nodenv/config / /etc/nodenv/config / /etc/systemd/system/nodenv.service.d/http-proxy.conf)
+    if let Some((nodenv_proxy, nodenv_path)) = get_nodenv_proxy() {
+        let ok = verify_proxy_url(&nodenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "nodenv proxy `{}` in {} is dead! (nodenv toolchain proxy will fail)",
+                nodenv_proxy,
+                nodenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "nodenv Dev Proxy",
+            format!("{}", nodenv_path.display()),
+            nodenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (nodenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "nodenv Dev Proxy",
+            "~/.nodenv/vars & ~/.config/nodenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // jenv (Java Environment Manager) Daemon (~/.jenv/vars / ~/.jenv/config / ~/.config/jenv/config / /etc/jenv/config / /etc/systemd/system/jenv.service.d/http-proxy.conf)
+    if let Some((jenv_proxy, jenv_path)) = get_jenv_proxy() {
+        let ok = verify_proxy_url(&jenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "jenv proxy `{}` in {} is dead! (jenv toolchain proxy will fail)",
+                jenv_proxy,
+                jenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "jenv Dev Proxy",
+            format!("{}", jenv_path.display()),
+            jenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (jenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "jenv Dev Proxy",
+            "~/.jenv/vars & ~/.config/jenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -83129,5 +83717,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// gvm_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_gvm_proxy(input_comment), None);
         assert_eq!(parse_gvm_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_nodenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_nodenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "nodenv_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_nodenv_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_nodenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// nodenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_nodenv_proxy(input_comment), None);
+        assert_eq!(parse_nodenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_jenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_jenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "jenv_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_jenv_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_jenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// jenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_jenv_proxy(input_comment), None);
+        assert_eq!(parse_jenv_proxy(""), None);
     }
 }
