@@ -71,6 +71,7 @@ use crate::doctor::{
     get_gitpod_proxy, get_devcontainer_proxy,
     get_mise_proxy, get_pixi_proxy,
     get_proto_proxy, get_flox_proxy,
+    get_devenv_proxy, get_devbox_proxy,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bazel_proxy, unset_bun_proxy,
@@ -138,6 +139,7 @@ use crate::manager::{
     unset_gitpod_proxy, unset_devcontainer_proxy,
     unset_mise_proxy, unset_pixi_proxy,
     unset_proto_proxy, unset_flox_proxy,
+    unset_devenv_proxy, unset_devbox_proxy,
 };
 use crate::scanner;
 
@@ -7221,7 +7223,7 @@ pub async fn run() -> Result<()> {
     if let Some((devcontainer_proxy, devcontainer_path)) = get_devcontainer_proxy() {
         if !verify_proxy_url(&devcontainer_proxy).await {
             println!(
-                "  [260/269] Found dead Dev Container proxy (`{}` in {}), cleaning with backup...",
+                "  [260/271] Found dead Dev Container proxy (`{}` in {}), cleaning with backup...",
                 devcontainer_proxy.yellow(),
                 devcontainer_path.display()
             );
@@ -7238,17 +7240,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [260/269] Dev Container proxy: {}", "Reachable".green());
+            println!("  [260/271] Dev Container proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [260/269] Dev Container proxy: {}", "Clean or not set".dimmed());
+        println!("  [260/271] Dev Container proxy: {}", "Clean or not set".dimmed());
     }
 
     // 261. Clean dead Mise-en-place Polyglot Dev Environment Manager in config / systemd
     if let Some((mise_proxy, mise_path)) = get_mise_proxy() {
         if !verify_proxy_url(&mise_proxy).await {
             println!(
-                "  [261/269] Found dead Mise dev environment proxy (`{}` in {}), cleaning with backup...",
+                "  [261/271] Found dead Mise dev environment proxy (`{}` in {}), cleaning with backup...",
                 mise_proxy.yellow(),
                 mise_path.display()
             );
@@ -7265,17 +7267,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [261/269] Mise dev environment proxy: {}", "Reachable".green());
+            println!("  [261/271] Mise dev environment proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [261/269] Mise dev environment proxy: {}", "Clean or not set".dimmed());
+        println!("  [261/271] Mise dev environment proxy: {}", "Clean or not set".dimmed());
     }
 
     // 262. Clean dead Pixi Fast Conda Dev Environment & Package Manager in config / systemd
     if let Some((pixi_proxy, pixi_path)) = get_pixi_proxy() {
         if !verify_proxy_url(&pixi_proxy).await {
             println!(
-                "  [262/269] Found dead Pixi dev environment proxy (`{}` in {}), cleaning with backup...",
+                "  [262/271] Found dead Pixi dev environment proxy (`{}` in {}), cleaning with backup...",
                 pixi_proxy.yellow(),
                 pixi_path.display()
             );
@@ -7292,17 +7294,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [262/269] Pixi dev environment proxy: {}", "Reachable".green());
+            println!("  [262/271] Pixi dev environment proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [262/269] Pixi dev environment proxy: {}", "Clean or not set".dimmed());
+        println!("  [262/271] Pixi dev environment proxy: {}", "Clean or not set".dimmed());
     }
 
     // 263. Clean dead Proto Polyglot Toolchain Manager & Dev Environment in config / systemd
     if let Some((proto_proxy, proto_path)) = get_proto_proxy() {
         if !verify_proxy_url(&proto_proxy).await {
             println!(
-                "  [263/269] Found dead Proto dev environment proxy (`{}` in {}), cleaning with backup...",
+                "  [263/271] Found dead Proto dev environment proxy (`{}` in {}), cleaning with backup...",
                 proto_proxy.yellow(),
                 proto_path.display()
             );
@@ -7319,17 +7321,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [263/269] Proto dev environment proxy: {}", "Reachable".green());
+            println!("  [263/271] Proto dev environment proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [263/269] Proto dev environment proxy: {}", "Clean or not set".dimmed());
+        println!("  [263/271] Proto dev environment proxy: {}", "Clean or not set".dimmed());
     }
 
     // 264. Clean dead Flox Nix-Based Virtual Dev Environment & Package Manager in config / systemd
     if let Some((flox_proxy, flox_path)) = get_flox_proxy() {
         if !verify_proxy_url(&flox_proxy).await {
             println!(
-                "  [264/269] Found dead Flox dev environment proxy (`{}` in {}), cleaning with backup...",
+                "  [264/271] Found dead Flox dev environment proxy (`{}` in {}), cleaning with backup...",
                 flox_proxy.yellow(),
                 flox_path.display()
             );
@@ -7346,13 +7348,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [264/269] Flox dev environment proxy: {}", "Reachable".green());
+            println!("  [264/271] Flox dev environment proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [264/269] Flox dev environment proxy: {}", "Clean or not set".dimmed());
+        println!("  [264/271] Flox dev environment proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 265. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 265. Clean dead Devenv Fast Nix-Based Dev Environment Manager in config / systemd
+    if let Some((devenv_proxy, devenv_path)) = get_devenv_proxy() {
+        if !verify_proxy_url(&devenv_proxy).await {
+            println!(
+                "  [265/271] Found dead Devenv dev environment proxy (`{}` in {}), cleaning with backup...",
+                devenv_proxy.yellow(),
+                devenv_path.display()
+            );
+            if devenv_path.exists() {
+                let backup = devenv_path.with_extension("bak");
+                let _ = std::fs::copy(&devenv_path, &backup);
+            }
+            if let Ok(true) = unset_devenv_proxy() {
+                println!(
+                    "  {} Cleared broken Devenv dev environment proxy in {} (backup saved)",
+                    "✔".green(),
+                    devenv_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [265/271] Devenv dev environment proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [265/271] Devenv dev environment proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 266. Clean dead Devbox Portable Nix-Based Isolated Dev Environment in config / systemd
+    if let Some((devbox_proxy, devbox_path)) = get_devbox_proxy() {
+        if !verify_proxy_url(&devbox_proxy).await {
+            println!(
+                "  [266/271] Found dead Devbox dev environment proxy (`{}` in {}), cleaning with backup...",
+                devbox_proxy.yellow(),
+                devbox_path.display()
+            );
+            if devbox_path.exists() {
+                let backup = devbox_path.with_extension("bak");
+                let _ = std::fs::copy(&devbox_path, &backup);
+            }
+            if let Ok(true) = unset_devbox_proxy() {
+                println!(
+                    "  {} Cleared broken Devbox dev environment proxy in {} (backup saved)",
+                    "✔".green(),
+                    devbox_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [266/271] Devbox dev environment proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [266/271] Devbox dev environment proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 267. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -7366,7 +7422,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [265/269] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [267/271] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -7383,17 +7439,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [265/269] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [267/271] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [265/269] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [267/271] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [265/269] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [267/271] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 266. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 268. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -7407,7 +7463,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [266/269] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [268/271] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -7425,17 +7481,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [266/269] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [268/271] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [266/269] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [268/271] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [266/269] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [268/271] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 267. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 269. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -7449,7 +7505,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [267/269] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [269/271] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -7467,17 +7523,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [267/269] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [269/271] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [267/269] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [269/271] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [267/269] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [269/271] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 268. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 270. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -7496,7 +7552,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [268/269] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [270/271] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -7524,12 +7580,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [268/269] No active local proxy client found. Ensure your proxy software is open."
+            "  [270/271] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 269. Flush local DNS cache
-    println!("  [269/269] Flushing local DNS cache to fix resolution stalls...");
+    // 271. Flush local DNS cache
+    println!("  [271/271] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

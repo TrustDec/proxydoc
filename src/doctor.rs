@@ -58515,6 +58515,717 @@ pub fn get_flox_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_devenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DEVENV_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("devenv.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVENV_DIR") {
+        let p = PathBuf::from(dir.trim()).join("devenv.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("devenv.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("devenv.yaml"),
+        PathBuf::from("devenv.local.nix"),
+        PathBuf::from(".devenv/devenv.json"),
+        PathBuf::from("devenv.json"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("devenv").join("config.json"),
+            home.join(".config").join("devenv").join("devenv.toml"),
+            home.join(".config").join("devenv").join("config.toml"),
+            home.join(".devenv").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("devenv.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/devenv/config.json"),
+        PathBuf::from("/etc/devenv/config.toml"),
+        PathBuf::from("/etc/devenv.toml"),
+        PathBuf::from("/usr/local/etc/devenv/config.json"),
+        PathBuf::from("/opt/homebrew/etc/devenv/config.json"),
+        PathBuf::from("/etc/default/devenv"),
+        PathBuf::from("/etc/sysconfig/devenv"),
+        PathBuf::from("/etc/systemd/system/devenv.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_devenv = PathBuf::from("/etc/devenv");
+    if etc_devenv.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_devenv) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "toml" || ext == "json" || ext == "yaml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_devenv_config_path() -> Option<PathBuf> {
+    let paths = get_devenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_devenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_devenv_write_path() -> PathBuf {
+    if let Some(p) = get_devenv_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DEVENV_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("devenv");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".devenv");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/devenv");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/devenv.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("devenv").join("config.json");
+    }
+    PathBuf::from("/etc/devenv/config.json")
+}
+
+pub fn parse_devenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "devenv_proxy", "devenv_http_proxy"] {
+                if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+                    let trim = s.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devenv_proxy"
+                    || k_low == "devenv_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export devenv_proxy=")
+            || lower.starts_with("export devenv_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("devenv_proxy=")
+            || lower.starts_with("devenv_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy =")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http =")
+            || clean.starts_with("http=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https-proxy =")
+            || clean.starts_with("https-proxy=")
+            || clean.starts_with("https =")
+            || clean.starts_with("https=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("devenv_proxy =")
+            || clean.starts_with("devenv_proxy=")
+            || clean.starts_with("devenv_http_proxy =")
+            || clean.starts_with("devenv_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https-proxy:")
+            || clean.starts_with("https:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("devenv_proxy:")
+            || clean.starts_with("devenv_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_devenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_devenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_devenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DEVENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVENV_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVENV_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVENV_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVENV_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVENV_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_devbox_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DEVBOX_CONFIG_FILE") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVBOX_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVBOX_DIR") {
+        let p = PathBuf::from(dir.trim()).join("devbox.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("devbox.json"),
+        PathBuf::from(".devbox/config.json"),
+        PathBuf::from("devbox.toml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("devbox").join("config.json"),
+            home.join(".config").join("devbox").join("config.toml"),
+            home.join(".devbox").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("devbox.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/devbox/config.json"),
+        PathBuf::from("/etc/devbox/config.toml"),
+        PathBuf::from("/etc/devbox.json"),
+        PathBuf::from("/usr/local/etc/devbox/config.json"),
+        PathBuf::from("/opt/homebrew/etc/devbox/config.json"),
+        PathBuf::from("/etc/default/devbox"),
+        PathBuf::from("/etc/sysconfig/devbox"),
+        PathBuf::from("/etc/systemd/system/devbox.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_devbox = PathBuf::from("/etc/devbox");
+    if etc_devbox.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_devbox) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "toml" || ext == "json" || ext == "yaml" || ext == "conf") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_devbox_config_path() -> Option<PathBuf> {
+    let paths = get_devbox_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_devbox_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_devbox_write_path() -> PathBuf {
+    if let Some(p) = get_devbox_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DEVBOX_CONFIG_FILE") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("devbox");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".devbox");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/devbox");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/devbox.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("devbox").join("config.json");
+    }
+    PathBuf::from("/etc/devbox/config.json")
+}
+
+pub fn parse_devbox_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in ["http-proxy", "https-proxy", "http_proxy", "https_proxy", "proxy", "proxy_url", "devbox_proxy", "devbox_http_proxy"] {
+                if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+                    let trim = s.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+            if let Some(env_obj) = obj.get("env").and_then(|v| v.as_object()) {
+                for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+                    if let Some(s) = env_obj.get(key).and_then(|v| v.as_str()) {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devbox_proxy"
+                    || k_low == "devbox_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export devbox_proxy=")
+            || lower.starts_with("export devbox_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("devbox_proxy=")
+            || lower.starts_with("devbox_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("http_proxy =")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy =")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("http =")
+            || clean.starts_with("http=")
+            || clean.starts_with("https_proxy =")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("https-proxy =")
+            || clean.starts_with("https-proxy=")
+            || clean.starts_with("https =")
+            || clean.starts_with("https=")
+            || clean.starts_with("all_proxy =")
+            || clean.starts_with("all_proxy=")
+            || clean.starts_with("proxy =")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url =")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("devbox_proxy =")
+            || clean.starts_with("devbox_proxy=")
+            || clean.starts_with("devbox_http_proxy =")
+            || clean.starts_with("devbox_http_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("http:")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https-proxy:")
+            || clean.starts_with("https:")
+            || clean.starts_with("all_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("devbox_proxy:")
+            || clean.starts_with("devbox_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_devbox_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_devbox_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_devbox_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DEVBOX_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVBOX_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVBOX_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVBOX_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVBOX_ALL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVBOX_ALL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVBOX_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVBOX_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -67864,6 +68575,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Flox Dev Proxy",
             "~/.config/flox/config.toml & /etc/flox/config.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Devenv Fast Nix-Based Dev Environment Manager Daemon (~/.config/devenv/config.json / ~/.config/devenv/devenv.toml / /etc/devenv/config.json / /etc/systemd/system/devenv.service.d/http-proxy.conf)
+    if let Some((devenv_proxy, devenv_path)) = get_devenv_proxy() {
+        let ok = verify_proxy_url(&devenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Devenv proxy `{}` in {} is dead! (Devenv fast nix dev environment proxy will fail)",
+                devenv_proxy,
+                devenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Devenv Dev Proxy",
+            format!("{}", devenv_path.display()),
+            devenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Devenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Devenv Dev Proxy",
+            "~/.config/devenv/config.json & /etc/devenv/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Devbox Portable Nix-Based Isolated Dev Environment Daemon (~/.config/devbox/config.json / devbox.json / /etc/devbox/config.json / /etc/systemd/system/devbox.service.d/http-proxy.conf)
+    if let Some((devbox_proxy, devbox_path)) = get_devbox_proxy() {
+        let ok = verify_proxy_url(&devbox_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Devbox proxy `{}` in {} is dead! (Devbox portable nix dev environment proxy will fail)",
+                devbox_proxy,
+                devbox_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Devbox Dev Proxy",
+            format!("{}", devbox_path.display()),
+            devbox_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Devbox fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Devbox Dev Proxy",
+            "~/.config/devbox/config.json & /etc/devbox/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -78203,5 +78978,78 @@ Environment="FLOX_PROXY=http://127.0.0.1:7890"
         let input_comment = "# http-proxy = \"http://127.0.0.1:7890\"\n; flox_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_flox_proxy(input_comment), None);
         assert_eq!(parse_flox_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_devenv_proxy() {
+        let json_config = r#"
+{
+  "http-proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_devenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let toml_config = r#"
+[network]
+http-proxy = "http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_devenv_proxy(toml_config),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="DEVENV_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_devenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http-proxy = \"http://127.0.0.1:7890\"\n; devenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_devenv_proxy(input_comment), None);
+        assert_eq!(parse_devenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_devbox_proxy() {
+        let json_config = r#"
+{
+  "http-proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_devbox_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let json_env = r#"
+{
+  "env": {
+    "HTTP_PROXY": "http://10.0.0.5:8888"
+  }
+}
+"#;
+        assert_eq!(
+            parse_devbox_proxy(json_env),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="DEVBOX_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_devbox_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http-proxy = \"http://127.0.0.1:7890\"\n; devbox_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_devbox_proxy(input_comment), None);
+        assert_eq!(parse_devbox_proxy(""), None);
     }
 }

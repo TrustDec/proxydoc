@@ -181,6 +181,8 @@
   - 智能诊断 **Pixi (超快 Conda 跨平台开发环境与包管理器 pixi) 代理**（`~/.config/pixi/config.toml`、`pixi.toml`、`/etc/pixi/config.toml`、`/etc/systemd/system/pixi.service.d/http-proxy.conf`、`PIXI_HTTP_PROXY`），排查 Conda 包拉取、依赖锁定与隔离环境构建因死代理卡死；
   - 智能诊断 **Proto (下一代多语言工具链管理器与开发环境 proto) 代理**（`~/.proto/config.toml`、`~/.proto/settings.json`、`.prototools`、`/etc/proto/config.toml`、`/etc/systemd/system/proto.service.d/http-proxy.conf`、`PROTO_HTTP_PROXY`），排查工具链二进制下载、插件获取与工作区执行因死代理失败；
   - 智能诊断 **Flox (基于 Nix 的轻量虚拟开发环境与包管理器 flox) 代理**（`~/.config/flox/config.toml`、`flox.toml`、`.flox/env/manifest.toml`、`/etc/flox/config.toml`、`/etc/systemd/system/flox.service.d/http-proxy.conf`、`FLOX_HTTP_PROXY`），排查软件包解析、依赖安装与虚拟环境构建因死代理卡死；
+  - 智能诊断 **Devenv (超快声明式 Nix 开发环境管理器 devenv) 代理**（`~/.config/devenv/config.json`、`~/.config/devenv/devenv.toml`、`devenv.yaml`、`/etc/devenv/config.json`、`/etc/systemd/system/devenv.service.d/http-proxy.conf`、`DEVENV_HTTP_PROXY`），排查声明式开发环境初始化、容器构建与依赖下载因死代理卡死；
+  - 智能诊断 **Devbox (便携式 Nix 隔离开发环境 devbox) 代理**（`~/.config/devbox/config.json`、`devbox.json`、`/etc/devbox/config.json`、`/etc/systemd/system/devbox.service.d/http-proxy.conf`、`DEVBOX_HTTP_PROXY`），排查 Nix 软件包解析、Flake 依赖同步与容器化环境构建因死代理失败；
   - 智能诊断 **Ollama (本地 AI 模型服务守护进程) 代理**（`/etc/systemd/system/ollama.service.d/http-proxy.conf`、`~/.ollama/environment`、`~/Library/LaunchAgents/com.ollama.ollama.plist`），排查 `ollama pull` 与 `ollama run` 因守护进程死代理超时卡死；
   - 智能诊断 **Alpine Linux apk 包管理器仓库与镜像源**（`/etc/apk/repositories`），排查 `apk add` 与 `apk update` 因死镜像源阻塞；
   - 智能诊断 **Flatpak (Linux 桌面应用包管理器与运行环境) 仓库代理**（`~/.local/share/flatpak/repo/config`、`/var/lib/flatpak/repo/config`、`/etc/flatpak/remotes.d/`），排查 `flatpak install` 与应用更新因死代理失败；

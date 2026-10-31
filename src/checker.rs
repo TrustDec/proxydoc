@@ -2598,6 +2598,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "InternVideo2.5 AI CDN",
         "https://github.com/OpenGVLab/InternVideo",
     ),
+    (
+        "devenv Dev CDN",
+        "https://github.com/cachix/devenv",
+    ),
+    (
+        "devbox Dev CDN",
+        "https://github.com/jetify-com/devbox",
+    ),
+    (
+        "R1-V AI CDN",
+        "https://github.com/Deep-Agent/R1-V",
+    ),
+    (
+        "Logic-RL AI CDN",
+        "https://github.com/Unakar/Logic-RL",
+    ),
+    (
+        "Fast-DetectGPT AI CDN",
+        "https://github.com/BaDAOI-Lab/Fast-DetectGPT",
+    ),
+    (
+        "SimpleRL-Reason AI CDN",
+        "https://github.com/hkust-nlp/simple-rl-reason",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4856,6 +4880,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "InternVideo2.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "devenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "devbox Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "R1-V AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Logic-RL AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Fast-DetectGPT AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SimpleRL-Reason AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

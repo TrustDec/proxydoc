@@ -185,6 +185,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (24242, false, "Pixi Fast Conda Dev Environment & Package Manager Daemon (HTTP/API)"),
     (26262, false, "Proto Polyglot Toolchain Manager & Dev Environment Daemon (HTTP/API)"),
     (28282, false, "Flox Nix-Based Virtual Dev Environment & Package Manager Daemon (HTTP/API)"),
+    (29292, false, "Devenv Fast Nix-Based Dev Environment Manager Daemon (HTTP/API)"),
+    (27272, false, "Devbox Portable Nix-Based Isolated Dev Environment Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
