@@ -179,6 +179,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (8443, false, "vcluster Virtual Kubernetes Cluster Control Plane & Syncer Proxy Daemon (HTTPS/API)"),
     (7080, false, "Coder Open-Source Cloud Development Environment & Workspace Daemon (HTTP/API)"),
     (25252, false, "DevPod Client-Only Dev Environment Manager & Container Daemon (HTTP/API)"),
+    (22999, false, "Gitpod Cloud Development Environment & Workspace Daemon (HTTP/API)"),
+    (23300, false, "Dev Container CLI & Workspace Container Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

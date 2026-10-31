@@ -48907,6 +48907,460 @@ pub fn unset_devpod_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_gitpod_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "proxy_url".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "gitpod_proxy"
+                    || k_low == "gitpod_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "workspace_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"GITPOD_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export gitpod_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("gitpod_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export GITPOD_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "gitpod_proxy"
+                || k_trim == "gitpod_http_proxy"
+                || k_trim == "workspace_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}proxy_url = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}proxy_url: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"GITPOD_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy_url: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_gitpod_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "gitpod_proxy",
+                "gitpod-proxy",
+                "gitpod_http_proxy",
+                "tunnel_proxy",
+                "workspace_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "gitpod_proxy"
+                    || k_low == "gitpod_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                    || k_low == "workspace_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export gitpod_proxy=")
+            || lower.starts_with("export gitpod_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("gitpod_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "gitpod_proxy"
+                || k_trim == "gitpod_http_proxy"
+                || k_trim == "workspace_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_gitpod_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_gitpod_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_gitpod_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_gitpod_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_gitpod_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_gitpod_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_devcontainer_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devcontainer_proxy"
+                    || k_low == "devcontainer_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "container_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"DEVCONTAINER_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export devcontainer_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("devcontainer_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export DEVCONTAINER_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "devcontainer_proxy"
+                || k_trim == "devcontainer_http_proxy"
+                || k_trim == "container_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"DEVCONTAINER_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_devcontainer_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "devcontainer_proxy",
+                "devcontainer-proxy",
+                "devcontainer_http_proxy",
+                "tunnel_proxy",
+                "container_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devcontainer_proxy"
+                    || k_low == "devcontainer_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                    || k_low == "container_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export devcontainer_proxy=")
+            || lower.starts_with("export devcontainer_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("devcontainer_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "devcontainer_proxy"
+                || k_trim == "devcontainer_http_proxy"
+                || k_trim == "container_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_devcontainer_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_devcontainer_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_devcontainer_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_devcontainer_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_devcontainer_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_devcontainer_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -49165,6 +49619,8 @@ pub async fn turn_on(
     vcluster: bool,
     coder: bool,
     devpod: bool,
+    gitpod: bool,
+    devcontainer: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -49422,6 +49878,8 @@ pub async fn turn_on(
     let set_vcluster = vcluster || all;
     let set_coder = coder || all;
     let set_devpod = devpod || all;
+    let set_gitpod = gitpod || all;
+    let set_devcontainer = devcontainer || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -53163,6 +53621,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_gitpod {
+        match set_gitpod_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Gitpod daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Gitpod daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_devcontainer {
+        match set_devcontainer_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Dev Container daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Dev Container daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -53434,6 +53922,8 @@ pub fn turn_off(
     vcluster: bool,
     coder: bool,
     devpod: bool,
+    gitpod: bool,
+    devcontainer: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -53691,6 +54181,8 @@ pub fn turn_off(
     let unset_vcluster = vcluster || all;
     let unset_coder = coder || all;
     let unset_devpod = devpod || all;
+    let unset_gitpod = gitpod || all;
+    let unset_devcontainer = devcontainer || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -55808,6 +56300,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ DevPod daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ DevPod proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset DevPod daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_gitpod {
+        match unset_gitpod_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Gitpod daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Gitpod proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Gitpod daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_devcontainer {
+        match unset_devcontainer_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Dev Container daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Dev Container proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Dev Container daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -61758,5 +62266,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("DEVPOD_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_gitpod_proxy() {
+        let json_initial = "{\n  \"proxy_url\": \"http://127.0.0.1:1080\"\n}\n";
+        let json_updated = apply_gitpod_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("10.0.0.128:7890"));
+        let (json_cleaned, json_removed) = remove_gitpod_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_gitpod_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"GITPOD_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_gitpod_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("GITPOD_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_devcontainer_proxy() {
+        let json_initial = "{\n  \"proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let json_updated = apply_devcontainer_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("10.0.0.128:7890"));
+        let (json_cleaned, json_removed) = remove_devcontainer_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_devcontainer_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"DEVCONTAINER_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_devcontainer_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("DEVCONTAINER_PROXY="));
     }
 }

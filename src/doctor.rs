@@ -56504,6 +56504,697 @@ pub fn get_devpod_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_gitpod_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("GITPOD_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("GITPOD_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("GITPOD_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("GITPOD_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("GITPOD_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("gitpod.yaml"),
+        PathBuf::from("gitpod.yml"),
+        PathBuf::from("gitpod.json"),
+        PathBuf::from(".gitpod.yaml"),
+        PathBuf::from(".gitpod.yml"),
+        PathBuf::from(".gitpod.json"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("gitpod").join("config.json"),
+            home.join(".gitpod").join("config.json"),
+            home.join(".config").join("gitpod").join("config.yaml"),
+            home.join(".gitpod").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("gitpod.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/gitpod/config.yaml"),
+        PathBuf::from("/etc/gitpod/config.json"),
+        PathBuf::from("/etc/gitpod/gitpod.yaml"),
+        PathBuf::from("/etc/gitpod.yaml"),
+        PathBuf::from("/etc/gitpod.json"),
+        PathBuf::from("/var/lib/gitpod/config.json"),
+        PathBuf::from("/usr/local/etc/gitpod/config.json"),
+        PathBuf::from("/opt/homebrew/etc/gitpod/config.json"),
+        PathBuf::from("/etc/default/gitpod"),
+        PathBuf::from("/etc/sysconfig/gitpod"),
+        PathBuf::from("/etc/systemd/system/gitpod.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_gitpod = PathBuf::from("/etc/gitpod");
+    if etc_gitpod.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_gitpod) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_gitpod_config_path() -> Option<PathBuf> {
+    let paths = get_gitpod_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_gitpod_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_gitpod_write_path() -> PathBuf {
+    if let Some(p) = get_gitpod_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("GITPOD_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("gitpod");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".gitpod");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/gitpod");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/gitpod.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("gitpod").join("config.json");
+    }
+    PathBuf::from("/etc/gitpod/config.json")
+}
+
+pub fn parse_gitpod_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "gitpod_proxy",
+                "gitpod_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+                "workspace_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "gitpod_proxy"
+                    || k_low == "gitpod_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                    || k_low == "workspace_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export gitpod_proxy=")
+            || lower.starts_with("export gitpod_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("gitpod_proxy=")
+            || lower.starts_with("gitpod_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("gitpod_proxy=")
+            || clean.starts_with("gitpod_http_proxy=")
+            || clean.starts_with("workspace_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("gitpod_proxy:")
+            || clean.starts_with("gitpod_http_proxy:")
+            || clean.starts_with("workspace_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_gitpod_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_gitpod_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_gitpod_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GITPOD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GITPOD_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GITPOD_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GITPOD_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GITPOD_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GITPOD_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_devcontainer_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DEVCONTAINER_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DEVCONTAINER_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVCONTAINER_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVCONTAINER_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DEVCONTAINER_HOME") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from(".devcontainer/devcontainer.json"),
+        PathBuf::from(".devcontainer.json"),
+        PathBuf::from("devcontainer.json"),
+        PathBuf::from(".devcontainer/config.json"),
+        PathBuf::from(".devcontainer/devcontainer.yaml"),
+        PathBuf::from(".devcontainer/devcontainer.yml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".devcontainer").join("config.json"),
+            home.join(".config").join("devcontainer").join("config.json"),
+            home.join(".devcontainer").join("devcontainer.json"),
+            home.join(".config").join("devcontainer").join("devcontainer.json"),
+            home.join(".config").join("systemd").join("user").join("devcontainer.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/devcontainer/config.json"),
+        PathBuf::from("/etc/devcontainer/devcontainer.json"),
+        PathBuf::from("/etc/devcontainer/config.yaml"),
+        PathBuf::from("/etc/devcontainer.json"),
+        PathBuf::from("/var/lib/devcontainer/config.json"),
+        PathBuf::from("/usr/local/etc/devcontainer/config.json"),
+        PathBuf::from("/opt/homebrew/etc/devcontainer/config.json"),
+        PathBuf::from("/etc/default/devcontainer"),
+        PathBuf::from("/etc/sysconfig/devcontainer"),
+        PathBuf::from("/etc/systemd/system/devcontainer.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_devcontainer = PathBuf::from("/etc/devcontainer");
+    if etc_devcontainer.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_devcontainer) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_devcontainer_config_path() -> Option<PathBuf> {
+    let paths = get_devcontainer_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_devcontainer_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_devcontainer_write_path() -> PathBuf {
+    if let Some(p) = get_devcontainer_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DEVCONTAINER_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".devcontainer");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("devcontainer");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/devcontainer");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/devcontainer.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".devcontainer").join("config.json");
+    }
+    PathBuf::from("/etc/devcontainer/config.json")
+}
+
+pub fn parse_devcontainer_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "devcontainer_proxy",
+                "devcontainer_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+                "container_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "devcontainer_proxy"
+                    || k_low == "devcontainer_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                    || k_low == "container_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export devcontainer_proxy=")
+            || lower.starts_with("export devcontainer_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("devcontainer_proxy=")
+            || lower.starts_with("devcontainer_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("devcontainer_proxy=")
+            || clean.starts_with("devcontainer_http_proxy=")
+            || clean.starts_with("container_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("devcontainer_proxy:")
+            || clean.starts_with("devcontainer_http_proxy:")
+            || clean.starts_with("container_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_devcontainer_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_devcontainer_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_devcontainer_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DEVCONTAINER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVCONTAINER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVCONTAINER_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVCONTAINER_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DEVCONTAINER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DEVCONTAINER_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -65661,6 +66352,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "DevPod Daemon Proxy",
             "~/.devpod/config.json & /etc/devpod/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Gitpod Automated Cloud Development Environment & Workspace Tunnel Daemon (~/.config/gitpod/config.json / /etc/gitpod/config.yaml / /etc/systemd/system/gitpod.service.d/http-proxy.conf)
+    if let Some((gitpod_proxy, gitpod_path)) = get_gitpod_proxy() {
+        let ok = verify_proxy_url(&gitpod_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Gitpod proxy `{}` in {} is dead! (Gitpod cloud dev environment workspace proxy will fail)",
+                gitpod_proxy,
+                gitpod_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Gitpod Daemon Proxy",
+            format!("{}", gitpod_path.display()),
+            gitpod_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Gitpod fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Gitpod Daemon Proxy",
+            "~/.config/gitpod/config.json & /etc/gitpod/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Dev Container Open-Source Spec CLI & Workspace Container Daemon (~/.devcontainer/config.json / /etc/devcontainer/config.json / /etc/systemd/system/devcontainer.service.d/http-proxy.conf)
+    if let Some((devcontainer_proxy, devcontainer_path)) = get_devcontainer_proxy() {
+        let ok = verify_proxy_url(&devcontainer_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Dev Container proxy `{}` in {} is dead! (Dev Container CLI & workspace container daemon proxy will fail)",
+                devcontainer_proxy,
+                devcontainer_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Dev Container Proxy",
+            format!("{}", devcontainer_path.display()),
+            devcontainer_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Dev Container fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Dev Container Proxy",
+            "~/.devcontainer/config.json & /etc/devcontainer/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -75795,5 +76550,73 @@ Environment="DEVPOD_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; devpod_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_devpod_proxy(input_comment), None);
         assert_eq!(parse_devpod_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_gitpod_proxy() {
+        let gitpod_json = r#"
+{
+  "proxy_url": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_gitpod_proxy(gitpod_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let gitpod_yaml = r#"
+workspace_proxy: "http://10.0.0.4:8888"
+"#;
+        assert_eq!(
+            parse_gitpod_proxy(gitpod_yaml),
+            Some("http://10.0.0.4:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="GITPOD_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_gitpod_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; gitpod_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_gitpod_proxy(input_comment), None);
+        assert_eq!(parse_gitpod_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_devcontainer_proxy() {
+        let devcontainer_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_devcontainer_proxy(devcontainer_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let devcontainer_yaml = r#"
+container_proxy: "http://10.0.0.5:8888"
+"#;
+        assert_eq!(
+            parse_devcontainer_proxy(devcontainer_yaml),
+            Some("http://10.0.0.5:8888".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="DEVCONTAINER_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_devcontainer_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; devcontainer_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_devcontainer_proxy(input_comment), None);
+        assert_eq!(parse_devcontainer_proxy(""), None);
     }
 }

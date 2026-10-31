@@ -833,7 +833,13 @@ enum Commands {
         /// Also configure DevPod Client-Only Dev Environment Manager & Container Daemon (~/.devpod/config.json / /etc/devpod/config.json / /etc/systemd/system/devpod.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "devpod-proxy", visible_alias = "devpod-dev", visible_alias = "devpod-daemon", visible_alias = "devpod-cde")]
         devpod: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, and devpod proxy
+        /// Also configure Gitpod Automated Cloud Development Environment & Workspace Tunnel Daemon (~/.config/gitpod/config.json / /etc/gitpod/config.yaml / /etc/systemd/system/gitpod.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "gitpod-proxy", visible_alias = "gitpod-dev", visible_alias = "gitpod-daemon", visible_alias = "gitpod-cde")]
+        gitpod: bool,
+        /// Also configure Dev Container Open-Source Spec CLI & Workspace Container Daemon (~/.devcontainer/config.json / /etc/devcontainer/config.json / /etc/systemd/system/devcontainer.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "devcontainer-proxy", visible_alias = "devcontainer-cli", visible_alias = "devcontainer-daemon", visible_alias = "devcontainer-cde")]
+        devcontainer: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, and devcontainer proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1610,7 +1616,13 @@ enum Commands {
         /// Also unset DevPod Client-Only Dev Environment Manager & Container Daemon (~/.devpod/config.json / /etc/devpod/config.json / /etc/systemd/system/devpod.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "devpod-proxy", visible_alias = "devpod-dev", visible_alias = "devpod-daemon", visible_alias = "devpod-cde")]
         devpod: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, and devpod proxy
+        /// Also unset Gitpod Automated Cloud Development Environment & Workspace Tunnel Daemon (~/.config/gitpod/config.json / /etc/gitpod/config.yaml / /etc/systemd/system/gitpod.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "gitpod-proxy", visible_alias = "gitpod-dev", visible_alias = "gitpod-daemon", visible_alias = "gitpod-cde")]
+        gitpod: bool,
+        /// Also unset Dev Container Open-Source Spec CLI & Workspace Container Daemon (~/.devcontainer/config.json / /etc/devcontainer/config.json / /etc/systemd/system/devcontainer.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "devcontainer-proxy", visible_alias = "devcontainer-cli", visible_alias = "devcontainer-daemon", visible_alias = "devcontainer-cde")]
+        devcontainer: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, and devcontainer proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1910,6 +1922,8 @@ async fn main() -> Result<()> {
             vcluster,
             coder,
             devpod,
+            gitpod,
+            devcontainer,
             all,
             shell,
         }) => {
@@ -2171,6 +2185,8 @@ async fn main() -> Result<()> {
                 vcluster,
                 coder,
                 devpod,
+                gitpod,
+                devcontainer,
                 all,
                 shell.as_deref(),
             )
@@ -2433,6 +2449,8 @@ async fn main() -> Result<()> {
             vcluster,
             coder,
             devpod,
+            gitpod,
+            devcontainer,
             all,
             shell,
         }) => {
@@ -2693,6 +2711,8 @@ async fn main() -> Result<()> {
                 vcluster,
                 coder,
                 devpod,
+                gitpod,
+                devcontainer,
                 all,
                 shell.as_deref(),
             )?;
@@ -11203,6 +11223,114 @@ mod tests {
         match cli.command {
             Some(Commands::Off { devpod, .. }) => {
                 assert!(devpod);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_gitpod() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--gitpod"]).unwrap();
+        match cli.command {
+            Some(Commands::On { gitpod, .. }) => {
+                assert!(gitpod);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--gitpod-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { gitpod, .. }) => {
+                assert!(gitpod);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--gitpod-dev"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { gitpod, .. }) => {
+                assert!(gitpod);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--gitpod-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { gitpod, .. }) => {
+                assert!(gitpod);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--gitpod-cde"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { gitpod, .. }) => {
+                assert!(gitpod);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_gitpod() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--gitpod"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { gitpod, .. }) => {
+                assert!(gitpod);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_devcontainer() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--devcontainer"]).unwrap();
+        match cli.command {
+            Some(Commands::On { devcontainer, .. }) => {
+                assert!(devcontainer);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--devcontainer-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { devcontainer, .. }) => {
+                assert!(devcontainer);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--devcontainer-cli"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { devcontainer, .. }) => {
+                assert!(devcontainer);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--devcontainer-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { devcontainer, .. }) => {
+                assert!(devcontainer);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--devcontainer-cde"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { devcontainer, .. }) => {
+                assert!(devcontainer);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_devcontainer() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--devcontainer"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { devcontainer, .. }) => {
+                assert!(devcontainer);
             }
             _ => panic!("Expected Off command"),
         }
