@@ -39007,6 +39007,432 @@ pub fn unset_boringproxy_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_ghostunnel_proxy(content: &str, proxy_url: &str) -> String {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("connect-proxy".to_string(), serde_json::Value::String(proxy_url.to_string()));
+            return serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n";
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("connect-proxy = \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ghostunnel_proxy"
+                    || k_low == "ghostunnel_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "connect_proxy"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"GHOSTUNNEL_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("ghostunnel_proxy=")
+            || lower.starts_with("connect_proxy=")
+            || lower.starts_with("connect-proxy=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(format!("HTTP_PROXY=\"{}\"", proxy_url));
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("ghostunnel_proxy:")
+            || clean.starts_with("ghostunnel_proxy=")
+            || clean.starts_with("connect-proxy:")
+            || clean.starts_with("connect-proxy=")
+            || clean.starts_with("connect_proxy:")
+            || clean.starts_with("connect_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_ghostunnel_proxy(content: &str) -> (String, bool) {
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            let mut removed = false;
+            for key in [
+                "proxy",
+                "proxy_url",
+                "connect-proxy",
+                "connect_proxy",
+                "httpProxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "ghostunnel_proxy",
+                "socks5_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| content.to_string()) + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ghostunnel_proxy"
+                    || k_low == "ghostunnel_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "connect_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ghostunnel_proxy"
+                    || k_low == "ghostunnel_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "connect_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("ghostunnel_proxy=")
+            || lower.starts_with("connect_proxy=")
+            || lower.starts_with("connect-proxy=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("ghostunnel_proxy:")
+            || clean.starts_with("ghostunnel_proxy=")
+            || clean.starts_with("connect-proxy:")
+            || clean.starts_with("connect-proxy=")
+            || clean.starts_with("connect_proxy:")
+            || clean.starts_with("connect_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_ghostunnel_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_ghostunnel_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_ghostunnel_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_ghostunnel_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_ghostunnel_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_ghostunnel_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_freelan_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    let directive = format!("server.http_proxy_url = \"{}\"", proxy_url);
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "freelan_proxy"
+                    || k_low == "freelan_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "server_http_proxy_url"
+                    || k_low == "proxy_url"
+                {
+                    if !replaced {
+                        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                        lines.push(format!("Environment=\"FREELAN_PROXY={}\"", proxy_url));
+                        replaced = true;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("freelan_proxy=")
+            || lower.starts_with("server.http_proxy_url=")
+            || lower.starts_with("proxy=")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("server.http_proxy_url=")
+            || clean.starts_with("server.http_proxy_url:")
+            || clean.starts_with("server.proxy=")
+            || clean.starts_with("server.proxy:")
+            || clean.starts_with("freelan_proxy:")
+            || clean.starts_with("freelan_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+        {
+            if !replaced {
+                lines.push(directive.clone());
+                replaced = true;
+            }
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced {
+        lines.push(directive);
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_freelan_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "freelan_proxy"
+                    || k_low == "freelan_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "server_http_proxy_url"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, _)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "freelan_proxy"
+                    || k_low == "freelan_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("freelan_proxy=")
+            || lower.starts_with("server.http_proxy_url=")
+            || lower.starts_with("proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("server.http_proxy_url=")
+            || clean.starts_with("server.http_proxy_url:")
+            || clean.starts_with("server.proxy=")
+            || clean.starts_with("server.proxy:")
+            || clean.starts_with("freelan_proxy:")
+            || clean.starts_with("freelan_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_freelan_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_freelan_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_freelan_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_freelan_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_freelan_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_freelan_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -39221,6 +39647,8 @@ pub async fn turn_on(
     fastd: bool,
     edgevpn: bool,
     boringproxy: bool,
+    ghostunnel: bool,
+    freelan: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -39434,6 +39862,8 @@ pub async fn turn_on(
     let set_fastd = fastd || all;
     let set_edgevpn = edgevpn || all;
     let set_boringproxy = boringproxy || all;
+    let set_ghostunnel = ghostunnel || all;
+    let set_freelan = freelan || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -42515,6 +42945,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_ghostunnel {
+        match set_ghostunnel_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Ghostunnel daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Ghostunnel daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_freelan {
+        match set_freelan_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ FreeLAN daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update FreeLAN daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -42742,6 +43202,8 @@ pub fn turn_off(
     fastd: bool,
     edgevpn: bool,
     boringproxy: bool,
+    ghostunnel: bool,
+    freelan: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -42955,6 +43417,8 @@ pub fn turn_off(
     let unset_fastd = fastd || all;
     let unset_edgevpn = edgevpn || all;
     let unset_boringproxy = boringproxy || all;
+    let unset_ghostunnel = ghostunnel || all;
+    let unset_freelan = freelan || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -44720,6 +45184,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ boringproxy daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ boringproxy proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset boringproxy daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_ghostunnel {
+        match unset_ghostunnel_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Ghostunnel daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Ghostunnel proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Ghostunnel daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_freelan {
+        match unset_freelan_proxy() {
+            Ok(true) => eprintln!("{}", "✔ FreeLAN daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ FreeLAN proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset FreeLAN daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -49834,5 +50314,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("BORINGPROXY_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_ghostunnel_proxy() {
+        let ghostunnel_initial = "connect-proxy = \"http://127.0.0.1:1080\"\n";
+        let ghostunnel_updated = apply_ghostunnel_proxy(ghostunnel_initial, "http://10.0.0.128:7890");
+        assert!(ghostunnel_updated.contains("http://10.0.0.128:7890"));
+        let (ghostunnel_cleaned, ghostunnel_removed) = remove_ghostunnel_proxy(&ghostunnel_updated);
+        assert!(ghostunnel_removed);
+        assert!(!ghostunnel_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_ghostunnel_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"GHOSTUNNEL_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_ghostunnel_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("GHOSTUNNEL_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_freelan_proxy() {
+        let freelan_initial = "server.http_proxy_url = \"http://127.0.0.1:1080\"\n";
+        let freelan_updated = apply_freelan_proxy(freelan_initial, "http://10.0.0.128:7890");
+        assert!(freelan_updated.contains("http://10.0.0.128:7890"));
+        let (freelan_cleaned, freelan_removed) = remove_freelan_proxy(&freelan_updated);
+        assert!(freelan_removed);
+        assert!(!freelan_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_freelan_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"FREELAN_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_freelan_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("FREELAN_PROXY="));
     }
 }

@@ -46,6 +46,7 @@ use crate::doctor::{
     get_zrok_proxy, get_n2n_proxy,
     get_hyprspace_proxy, get_fastd_proxy,
     get_edgevpn_proxy, get_boringproxy_proxy,
+    get_ghostunnel_proxy, get_freelan_proxy,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bazel_proxy, unset_bun_proxy,
@@ -88,6 +89,7 @@ use crate::manager::{
     unset_zrok_proxy, unset_n2n_proxy,
     unset_hyprspace_proxy, unset_fastd_proxy,
     unset_edgevpn_proxy, unset_boringproxy_proxy,
+    unset_ghostunnel_proxy, unset_freelan_proxy,
 };
 use crate::scanner;
 
@@ -5739,7 +5741,7 @@ pub async fn run() -> Result<()> {
     if let Some((defguard_proxy, defguard_path)) = get_defguard_proxy() {
         if !verify_proxy_url(&defguard_proxy).await {
             println!(
-                "  [207/219] Found dead Defguard proxy (`{}` in {}), cleaning with backup...",
+                "  [207/221] Found dead Defguard proxy (`{}` in {}), cleaning with backup...",
                 defguard_proxy.yellow(),
                 defguard_path.display()
             );
@@ -5756,17 +5758,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [207/219] Defguard proxy: {}", "Reachable".green());
+            println!("  [207/221] Defguard proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [207/219] Defguard proxy: {}", "Clean or not set".dimmed());
+        println!("  [207/221] Defguard proxy: {}", "Clean or not set".dimmed());
     }
 
     // 208. Clean dead Inlets Cloud-Native Tunnel & Reverse Proxy daemon in config / systemd
     if let Some((inlets_proxy, inlets_path)) = get_inlets_proxy() {
         if !verify_proxy_url(&inlets_proxy).await {
             println!(
-                "  [208/219] Found dead Inlets proxy (`{}` in {}), cleaning with backup...",
+                "  [208/221] Found dead Inlets proxy (`{}` in {}), cleaning with backup...",
                 inlets_proxy.yellow(),
                 inlets_path.display()
             );
@@ -5783,17 +5785,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [208/219] Inlets proxy: {}", "Reachable".green());
+            println!("  [208/221] Inlets proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [208/219] Inlets proxy: {}", "Clean or not set".dimmed());
+        println!("  [208/221] Inlets proxy: {}", "Clean or not set".dimmed());
     }
 
     // 209. Clean dead zrok Peer-to-Peer Sharing & Zero Trust Tunnel daemon in config / systemd
     if let Some((zrok_proxy, zrok_path)) = get_zrok_proxy() {
         if !verify_proxy_url(&zrok_proxy).await {
             println!(
-                "  [209/219] Found dead zrok proxy (`{}` in {}), cleaning with backup...",
+                "  [209/221] Found dead zrok proxy (`{}` in {}), cleaning with backup...",
                 zrok_proxy.yellow(),
                 zrok_path.display()
             );
@@ -5810,17 +5812,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [209/219] zrok proxy: {}", "Reachable".green());
+            println!("  [209/221] zrok proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [209/219] zrok proxy: {}", "Clean or not set".dimmed());
+        println!("  [209/221] zrok proxy: {}", "Clean or not set".dimmed());
     }
 
     // 210. Clean dead n2n Peer-to-Peer Mesh VPN & Supernode daemon in config / systemd
     if let Some((n2n_proxy, n2n_path)) = get_n2n_proxy() {
         if !verify_proxy_url(&n2n_proxy).await {
             println!(
-                "  [210/219] Found dead n2n proxy (`{}` in {}), cleaning with backup...",
+                "  [210/221] Found dead n2n proxy (`{}` in {}), cleaning with backup...",
                 n2n_proxy.yellow(),
                 n2n_path.display()
             );
@@ -5837,17 +5839,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [210/219] n2n proxy: {}", "Reachable".green());
+            println!("  [210/221] n2n proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [210/219] n2n proxy: {}", "Clean or not set".dimmed());
+        println!("  [210/221] n2n proxy: {}", "Clean or not set".dimmed());
     }
 
     // 211. Clean dead Hyprspace Peer-to-Peer Mesh VPN daemon in config / systemd
     if let Some((hyprspace_proxy, hyprspace_path)) = get_hyprspace_proxy() {
         if !verify_proxy_url(&hyprspace_proxy).await {
             println!(
-                "  [211/219] Found dead Hyprspace proxy (`{}` in {}), cleaning with backup...",
+                "  [211/221] Found dead Hyprspace proxy (`{}` in {}), cleaning with backup...",
                 hyprspace_proxy.yellow(),
                 hyprspace_path.display()
             );
@@ -5864,17 +5866,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [211/219] Hyprspace proxy: {}", "Reachable".green());
+            println!("  [211/221] Hyprspace proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [211/219] Hyprspace proxy: {}", "Clean or not set".dimmed());
+        println!("  [211/221] Hyprspace proxy: {}", "Clean or not set".dimmed());
     }
 
     // 212. Clean dead Fastd Secure Tunneling & Mesh VPN daemon in config / systemd
     if let Some((fastd_proxy, fastd_path)) = get_fastd_proxy() {
         if !verify_proxy_url(&fastd_proxy).await {
             println!(
-                "  [212/219] Found dead Fastd proxy (`{}` in {}), cleaning with backup...",
+                "  [212/221] Found dead Fastd proxy (`{}` in {}), cleaning with backup...",
                 fastd_proxy.yellow(),
                 fastd_path.display()
             );
@@ -5891,17 +5893,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [212/219] Fastd proxy: {}", "Reachable".green());
+            println!("  [212/221] Fastd proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [212/219] Fastd proxy: {}", "Clean or not set".dimmed());
+        println!("  [212/221] Fastd proxy: {}", "Clean or not set".dimmed());
     }
 
     // 213. Clean dead EdgeVPN Decentralized Immutable P2P Mesh VPN daemon in config / systemd
     if let Some((edgevpn_proxy, edgevpn_path)) = get_edgevpn_proxy() {
         if !verify_proxy_url(&edgevpn_proxy).await {
             println!(
-                "  [213/219] Found dead EdgeVPN proxy (`{}` in {}), cleaning with backup...",
+                "  [213/221] Found dead EdgeVPN proxy (`{}` in {}), cleaning with backup...",
                 edgevpn_proxy.yellow(),
                 edgevpn_path.display()
             );
@@ -5918,17 +5920,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [213/219] EdgeVPN proxy: {}", "Reachable".green());
+            println!("  [213/221] EdgeVPN proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [213/219] EdgeVPN proxy: {}", "Clean or not set".dimmed());
+        println!("  [213/221] EdgeVPN proxy: {}", "Clean or not set".dimmed());
     }
 
     // 214. Clean dead boringproxy Reverse Proxy & Automated Tunnel daemon in config / systemd
     if let Some((boringproxy_proxy, boringproxy_path)) = get_boringproxy_proxy() {
         if !verify_proxy_url(&boringproxy_proxy).await {
             println!(
-                "  [214/219] Found dead boringproxy proxy (`{}` in {}), cleaning with backup...",
+                "  [214/221] Found dead boringproxy proxy (`{}` in {}), cleaning with backup...",
                 boringproxy_proxy.yellow(),
                 boringproxy_path.display()
             );
@@ -5945,13 +5947,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [214/219] boringproxy proxy: {}", "Reachable".green());
+            println!("  [214/221] boringproxy proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [214/219] boringproxy proxy: {}", "Clean or not set".dimmed());
+        println!("  [214/221] boringproxy proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 215. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 215. Clean dead Ghostunnel Mutual TLS proxy daemon in config / systemd
+    if let Some((ghostunnel_proxy, ghostunnel_path)) = get_ghostunnel_proxy() {
+        if !verify_proxy_url(&ghostunnel_proxy).await {
+            println!(
+                "  [215/221] Found dead Ghostunnel proxy (`{}` in {}), cleaning with backup...",
+                ghostunnel_proxy.yellow(),
+                ghostunnel_path.display()
+            );
+            if ghostunnel_path.exists() {
+                let backup = ghostunnel_path.with_extension("bak");
+                let _ = std::fs::copy(&ghostunnel_path, &backup);
+            }
+            if let Ok(true) = unset_ghostunnel_proxy() {
+                println!(
+                    "  {} Cleared broken Ghostunnel proxy in {} (backup saved)",
+                    "✔".green(),
+                    ghostunnel_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [215/221] Ghostunnel proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [215/221] Ghostunnel proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 216. Clean dead FreeLAN Peer-to-Peer Mesh VPN daemon in config / systemd
+    if let Some((freelan_proxy, freelan_path)) = get_freelan_proxy() {
+        if !verify_proxy_url(&freelan_proxy).await {
+            println!(
+                "  [216/221] Found dead FreeLAN proxy (`{}` in {}), cleaning with backup...",
+                freelan_proxy.yellow(),
+                freelan_path.display()
+            );
+            if freelan_path.exists() {
+                let backup = freelan_path.with_extension("bak");
+                let _ = std::fs::copy(&freelan_path, &backup);
+            }
+            if let Ok(true) = unset_freelan_proxy() {
+                println!(
+                    "  {} Cleared broken FreeLAN proxy in {} (backup saved)",
+                    "✔".green(),
+                    freelan_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [216/221] FreeLAN proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [216/221] FreeLAN proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 217. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -5965,7 +6021,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [215/219] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [217/221] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -5982,17 +6038,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [215/219] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [217/221] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [215/219] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [217/221] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [215/219] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [217/221] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 216. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 218. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -6006,7 +6062,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [216/219] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [218/221] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -6024,17 +6080,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [216/219] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [218/221] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [216/219] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [218/221] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [216/219] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [218/221] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 217. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 219. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -6048,7 +6104,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [217/219] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [219/221] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -6066,17 +6122,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [217/219] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [219/221] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [217/219] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [219/221] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [217/219] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [219/221] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 218. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 220. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -6095,7 +6151,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [218/219] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [220/221] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -6123,12 +6179,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [218/219] No active local proxy client found. Ensure your proxy software is open."
+            "  [220/221] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 219. Flush local DNS cache
-    println!("  [219/219] Flushing local DNS cache to fix resolution stalls...");
+    // 221. Flush local DNS cache
+    println!("  [221/221] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();

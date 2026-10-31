@@ -1998,6 +1998,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Emu3 AI CDN",
         "https://github.com/baaivision/Emu3",
     ),
+    (
+        "Ghostunnel TLS Proxy CDN",
+        "https://github.com/ghostunnel/ghostunnel",
+    ),
+    (
+        "FreeLAN Mesh VPN CDN",
+        "https://github.com/freelan-developers/freelan",
+    ),
+    (
+        "Kimi-k1.5 AI CDN",
+        "https://github.com/MoonshotAI/Kimi-k1.5",
+    ),
+    (
+        "Janus-Flow AI CDN",
+        "https://github.com/deepseek-ai/Janus-Flow",
+    ),
+    (
+        "Show-o AI CDN",
+        "https://github.com/showlab/Show-o",
+    ),
+    (
+        "FastVideo AI CDN",
+        "https://github.com/hao-ai-lab/FastVideo",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -3806,6 +3830,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Emu3 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Ghostunnel TLS Proxy CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FreeLAN Mesh VPN CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Kimi-k1.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Janus-Flow AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Show-o AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FastVideo AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

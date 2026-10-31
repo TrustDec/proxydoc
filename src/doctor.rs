@@ -42522,6 +42522,570 @@ pub fn get_boringproxy_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_ghostunnel_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("GHOSTUNNEL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("GHOSTUNNEL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("GHOSTUNNEL_DIR") {
+        let p = PathBuf::from(dir.trim()).join("ghostunnel.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("ghostunnel").join("ghostunnel.conf"),
+            home.join(".config").join("ghostunnel").join("config.env"),
+            home.join(".ghostunnel").join("ghostunnel.conf"),
+            home.join(".config").join("systemd").join("user").join("ghostunnel.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/ghostunnel/ghostunnel.conf"),
+        PathBuf::from("/etc/ghostunnel/ghostunnel.env"),
+        PathBuf::from("/etc/ghostunnel/config.env"),
+        PathBuf::from("/var/lib/ghostunnel/ghostunnel.conf"),
+        PathBuf::from("/usr/local/etc/ghostunnel/ghostunnel.conf"),
+        PathBuf::from("/opt/homebrew/etc/ghostunnel/ghostunnel.conf"),
+        PathBuf::from("/etc/default/ghostunnel"),
+        PathBuf::from("/etc/sysconfig/ghostunnel"),
+        PathBuf::from("/etc/systemd/system/ghostunnel.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_ghostunnel = PathBuf::from("/etc/ghostunnel");
+    if etc_ghostunnel.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_ghostunnel) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "env" || ext == "yaml" || ext == "yml" || ext == "json") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_ghostunnel_config_path() -> Option<PathBuf> {
+    let paths = get_ghostunnel_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_ghostunnel_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_ghostunnel_write_path() -> PathBuf {
+    if let Some(p) = get_ghostunnel_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("GHOSTUNNEL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("ghostunnel");
+        if dir.is_dir() {
+            return dir.join("ghostunnel.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/ghostunnel");
+    if etc_dir.is_dir() {
+        return etc_dir.join("ghostunnel.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/ghostunnel.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("ghostunnel").join("ghostunnel.conf");
+    }
+    PathBuf::from("/etc/ghostunnel/ghostunnel.conf")
+}
+
+pub fn parse_ghostunnel_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "connect-proxy",
+                "connect_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "ghostunnel_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ghostunnel_proxy"
+                    || k_low == "ghostunnel_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "connect_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ghostunnel_proxy"
+                    || k_low == "ghostunnel_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "connect_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("ghostunnel_proxy:")
+            || clean.starts_with("ghostunnel_proxy=")
+            || clean.starts_with("connect-proxy:")
+            || clean.starts_with("connect-proxy=")
+            || clean.starts_with("connect_proxy:")
+            || clean.starts_with("connect_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_ghostunnel_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_ghostunnel_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_ghostunnel_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("GHOSTUNNEL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GHOSTUNNEL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("GHOSTUNNEL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:GHOSTUNNEL_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_freelan_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("FREELAN_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("FREELAN_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("FREELAN_DIR") {
+        let p = PathBuf::from(dir.trim()).join("freelan.conf");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("freelan").join("freelan.conf"),
+            home.join(".config").join("freelan").join("freelan.cfg"),
+            home.join(".freelan").join("freelan.conf"),
+            home.join(".config").join("systemd").join("user").join("freelan.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/freelan/freelan.conf"),
+        PathBuf::from("/etc/freelan/freelan.cfg"),
+        PathBuf::from("/var/lib/freelan/freelan.conf"),
+        PathBuf::from("/usr/local/etc/freelan/freelan.conf"),
+        PathBuf::from("/opt/homebrew/etc/freelan/freelan.conf"),
+        PathBuf::from("/etc/default/freelan"),
+        PathBuf::from("/etc/sysconfig/freelan"),
+        PathBuf::from("/etc/systemd/system/freelan.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_freelan = PathBuf::from("/etc/freelan");
+    if etc_freelan.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_freelan) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "conf" || ext == "cfg" || ext == "ini" || ext == "yaml" || ext == "yml") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_freelan_config_path() -> Option<PathBuf> {
+    let paths = get_freelan_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_freelan_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_freelan_write_path() -> PathBuf {
+    if let Some(p) = get_freelan_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("FREELAN_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("freelan");
+        if dir.is_dir() {
+            return dir.join("freelan.conf");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/freelan");
+    if etc_dir.is_dir() {
+        return etc_dir.join("freelan.conf");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/freelan.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("freelan").join("freelan.conf");
+    }
+    PathBuf::from("/etc/freelan/freelan.conf")
+}
+
+pub fn parse_freelan_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "server.http_proxy_url",
+                "http_proxy_url",
+                "proxy",
+                "proxy_url",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "freelan_proxy",
+                "socks5_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "freelan_proxy"
+                    || k_low == "freelan_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "server_http_proxy_url"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "freelan_proxy"
+                    || k_low == "freelan_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        let clean = lower.replace(' ', "");
+        if clean.starts_with("server.http_proxy_url=")
+            || clean.starts_with("server.http_proxy_url:")
+            || clean.starts_with("server.proxy=")
+            || clean.starts_with("server.proxy:")
+            || clean.starts_with("freelan_proxy:")
+            || clean.starts_with("freelan_proxy=")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("https_proxy:")
+            || clean.starts_with("https_proxy=")
+            || clean.starts_with("proxy:")
+            || clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("proxy_url=")
+        {
+            let val_part = if clean.contains('=') {
+                trimmed.split_once('=').map(|(_, v)| v).unwrap_or("").trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else if let Some((_, v)) = trimmed.split_once(':') {
+                v.trim().trim_end_matches(';').trim().trim_end_matches(',').trim().trim_matches('"').trim_matches('\'').trim()
+            } else {
+                ""
+            };
+            if !val_part.is_empty() {
+                return Some(if val_part.starts_with("http://")
+                    || val_part.starts_with("https://")
+                    || val_part.starts_with("socks")
+                {
+                    val_part.to_string()
+                } else {
+                    format!("http://{}", val_part)
+                });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_freelan_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_freelan_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_freelan_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("FREELAN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FREELAN_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("FREELAN_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:FREELAN_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -50271,6 +50835,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "boringproxy Daemon Proxy",
             "~/.config/boringproxy/boringproxy.json & /etc/boringproxy/boringproxy.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Ghostunnel Mutual TLS Proxy Daemon (~/.config/ghostunnel/ghostunnel.conf / /etc/ghostunnel/ghostunnel.conf / /etc/systemd/system/ghostunnel.service.d/http-proxy.conf)
+    if let Some((ghostunnel_proxy, ghostunnel_path)) = get_ghostunnel_proxy() {
+        let ok = verify_proxy_url(&ghostunnel_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Ghostunnel proxy `{}` in {} is dead! (Ghostunnel mutual TLS tunnels and upstream connectivity will fail)",
+                ghostunnel_proxy,
+                ghostunnel_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Ghostunnel Daemon Proxy",
+            format!("{}", ghostunnel_path.display()),
+            ghostunnel_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Ghostunnel fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Ghostunnel Daemon Proxy",
+            "~/.config/ghostunnel/ghostunnel.conf & /etc/ghostunnel/ghostunnel.conf",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // FreeLAN Peer-to-Peer Mesh VPN Daemon (~/.config/freelan/freelan.conf / /etc/freelan/freelan.conf / /etc/systemd/system/freelan.service.d/http-proxy.conf)
+    if let Some((freelan_proxy, freelan_path)) = get_freelan_proxy() {
+        let ok = verify_proxy_url(&freelan_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "FreeLAN proxy `{}` in {} is dead! (FreeLAN P2P VPN tunnels and peer discovery will fail)",
+                freelan_proxy,
+                freelan_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "FreeLAN Daemon Proxy",
+            format!("{}", freelan_path.display()),
+            freelan_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (FreeLAN fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "FreeLAN Daemon Proxy",
+            "~/.config/freelan/freelan.conf & /etc/freelan/freelan.conf",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -58899,5 +59527,65 @@ Environment="HTTP_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; boringproxy_proxy = socks5://127.0.0.1:1080\n";
         assert_eq!(parse_boringproxy_proxy(input_comment), None);
         assert_eq!(parse_boringproxy_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_ghostunnel_proxy() {
+        let ghostunnel_conf = r#"
+# Ghostunnel configuration
+connect-proxy = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_ghostunnel_proxy(ghostunnel_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ghostunnel_json = r#"
+{
+  "proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_ghostunnel_proxy(ghostunnel_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_ghostunnel_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; ghostunnel_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_ghostunnel_proxy(input_comment), None);
+        assert_eq!(parse_ghostunnel_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_freelan_proxy() {
+        let freelan_conf = r#"
+# FreeLAN configuration
+server.http_proxy_url = "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_freelan_proxy(freelan_conf),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_freelan_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# server.http_proxy_url = \"http://127.0.0.1:7890\"\n; freelan_proxy = socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_freelan_proxy(input_comment), None);
+        assert_eq!(parse_freelan_proxy(""), None);
     }
 }

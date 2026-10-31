@@ -701,7 +701,13 @@ enum Commands {
         /// Also configure boringproxy reverse proxy & automated tunnel daemon (~/.config/boringproxy/boringproxy.json / /etc/boringproxy/boringproxy.json / /etc/systemd/system/boringproxy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "boringproxy-tunnel", visible_alias = "boringproxy-proxy", visible_alias = "boringproxy-daemon", visible_alias = "boringproxy-client")]
         boringproxy: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, and boringproxy proxy
+        /// Also configure Ghostunnel mutual TLS proxy daemon (~/.config/ghostunnel/ghostunnel.conf / /etc/ghostunnel/ghostunnel.conf / /etc/systemd/system/ghostunnel.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "ghostunnel-proxy", visible_alias = "ghostunnel-tls", visible_alias = "ghostunnel-daemon", visible_alias = "ghostunnel-client")]
+        ghostunnel: bool,
+        /// Also configure FreeLAN peer-to-peer mesh VPN daemon (/etc/freelan/freelan.conf / ~/.config/freelan/freelan.conf / /etc/systemd/system/freelan.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "freelan-vpn", visible_alias = "freelan-p2p", visible_alias = "freelan-daemon", visible_alias = "freelan-proxy")]
+        freelan: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, and freelan proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1346,7 +1352,13 @@ enum Commands {
         /// Also unset boringproxy reverse proxy & automated tunnel daemon (~/.config/boringproxy/boringproxy.json / /etc/boringproxy/boringproxy.json / /etc/systemd/system/boringproxy.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "boringproxy-tunnel", visible_alias = "boringproxy-proxy", visible_alias = "boringproxy-daemon", visible_alias = "boringproxy-client")]
         boringproxy: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, and boringproxy proxy
+        /// Also unset Ghostunnel mutual TLS proxy daemon (~/.config/ghostunnel/ghostunnel.conf / /etc/ghostunnel/ghostunnel.conf / /etc/systemd/system/ghostunnel.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "ghostunnel-proxy", visible_alias = "ghostunnel-tls", visible_alias = "ghostunnel-daemon", visible_alias = "ghostunnel-client")]
+        ghostunnel: bool,
+        /// Also unset FreeLAN peer-to-peer mesh VPN daemon (/etc/freelan/freelan.conf / ~/.config/freelan/freelan.conf / /etc/systemd/system/freelan.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "freelan-vpn", visible_alias = "freelan-p2p", visible_alias = "freelan-daemon", visible_alias = "freelan-proxy")]
+        freelan: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, and freelan proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1602,6 +1614,8 @@ async fn main() -> Result<()> {
             fastd,
             edgevpn,
             boringproxy,
+            ghostunnel,
+            freelan,
             all,
             shell,
         }) => {
@@ -1819,6 +1833,8 @@ async fn main() -> Result<()> {
                 fastd,
                 edgevpn,
                 boringproxy,
+                ghostunnel,
+                freelan,
                 all,
                 shell.as_deref(),
             )
@@ -2037,6 +2053,8 @@ async fn main() -> Result<()> {
             fastd,
             edgevpn,
             boringproxy,
+            ghostunnel,
+            freelan,
             all,
             shell,
         }) => {
@@ -2253,6 +2271,8 @@ async fn main() -> Result<()> {
                 fastd,
                 edgevpn,
                 boringproxy,
+                ghostunnel,
+                freelan,
                 all,
                 shell.as_deref(),
             )?;
@@ -8771,6 +8791,82 @@ mod tests {
         match cli.command {
             Some(Commands::Off { boringproxy, .. }) => {
                 assert!(boringproxy);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_ghostunnel() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--ghostunnel"]).unwrap();
+        match cli.command {
+            Some(Commands::On { ghostunnel, .. }) => {
+                assert!(ghostunnel);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--ghostunnel-tls"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { ghostunnel, .. }) => {
+                assert!(ghostunnel);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--ghostunnel-proxy"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { ghostunnel, .. }) => {
+                assert!(ghostunnel);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_ghostunnel() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--ghostunnel"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { ghostunnel, .. }) => {
+                assert!(ghostunnel);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_freelan() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--freelan"]).unwrap();
+        match cli.command {
+            Some(Commands::On { freelan, .. }) => {
+                assert!(freelan);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--freelan-vpn"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { freelan, .. }) => {
+                assert!(freelan);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--freelan-p2p"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { freelan, .. }) => {
+                assert!(freelan);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_freelan() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--freelan"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { freelan, .. }) => {
+                assert!(freelan);
             }
             _ => panic!("Expected Off command"),
         }
