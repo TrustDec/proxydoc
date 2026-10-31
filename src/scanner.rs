@@ -163,6 +163,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (3022, false, "teleconsole Terminal Sharing & SSH Reverse Tunnel Daemon (SSH/Tunnel)"),
     (8054, false, "tunnelto Localhost Reverse Proxy & Public Tunnel Client (Control/Tunnel)"),
     (8040, false, "Webhook Relay Localhost Tunnel & Webhook Forwarding Daemon (HTTP/Control)"),
+    (8299, false, "jprq Localhost Reverse Tunnel & Port Forwarding Daemon (HTTP/TCP)"),
+    (8022, false, "mysocketctl Localhost Reverse Tunnel & Border0 Daemon (SSH/Tunnel)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

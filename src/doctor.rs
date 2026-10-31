@@ -51097,6 +51097,713 @@ pub fn get_webhookrelay_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_jprq_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("JPRQ_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("JPRQ_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("JPRQ_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".jprq").join("config.json"),
+            home.join(".config").join("jprq").join("config.json"),
+            home.join(".jprq.json"),
+            home.join(".jprq").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("jprq.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/jprq/config.json"),
+        PathBuf::from("/etc/jprq.json"),
+        PathBuf::from("/var/lib/jprq/config.json"),
+        PathBuf::from("/usr/local/etc/jprq/config.json"),
+        PathBuf::from("/opt/homebrew/etc/jprq/config.json"),
+        PathBuf::from("/etc/default/jprq"),
+        PathBuf::from("/etc/sysconfig/jprq"),
+        PathBuf::from("/etc/systemd/system/jprq.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/jprqd.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_jprq = PathBuf::from("/etc/jprq");
+    if etc_jprq.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_jprq) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_jprq_config_path() -> Option<PathBuf> {
+    let paths = get_jprq_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_jprq_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_jprq_write_path() -> PathBuf {
+    if let Some(p) = get_jprq_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("JPRQ_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".jprq");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".config").join("jprq");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/jprq");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/jprq.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".jprq").join("config.json");
+    }
+    PathBuf::from("/etc/jprq/config.json")
+}
+
+pub fn parse_jprq_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "jprq_proxy",
+                "jprq_http_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "jprq_proxy"
+                    || k_low == "jprq_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "jprq_proxy"
+                    || k_low == "jprq_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "jprq_proxy"
+                || k_low == "jprq_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "jprq_proxy"
+                || k_low == "jprq_http_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_jprq_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_jprq_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_jprq_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("JPRQ_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JPRQ_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("JPRQ_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JPRQ_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("JPRQ_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JPRQ_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_mysocketctl_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("MYSOCKETCTL_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MYSOCKET_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("BORDER0_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("MYSOCKETCTL_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("MYSOCKET_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".mysocket").join("config.json"),
+            home.join(".mysocketctl").join("config.json"),
+            home.join(".border0").join("config.json"),
+            home.join(".config").join("mysocketctl").join("config.json"),
+            home.join(".config").join("border0").join("config.json"),
+            home.join(".mysocket.json"),
+            home.join(".config").join("systemd").join("user").join("mysocketctl.service.d").join("http-proxy.conf"),
+            home.join(".config").join("systemd").join("user").join("border0.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let system_paths = [
+        PathBuf::from("/etc/mysocketctl/config.json"),
+        PathBuf::from("/etc/border0/config.json"),
+        PathBuf::from("/etc/mysocket/config.json"),
+        PathBuf::from("/etc/mysocketctl.json"),
+        PathBuf::from("/var/lib/mysocketctl/config.json"),
+        PathBuf::from("/usr/local/etc/mysocketctl/config.json"),
+        PathBuf::from("/opt/homebrew/etc/mysocketctl/config.json"),
+        PathBuf::from("/etc/default/mysocketctl"),
+        PathBuf::from("/etc/sysconfig/mysocketctl"),
+        PathBuf::from("/etc/systemd/system/mysocketctl.service.d/http-proxy.conf"),
+        PathBuf::from("/etc/systemd/system/border0.service.d/http-proxy.conf"),
+    ];
+    for p in system_paths {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_mysocket = PathBuf::from("/etc/mysocketctl");
+    if etc_mysocket.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_mysocket) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    let etc_border0 = PathBuf::from("/etc/border0");
+    if etc_border0.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_border0) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if (ext == "json" || ext == "yaml" || ext == "yml" || ext == "toml" || ext == "conf" || ext == "env") && !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_mysocketctl_config_path() -> Option<PathBuf> {
+    let paths = get_mysocketctl_config_paths();
+    for p in &paths {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            if parse_mysocketctl_proxy(&content).is_some() {
+                return Some(p.clone());
+            }
+        }
+    }
+    paths.into_iter().next()
+}
+
+pub fn get_mysocketctl_write_path() -> PathBuf {
+    if let Some(p) = get_mysocketctl_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("MYSOCKETCTL_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".mysocket");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".mysocketctl");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+        let dir3 = home.join(".border0");
+        if dir3.is_dir() {
+            return dir3.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/mysocketctl");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/mysocketctl.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".mysocket").join("config.json");
+    }
+    PathBuf::from("/etc/mysocketctl/config.json")
+}
+
+pub fn parse_mysocketctl_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "mysocketctl_proxy",
+                "mysocket_proxy",
+                "border0_proxy",
+                "tunnel_proxy",
+                "socks5_proxy",
+                "socks_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "mysocketctl_proxy"
+                    || k_low == "mysocket_proxy"
+                    || k_low == "border0_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with('#') || lower.starts_with(';') || lower.starts_with("//") {
+            continue;
+        }
+
+        if lower.starts_with("export ") {
+            let rest = &trimmed["export ".len()..].trim();
+            if let Some((k, v)) = rest.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "mysocketctl_proxy"
+                    || k_low == "mysocket_proxy"
+                    || k_low == "border0_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once(':') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "mysocketctl_proxy"
+                || k_low == "mysocket_proxy"
+                || k_low == "border0_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k_low = k.trim().to_ascii_lowercase();
+            if k_low == "proxy"
+                || k_low == "proxy_url"
+                || k_low == "mysocketctl_proxy"
+                || k_low == "mysocket_proxy"
+                || k_low == "border0_proxy"
+                || k_low == "tunnel_proxy"
+                || k_low == "http_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https_proxy"
+            {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_mysocketctl_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_mysocketctl_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_mysocketctl_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("MYSOCKETCTL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MYSOCKETCTL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MYSOCKET_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MYSOCKET_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MYSOCKETCTL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MYSOCKETCTL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("MYSOCKET_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:MYSOCKET_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BORDER0_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BORDER0_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -59742,6 +60449,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Webhook Relay Daemon Proxy",
             "~/.relay/config.json & /etc/webhookrelay/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // jprq Localhost Reverse Tunnel & Public Port Forwarding Client (~/.jprq/config.json / /etc/jprq/config.json / /etc/systemd/system/jprq.service.d/http-proxy.conf)
+    if let Some((jprq_proxy, jprq_path)) = get_jprq_proxy() {
+        let ok = verify_proxy_url(&jprq_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "jprq proxy `{}` in {} is dead! (jprq localhost reverse tunneling and port forwarding will fail)",
+                jprq_proxy,
+                jprq_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "jprq Daemon Proxy",
+            format!("{}", jprq_path.display()),
+            jprq_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (jprq fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "jprq Daemon Proxy",
+            "~/.jprq/config.json & /etc/jprq/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // mysocketctl / Border0 Localhost Reverse Tunnel & Zero-Trust Client (~/.mysocket/config.json / /etc/mysocketctl/config.json / /etc/systemd/system/mysocketctl.service.d/http-proxy.conf)
+    if let Some((mysocketctl_proxy, mysocketctl_path)) = get_mysocketctl_proxy() {
+        let ok = verify_proxy_url(&mysocketctl_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "mysocketctl proxy `{}` in {} is dead! (mysocketctl localhost reverse tunneling and zero-trust connection will fail)",
+                mysocketctl_proxy,
+                mysocketctl_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "mysocketctl Daemon Proxy",
+            format!("{}", mysocketctl_path.display()),
+            mysocketctl_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (mysocketctl fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "mysocketctl Daemon Proxy",
+            "~/.mysocket/config.json & /etc/mysocketctl/config.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -69327,5 +70098,73 @@ Environment="RELAY_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; webhookrelay_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_webhookrelay_proxy(input_comment), None);
         assert_eq!(parse_webhookrelay_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_jprq_proxy() {
+        let jprq_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_jprq_proxy(jprq_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let jprq_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_jprq_proxy(jprq_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="JPRQ_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_jprq_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; jprq_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_jprq_proxy(input_comment), None);
+        assert_eq!(parse_jprq_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_mysocketctl_proxy() {
+        let mysocket_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_mysocketctl_proxy(mysocket_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let mysocket_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mysocketctl_proxy(mysocket_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="BORDER0_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_mysocketctl_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; mysocketctl_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_mysocketctl_proxy(input_comment), None);
+        assert_eq!(parse_mysocketctl_proxy(""), None);
     }
 }

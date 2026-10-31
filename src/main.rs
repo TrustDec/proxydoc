@@ -785,7 +785,13 @@ enum Commands {
         /// Also configure Webhook Relay localhost tunnel & webhook forwarding daemon (~/.relay/config.json / /etc/webhookrelay/config.json / /etc/systemd/system/webhookrelay.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "webhookrelay-proxy", visible_alias = "webhookrelay-tunnel", visible_alias = "webhookrelay-daemon", visible_alias = "relay")]
         webhookrelay: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, and webhookrelay proxy
+        /// Also configure jprq localhost reverse tunnel & port forwarding daemon (~/.jprq/config.json / /etc/jprq/config.json / /etc/systemd/system/jprq.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "jprq-proxy", visible_alias = "jprq-tunnel", visible_alias = "jprq-daemon")]
+        jprq: bool,
+        /// Also configure mysocketctl / Border0 localhost reverse tunnel & zero-trust client (~/.mysocket/config.json / /etc/mysocketctl/config.json / /etc/systemd/system/mysocketctl.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "mysocketctl-proxy", visible_alias = "mysocketctl-tunnel", visible_alias = "mysocket-proxy", visible_alias = "border0")]
+        mysocketctl: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, and mysocketctl proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1514,7 +1520,13 @@ enum Commands {
         /// Also unset Webhook Relay localhost tunnel & webhook forwarding daemon (~/.relay/config.json / /etc/webhookrelay/config.json / /etc/systemd/system/webhookrelay.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "webhookrelay-proxy", visible_alias = "webhookrelay-tunnel", visible_alias = "webhookrelay-daemon", visible_alias = "relay")]
         webhookrelay: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, and webhookrelay proxy
+        /// Also unset jprq localhost reverse tunnel & port forwarding daemon (~/.jprq/config.json / /etc/jprq/config.json / /etc/systemd/system/jprq.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "jprq-proxy", visible_alias = "jprq-tunnel", visible_alias = "jprq-daemon")]
+        jprq: bool,
+        /// Also unset mysocketctl / Border0 localhost reverse tunnel & zero-trust client (~/.mysocket/config.json / /etc/mysocketctl/config.json / /etc/systemd/system/mysocketctl.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "mysocketctl-proxy", visible_alias = "mysocketctl-tunnel", visible_alias = "mysocket-proxy", visible_alias = "border0")]
+        mysocketctl: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, and mysocketctl proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1798,6 +1810,8 @@ async fn main() -> Result<()> {
             teleconsole,
             tunnelto,
             webhookrelay,
+            jprq,
+            mysocketctl,
             all,
             shell,
         }) => {
@@ -2043,6 +2057,8 @@ async fn main() -> Result<()> {
                 teleconsole,
                 tunnelto,
                 webhookrelay,
+                jprq,
+                mysocketctl,
                 all,
                 shell.as_deref(),
             )
@@ -2289,6 +2305,8 @@ async fn main() -> Result<()> {
             teleconsole,
             tunnelto,
             webhookrelay,
+            jprq,
+            mysocketctl,
             all,
             shell,
         }) => {
@@ -2533,6 +2551,8 @@ async fn main() -> Result<()> {
                 teleconsole,
                 tunnelto,
                 webhookrelay,
+                jprq,
+                mysocketctl,
                 all,
                 shell.as_deref(),
             )?;
@@ -10259,6 +10279,106 @@ mod tests {
         match cli.command {
             Some(Commands::Off { webhookrelay, .. }) => {
                 assert!(webhookrelay);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_jprq() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--jprq"]).unwrap();
+        match cli.command {
+            Some(Commands::On { jprq, .. }) => {
+                assert!(jprq);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--jprq-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { jprq, .. }) => {
+                assert!(jprq);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--jprq-tunnel"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { jprq, .. }) => {
+                assert!(jprq);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--jprq-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { jprq, .. }) => {
+                assert!(jprq);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_jprq() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--jprq"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { jprq, .. }) => {
+                assert!(jprq);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_mysocketctl() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--mysocketctl"]).unwrap();
+        match cli.command {
+            Some(Commands::On { mysocketctl, .. }) => {
+                assert!(mysocketctl);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--mysocketctl-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { mysocketctl, .. }) => {
+                assert!(mysocketctl);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--mysocketctl-tunnel"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { mysocketctl, .. }) => {
+                assert!(mysocketctl);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--mysocket-proxy"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { mysocketctl, .. }) => {
+                assert!(mysocketctl);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--border0"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { mysocketctl, .. }) => {
+                assert!(mysocketctl);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_mysocketctl() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--mysocketctl"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { mysocketctl, .. }) => {
+                assert!(mysocketctl);
             }
             _ => panic!("Expected Off command"),
         }

@@ -2334,6 +2334,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "InternVL2 AI CDN",
         "https://github.com/OpenGVLab/InternVL2",
     ),
+    (
+        "jprq Tunnel CDN",
+        "https://github.com/azimjohn/jprq",
+    ),
+    (
+        "mysocketctl Tunnel CDN",
+        "https://github.com/mysocketio/mysocketctl",
+    ),
+    (
+        "DeepSeek-Coder AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-Coder",
+    ),
+    (
+        "CodeGeeX4 AI CDN",
+        "https://github.com/THUDM/CodeGeeX4",
+    ),
+    (
+        "Llama-2 AI CDN",
+        "https://github.com/facebookresearch/llama",
+    ),
+    (
+        "InternLM2 AI CDN",
+        "https://github.com/InternLM/InternLM",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4394,6 +4418,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "InternVL2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "jprq Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "mysocketctl Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-Coder AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CodeGeeX4 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Llama-2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InternLM2 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
