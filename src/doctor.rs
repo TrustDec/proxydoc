@@ -55141,6 +55141,667 @@ pub fn get_garden_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_daytona_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("DAYTONA_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("DAYTONA_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("DAYTONA_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("daytona.json"),
+        PathBuf::from("daytona.yaml"),
+        PathBuf::from("daytona.yml"),
+        PathBuf::from(".daytona.json"),
+        PathBuf::from(".daytona.yaml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".config").join("daytona").join("config.json"),
+            home.join(".config").join("daytona").join("config.yaml"),
+            home.join(".daytona").join("config.json"),
+            home.join(".daytona").join("config.yaml"),
+            home.join(".config").join("systemd").join("user").join("daytona.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/daytona/config.json"),
+        PathBuf::from("/etc/daytona/config.yaml"),
+        PathBuf::from("/etc/daytona/config.yml"),
+        PathBuf::from("/etc/daytona.json"),
+        PathBuf::from("/etc/daytona.yaml"),
+        PathBuf::from("/var/lib/daytona/config.json"),
+        PathBuf::from("/usr/local/etc/daytona/config.json"),
+        PathBuf::from("/opt/homebrew/etc/daytona/config.json"),
+        PathBuf::from("/etc/default/daytona"),
+        PathBuf::from("/etc/sysconfig/daytona"),
+        PathBuf::from("/etc/systemd/system/daytona.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_daytona = PathBuf::from("/etc/daytona");
+    if etc_daytona.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_daytona) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_daytona_config_path() -> Option<PathBuf> {
+    let paths = get_daytona_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_daytona_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_daytona_write_path() -> PathBuf {
+    if let Some(p) = get_daytona_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("DAYTONA_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".config").join("daytona");
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
+        let dir2 = home.join(".daytona");
+        if dir2.is_dir() {
+            return dir2.join("config.json");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/daytona");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.json");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/daytona.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".config").join("daytona").join("config.json");
+    }
+    PathBuf::from("/etc/daytona/config.json")
+}
+
+pub fn parse_daytona_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "daytona_proxy",
+                "daytona_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "daytona_proxy"
+                    || k_low == "daytona_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export daytona_proxy=")
+            || lower.starts_with("export daytona_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("daytona_proxy=")
+            || lower.starts_with("daytona_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("daytona_proxy=")
+            || clean.starts_with("daytona_http_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                            } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("daytona_proxy:")
+            || clean.starts_with("daytona_http_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_daytona_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_daytona_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_daytona_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("DAYTONA_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DAYTONA_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DAYTONA_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DAYTONA_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("DAYTONA_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:DAYTONA_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_vcluster_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(file) = std::env::var("VCLUSTER_CONFIG") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() {
+            paths.push(p);
+        }
+    }
+    if let Ok(file) = std::env::var("VCLUSTER_CONF") {
+        let p = PathBuf::from(file.trim());
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Ok(dir) = std::env::var("VCLUSTER_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.yaml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let local_candidates = [
+        PathBuf::from("vcluster.yaml"),
+        PathBuf::from("vcluster.yml"),
+        PathBuf::from("vcluster.json"),
+        PathBuf::from(".vcluster.yaml"),
+        PathBuf::from(".vcluster.yml"),
+    ];
+    for p in local_candidates {
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let user_candidates = [
+            home.join(".vcluster").join("config.yaml"),
+            home.join(".vcluster").join("config.json"),
+            home.join(".config").join("vcluster").join("config.yaml"),
+            home.join(".config").join("vcluster").join("config.json"),
+            home.join(".config").join("systemd").join("user").join("vcluster.service.d").join("http-proxy.conf"),
+        ];
+        for p in user_candidates {
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+    let global_candidates = [
+        PathBuf::from("/etc/vcluster/config.yaml"),
+        PathBuf::from("/etc/vcluster/config.json"),
+        PathBuf::from("/etc/vcluster/vcluster.yaml"),
+        PathBuf::from("/etc/vcluster.yaml"),
+        PathBuf::from("/var/lib/vcluster/config.yaml"),
+        PathBuf::from("/usr/local/etc/vcluster/config.yaml"),
+        PathBuf::from("/opt/homebrew/etc/vcluster/config.yaml"),
+        PathBuf::from("/etc/default/vcluster"),
+        PathBuf::from("/etc/sysconfig/vcluster"),
+        PathBuf::from("/etc/systemd/system/vcluster.service.d/http-proxy.conf"),
+    ];
+    for p in global_candidates {
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    let etc_vcluster = PathBuf::from("/etc/vcluster");
+    if etc_vcluster.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&etc_vcluster) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension() {
+                    if (ext == "yaml" || ext == "yml" || ext == "conf" || ext == "json") && !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+pub fn get_vcluster_config_path() -> Option<PathBuf> {
+    let paths = get_vcluster_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_vcluster_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_vcluster_write_path() -> PathBuf {
+    if let Some(p) = get_vcluster_config_path() {
+        return p;
+    }
+    if let Ok(file) = std::env::var("VCLUSTER_CONFIG") {
+        return PathBuf::from(file.trim());
+    }
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".vcluster");
+        if dir.is_dir() {
+            return dir.join("config.yaml");
+        }
+        let dir2 = home.join(".config").join("vcluster");
+        if dir2.is_dir() {
+            return dir2.join("config.yaml");
+        }
+    }
+    let etc_dir = PathBuf::from("/etc/vcluster");
+    if etc_dir.is_dir() {
+        return etc_dir.join("config.yaml");
+    }
+    let dropin_dir = PathBuf::from("/etc/systemd/system/vcluster.service.d");
+    if dropin_dir.is_dir() {
+        return dropin_dir.join("http-proxy.conf");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".vcluster").join("config.yaml");
+    }
+    PathBuf::from("/etc/vcluster/config.yaml")
+}
+
+pub fn parse_vcluster_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for key in [
+                "proxy",
+                "proxy_url",
+                "proxyUrl",
+                "http_proxy",
+                "http-proxy",
+                "httpProxy",
+                "https_proxy",
+                "vcluster_proxy",
+                "vcluster_http_proxy",
+                "socks5_proxy",
+                "tunnel_proxy",
+                "syncer_proxy",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    if let Some(s) = v.as_str() {
+                        let trim = s.trim();
+                        if !trim.is_empty() {
+                            return Some(if trim.starts_with("http://")
+                                || trim.starts_with("https://")
+                                || trim.starts_with("socks")
+                            {
+                                trim.to_string()
+                            } else {
+                                format!("http://{}", trim)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vcluster_proxy"
+                    || k_low == "vcluster_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                    || k_low == "syncer_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export vcluster_proxy=")
+            || lower.starts_with("export vcluster_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("vcluster_proxy=")
+            || lower.starts_with("vcluster_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        if clean.starts_with("proxy=")
+            || clean.starts_with("proxy_url=")
+            || clean.starts_with("http_proxy=")
+            || clean.starts_with("http-proxy=")
+            || clean.starts_with("vcluster_proxy=")
+            || clean.starts_with("vcluster_http_proxy=")
+            || clean.starts_with("syncer_proxy=")
+        {
+            if let Some((_, v)) = clean.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                            } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        if clean.starts_with("proxy:")
+            || clean.starts_with("proxy_url:")
+            || clean.starts_with("http_proxy:")
+            || clean.starts_with("http-proxy:")
+            || clean.starts_with("vcluster_proxy:")
+            || clean.starts_with("vcluster_http_proxy:")
+            || clean.starts_with("syncer_proxy:")
+        {
+            if let Some((_, v)) = clean.split_once(':') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_vcluster_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_vcluster_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_vcluster_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("VCLUSTER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VCLUSTER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VCLUSTER_HTTPS_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VCLUSTER_HTTPS_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VCLUSTER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VCLUSTER_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -64170,6 +64831,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "Garden Daemon Proxy",
             "~/.garden/config.yaml & /etc/garden/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // Daytona Open-Source Dev Environment Manager & Workspace Tunnel Daemon (~/.config/daytona/config.json / /etc/daytona/config.yaml / /etc/systemd/system/daytona.service.d/http-proxy.conf)
+    if let Some((daytona_proxy, daytona_path)) = get_daytona_proxy() {
+        let ok = verify_proxy_url(&daytona_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "Daytona proxy `{}` in {} is dead! (Daytona open-source dev environment workspace tunnel & proxy will fail)",
+                daytona_proxy,
+                daytona_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "Daytona Daemon Proxy",
+            format!("{}", daytona_path.display()),
+            daytona_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (Daytona fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "Daytona Daemon Proxy",
+            "~/.config/daytona/config.json & /etc/daytona/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // vcluster Virtual Kubernetes Cluster Control Plane & Syncer Proxy Daemon (~/.vcluster/config.yaml / /etc/vcluster/config.yaml / /etc/systemd/system/vcluster.service.d/http-proxy.conf)
+    if let Some((vcluster_proxy, vcluster_path)) = get_vcluster_proxy() {
+        let ok = verify_proxy_url(&vcluster_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "vcluster proxy `{}` in {} is dead! (vcluster virtual Kubernetes cluster control plane & syncer proxy will fail)",
+                vcluster_proxy,
+                vcluster_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "vcluster Daemon Proxy",
+            format!("{}", vcluster_path.display()),
+            vcluster_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (vcluster fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "vcluster Daemon Proxy",
+            "~/.vcluster/config.yaml & /etc/vcluster/config.yaml",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -74168,5 +74893,73 @@ Environment="GARDEN_PROXY=http://127.0.0.1:7890"
         let input_comment = "# proxy: http://127.0.0.1:7890\n; garden_proxy: socks5://127.0.0.1:1080\n";
         assert_eq!(parse_garden_proxy(input_comment), None);
         assert_eq!(parse_garden_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_daytona_proxy() {
+        let daytona_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_daytona_proxy(daytona_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let daytona_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_daytona_proxy(daytona_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="DAYTONA_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_daytona_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; daytona_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_daytona_proxy(input_comment), None);
+        assert_eq!(parse_daytona_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_vcluster_proxy() {
+        let vcluster_json = r#"
+{
+  "http_proxy": "http://127.0.0.1:7890"
+}
+"#;
+        assert_eq!(
+            parse_vcluster_proxy(vcluster_json),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let vcluster_yaml = r#"
+proxy: "http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_vcluster_proxy(vcluster_yaml),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = r#"
+[Service]
+Environment="VCLUSTER_PROXY=http://127.0.0.1:7890"
+"#;
+        assert_eq!(
+            parse_vcluster_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# proxy: http://127.0.0.1:7890\n; vcluster_proxy: socks5://127.0.0.1:1080\n";
+        assert_eq!(parse_vcluster_proxy(input_comment), None);
+        assert_eq!(parse_vcluster_proxy(""), None);
     }
 }

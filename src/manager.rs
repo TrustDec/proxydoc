@@ -48004,6 +48004,455 @@ pub fn unset_garden_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_daytona_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "daytona_proxy"
+                    || k_low == "daytona_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"DAYTONA_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export daytona_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("daytona_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export DAYTONA_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "daytona_proxy"
+                || k_trim == "daytona_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"DAYTONA_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_daytona_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "daytona_proxy",
+                "daytona-proxy",
+                "daytona_http_proxy",
+                "tunnel_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "daytona_proxy"
+                    || k_low == "daytona_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export daytona_proxy=")
+            || lower.starts_with("export daytona_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("daytona_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "daytona_proxy"
+                || k_trim == "daytona_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_daytona_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_daytona_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_daytona_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_daytona_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_daytona_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_daytona_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_vcluster_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vcluster_proxy"
+                    || k_low == "vcluster_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "syncer_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"VCLUSTER_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export vcluster_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("vcluster_proxy=")
+            || lower.starts_with("http_proxy=")
+        {
+            lines.push(format!("export VCLUSTER_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "vcluster_proxy"
+                || k_trim == "vcluster_http_proxy"
+                || k_trim == "syncer_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+            if line.contains('=') {
+                lines.push(format!("{}proxy = \"{}\"", indent, proxy_url));
+            } else {
+                lines.push(format!("{}proxy: \"{}\"", indent, proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        if content.contains("[Service]") {
+            lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            lines.push(format!("Environment=\"VCLUSTER_PROXY={}\"", proxy_url));
+        } else {
+            lines.push(format!("proxy: \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_vcluster_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "vcluster_proxy",
+                "vcluster-proxy",
+                "vcluster_http_proxy",
+                "tunnel_proxy",
+                "syncer_proxy",
+                "http_proxy",
+                "http-proxy",
+                "https_proxy",
+                "proxy",
+                "proxy_url",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vcluster_proxy"
+                    || k_low == "vcluster_http_proxy"
+                    || k_low == "tunnel_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "proxy_url"
+                    || k_low == "syncer_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export vcluster_proxy=")
+            || lower.starts_with("export vcluster_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("vcluster_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed
+            .trim_start_matches('-')
+            .trim()
+            .to_ascii_lowercase();
+
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "proxy_url"
+                || k_trim == "http_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "vcluster_proxy"
+                || k_trim == "vcluster_http_proxy"
+                || k_trim == "syncer_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_vcluster_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_vcluster_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_vcluster_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_vcluster_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_vcluster_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_vcluster_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -48258,6 +48707,8 @@ pub async fn turn_on(
     skaffold: bool,
     tilt: bool,
     garden: bool,
+    daytona: bool,
+    vcluster: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -48511,6 +48962,8 @@ pub async fn turn_on(
     let set_skaffold = skaffold || all;
     let set_tilt = tilt || all;
     let set_garden = garden || all;
+    let set_daytona = daytona || all;
+    let set_vcluster = vcluster || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -52192,6 +52645,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_daytona {
+        match set_daytona_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ Daytona daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update Daytona daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_vcluster {
+        match set_vcluster_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ vcluster daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update vcluster daemon config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -52459,6 +52942,8 @@ pub fn turn_off(
     skaffold: bool,
     tilt: bool,
     garden: bool,
+    daytona: bool,
+    vcluster: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -52712,6 +53197,8 @@ pub fn turn_off(
     let unset_skaffold = skaffold || all;
     let unset_tilt = tilt || all;
     let unset_garden = garden || all;
+    let unset_daytona = daytona || all;
+    let unset_vcluster = vcluster || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -54797,6 +55284,22 @@ pub fn turn_off(
             Ok(true) => eprintln!("{}", "✔ Garden daemon proxy removed from config".green()),
             Ok(false) => eprintln!("{}", "○ Garden proxy was not set".dimmed()),
             Err(e) => eprintln!("{} Failed to unset Garden daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_daytona {
+        match unset_daytona_proxy() {
+            Ok(true) => eprintln!("{}", "✔ Daytona daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ Daytona proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset Daytona daemon proxy: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_vcluster {
+        match unset_vcluster_proxy() {
+            Ok(true) => eprintln!("{}", "✔ vcluster daemon proxy removed from config".green()),
+            Ok(false) => eprintln!("{}", "○ vcluster proxy was not set".dimmed()),
+            Err(e) => eprintln!("{} Failed to unset vcluster daemon proxy: {}", "▲".yellow(), e),
         }
     }
 
@@ -60671,5 +61174,43 @@ auth: pass123
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("HTTP_PROXY="));
         assert!(!dropin_cleaned.contains("GARDEN_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_daytona_proxy() {
+        let json_initial = "{\n  \"proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let json_updated = apply_daytona_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("10.0.0.128:7890"));
+        let (json_cleaned, json_removed) = remove_daytona_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_daytona_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"DAYTONA_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_daytona_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("DAYTONA_PROXY="));
+    }
+
+    #[test]
+    fn test_apply_and_remove_vcluster_proxy() {
+        let json_initial = "{\n  \"proxy\": \"http://127.0.0.1:1080\"\n}\n";
+        let json_updated = apply_vcluster_proxy(json_initial, "http://10.0.0.128:7890");
+        assert!(json_updated.contains("10.0.0.128:7890"));
+        let (json_cleaned, json_removed) = remove_vcluster_proxy(&json_updated);
+        assert!(json_removed);
+        assert!(!json_cleaned.contains("10.0.0.128:7890"));
+
+        let dropin_initial = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        let dropin_updated = apply_vcluster_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        assert!(dropin_updated.contains("Environment=\"VCLUSTER_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_vcluster_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("HTTP_PROXY="));
+        assert!(!dropin_cleaned.contains("VCLUSTER_PROXY="));
     }
 }

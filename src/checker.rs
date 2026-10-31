@@ -2478,6 +2478,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "Skywork-o1 AI CDN",
         "https://github.com/SkyworkAI/Skywork-o1",
     ),
+    (
+        "daytona Tunnel CDN",
+        "https://github.com/daytonaio/daytona",
+    ),
+    (
+        "vcluster Tunnel CDN",
+        "https://github.com/loft-sh/vcluster",
+    ),
+    (
+        "OLMo-2 AI CDN",
+        "https://github.com/allenai/OLMo",
+    ),
+    (
+        "EXAONE-3.5 AI CDN",
+        "https://github.com/LG-AI-EXAONE/EXAONE-3.5",
+    ),
+    (
+        "Hunyuan-Large AI CDN",
+        "https://github.com/Tencent/Tencent-Hunyuan-Large",
+    ),
+    (
+        "Granite-3.1 AI CDN",
+        "https://github.com/ibm-granite/granite-3.1-language-models",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -4646,6 +4670,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "Skywork-o1 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "daytona Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "vcluster Tunnel CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OLMo-2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "EXAONE-3.5 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Hunyuan-Large AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Granite-3.1 AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

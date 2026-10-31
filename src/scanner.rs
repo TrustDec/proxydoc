@@ -175,6 +175,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (50052, false, "Skaffold Cloud-Native Kubernetes Dev Port-Forward & Control Daemon (gRPC/HTTP)"),
     (10350, false, "Tilt Cloud-Native Kubernetes Dev Engine & Web Proxy Daemon (HTTP/Web)"),
     (9777, false, "Garden Cloud-Native Kubernetes Dev Environment & Console Daemon (HTTP/Web)"),
+    (3986, false, "Daytona Open-Source Dev Environment Manager & Workspace Tunnel Daemon (HTTP/API)"),
+    (8443, false, "vcluster Virtual Kubernetes Cluster Control Plane & Syncer Proxy Daemon (HTTPS/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
