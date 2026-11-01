@@ -63575,6 +63575,500 @@ pub fn unset_jlenv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_zenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "zenv_http_proxy"
+                    || k_low == "zenv_https_proxy"
+                    || k_low == "zenv_proxy"
+                    || k_low == "zig_http_proxy"
+                    || k_low == "zig_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"ZENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export zenv_http_proxy=")
+            || lower.starts_with("export zenv_https_proxy=")
+            || lower.starts_with("export zenv_proxy=")
+            || lower.starts_with("export zig_http_proxy=")
+            || lower.starts_with("export zig_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("zenv_http_proxy=")
+            || lower.starts_with("zenv_https_proxy=")
+            || lower.starts_with("zenv_proxy=")
+            || lower.starts_with("zig_http_proxy=")
+            || lower.starts_with("zig_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export ZENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "zenv_http_proxy"
+                || k_trim == "zenv_https_proxy"
+                || k_trim == "zenv_proxy"
+                || k_trim == "zig_http_proxy"
+                || k_trim == "zig_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("zenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"ZENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("zenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_zenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "zenv_proxy", "zenv_http_proxy", "zig_http_proxy", "zig_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "zenv_http_proxy"
+                    || k_low == "zenv_https_proxy"
+                    || k_low == "zenv_proxy"
+                    || k_low == "zig_http_proxy"
+                    || k_low == "zig_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export zenv_http_proxy=")
+            || lower.starts_with("export zenv_https_proxy=")
+            || lower.starts_with("export zenv_proxy=")
+            || lower.starts_with("export zig_http_proxy=")
+            || lower.starts_with("export zig_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("zenv_http_proxy=")
+            || lower.starts_with("zenv_https_proxy=")
+            || lower.starts_with("zenv_proxy=")
+            || lower.starts_with("zig_http_proxy=")
+            || lower.starts_with("zig_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "zenv_http_proxy"
+                || k_trim == "zenv_https_proxy"
+                || k_trim == "zenv_proxy"
+                || k_trim == "zig_http_proxy"
+                || k_trim == "zig_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_zenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_zenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_zenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_zenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_zenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_zenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_vlenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vlenv_http_proxy"
+                    || k_low == "vlenv_https_proxy"
+                    || k_low == "vlenv_proxy"
+                    || k_low == "v_http_proxy"
+                    || k_low == "v_proxy"
+                    || k_low == "vlang_http_proxy"
+                    || k_low == "vlang_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"VLENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export vlenv_http_proxy=")
+            || lower.starts_with("export vlenv_https_proxy=")
+            || lower.starts_with("export vlenv_proxy=")
+            || lower.starts_with("export v_http_proxy=")
+            || lower.starts_with("export v_proxy=")
+            || lower.starts_with("export vlang_http_proxy=")
+            || lower.starts_with("export vlang_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("vlenv_http_proxy=")
+            || lower.starts_with("vlenv_https_proxy=")
+            || lower.starts_with("vlenv_proxy=")
+            || lower.starts_with("v_http_proxy=")
+            || lower.starts_with("v_proxy=")
+            || lower.starts_with("vlang_http_proxy=")
+            || lower.starts_with("vlang_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export VLENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "vlenv_http_proxy"
+                || k_trim == "vlenv_https_proxy"
+                || k_trim == "vlenv_proxy"
+                || k_trim == "v_http_proxy"
+                || k_trim == "v_proxy"
+                || k_trim == "vlang_http_proxy"
+                || k_trim == "vlang_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("vlenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"VLENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("vlenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_vlenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "vlenv_proxy", "vlenv_http_proxy", "v_http_proxy", "v_proxy", "vlang_http_proxy", "vlang_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vlenv_http_proxy"
+                    || k_low == "vlenv_https_proxy"
+                    || k_low == "vlenv_proxy"
+                    || k_low == "v_http_proxy"
+                    || k_low == "v_proxy"
+                    || k_low == "vlang_http_proxy"
+                    || k_low == "vlang_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export vlenv_http_proxy=")
+            || lower.starts_with("export vlenv_https_proxy=")
+            || lower.starts_with("export vlenv_proxy=")
+            || lower.starts_with("export v_http_proxy=")
+            || lower.starts_with("export v_proxy=")
+            || lower.starts_with("export vlang_http_proxy=")
+            || lower.starts_with("export vlang_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("vlenv_http_proxy=")
+            || lower.starts_with("vlenv_https_proxy=")
+            || lower.starts_with("vlenv_proxy=")
+            || lower.starts_with("v_http_proxy=")
+            || lower.starts_with("v_proxy=")
+            || lower.starts_with("vlang_http_proxy=")
+            || lower.starts_with("vlang_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "vlenv_http_proxy"
+                || k_trim == "vlenv_https_proxy"
+                || k_trim == "vlenv_proxy"
+                || k_trim == "v_http_proxy"
+                || k_trim == "v_proxy"
+                || k_trim == "vlang_http_proxy"
+                || k_trim == "vlang_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_vlenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_vlenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_vlenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_vlenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_vlenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_vlenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -63897,6 +64391,8 @@ pub async fn turn_on(
     gdenv: bool,
     anyenv: bool,
     jlenv: bool,
+    zenv: bool,
+    vlenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -64218,6 +64714,8 @@ pub async fn turn_on(
     let set_gdenv = gdenv || all;
     let set_anyenv = anyenv || all;
     let set_jlenv = jlenv || all;
+    let set_zenv = zenv || all;
+    let set_vlenv = vlenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -68919,6 +69417,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_zenv {
+        match set_zenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ zenv (Zig Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update zenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_vlenv {
+        match set_vlenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ vlenv (Vlang Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update vlenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -69254,6 +69782,8 @@ pub fn turn_off(
     gdenv: bool,
     anyenv: bool,
     jlenv: bool,
+    zenv: bool,
+    vlenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -69575,6 +70105,8 @@ pub fn turn_off(
     let unset_gdenv = gdenv || all;
     let unset_anyenv = anyenv || all;
     let unset_jlenv = jlenv || all;
+    let unset_zenv = zenv || all;
+    let unset_vlenv = vlenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -72492,6 +73024,34 @@ pub fn turn_off(
                 "○ jlenv Julia Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update jlenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_zenv {
+        match unset_zenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ zenv Zig Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ zenv Zig Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update zenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_vlenv {
+        match unset_vlenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ vlenv Vlang Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ vlenv Vlang Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update vlenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -79560,6 +80120,40 @@ auth: pass123
         let dropin_updated = apply_jlenv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_jlenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_zenv_proxy() {
+        let conf_initial = "ZENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_zenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_zenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/zenv\n";
+        let dropin_updated = apply_zenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_zenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_vlenv_proxy() {
+        let conf_initial = "VLENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_vlenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_vlenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/vlenv\n";
+        let dropin_updated = apply_vlenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_vlenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

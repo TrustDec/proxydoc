@@ -239,6 +239,8 @@
   - 智能诊断 **gdenv（Godot 引擎多版本管理器 `gdenv`）守护进程代理**（`~/.gdenv/config`、`~/.config/gdenv/config`、`/etc/gdenv/config`、`/etc/systemd/system/gdenv.service.d/http-proxy.conf`、`GDENV_HTTP_PROXY`、`GDENV_PROXY`、`GDENV_ROOT`）死代理配置，防止 Godot 引擎官方发行版获取、Mono/导出模板下载与版本切换卡死；
   - 智能诊断 **anyenv（全环境多版本套件管理器 `anyenv`）守护进程代理**（`~/.anyenv/config`、`~/.config/anyenv/config`、`/etc/anyenv/config`、`/etc/systemd/system/anyenv.service.d/http-proxy.conf`、`ANYENV_HTTP_PROXY`、`ANYENV_PROXY`、`ANYENV_ROOT`）死代理配置，防止 anyenv 插件安装、清单同步与环境切换卡死；
   - 智能诊断 **jlenv（Julia 多版本管理器 `jlenv`）守护进程代理**（`~/.jlenv/config`、`~/.config/jlenv/config`、`/etc/jlenv/config`、`/etc/systemd/system/jlenv.service.d/http-proxy.conf`、`JLENV_HTTP_PROXY`、`JLENV_PROXY`、`JLENV_ROOT`）死代理配置，防止 Julia 官方二进制发行拉取、通用包注册表同步与版本切换卡死；
+  - 智能诊断 **zenv（Zig 语言多版本管理器 `zenv`）守护进程代理**（`~/.zenv/config`、`~/.config/zenv/config`、`/etc/zenv/config`、`/etc/systemd/system/zenv.service.d/http-proxy.conf`、`ZENV_HTTP_PROXY`、`ZENV_PROXY`、`ZENV_ROOT`）死代理配置，防止 Zig 编译器归档拉取、标准库包下载与版本切换卡死；
+  - 智能诊断 **vlenv（V 语言多版本管理器 `vlenv`）守护进程代理**（`~/.vlenv/config`、`~/.config/vlenv/config`、`/etc/vlenv/config`、`/etc/systemd/system/vlenv.service.d/http-proxy.conf`、`VLENV_HTTP_PROXY`、`VLENV_PROXY`、`VLENV_ROOT`）死代理配置，防止 V 编译器二进制分发拉取、vpm 模块安装与版本切换卡死；
   - 智能诊断 **Ollama (本地 AI 模型服务守护进程) 代理**（`/etc/systemd/system/ollama.service.d/http-proxy.conf`、`~/.ollama/environment`、`~/Library/LaunchAgents/com.ollama.ollama.plist`），排查 `ollama pull` 与 `ollama run` 因守护进程死代理超时卡死；
   - 智能诊断 **Alpine Linux apk 包管理器仓库与镜像源**（`/etc/apk/repositories`），排查 `apk add` 与 `apk update` 因死镜像源阻塞；
   - 智能诊断 **Flatpak (Linux 桌面应用包管理器与运行环境) 仓库代理**（`~/.local/share/flatpak/repo/config`、`/var/lib/flatpak/repo/config`、`/etc/flatpak/remotes.d/`），排查 `flatpak install` 与应用更新因死代理失败；
