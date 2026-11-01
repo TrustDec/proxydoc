@@ -223,6 +223,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (65151, false, "helmenv (Helm Version Manager) Daemon (HTTP/API)"),
     (65252, false, "kbenv (Kubectl Version Manager) Daemon (HTTP/API)"),
     (65353, false, "sopsenv (SOPS Version Manager) Daemon (HTTP/API)"),
+    (65454, false, "ocenv (OpenShift Version Manager) Daemon (HTTP/API)"),
+    (65525, false, "sbtenv (sbt Version Manager) Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
