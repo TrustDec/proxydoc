@@ -959,7 +959,13 @@ enum Commands {
         /// Also configure helmenv (Helm Version Manager) Daemon (~/.helmenv/config / ~/.config/helmenv/config / /etc/helmenv/config / /etc/systemd/system/helmenv.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "helmenv-proxy", visible_alias = "helmenv-dev", visible_alias = "helmenv-daemon", visible_alias = "helm-env", visible_alias = "hlm-env")]
         helmenv: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, and helmenv proxy
+        /// Also configure kbenv (Kubectl Version Manager) Daemon (~/.kbenv/config / ~/.config/kbenv/config / /etc/kbenv/config / /etc/systemd/system/kbenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "kbenv-proxy", visible_alias = "kbenv-dev", visible_alias = "kbenv-daemon", visible_alias = "kubectl-env", visible_alias = "k8s-env")]
+        kbenv: bool,
+        /// Also configure sopsenv (SOPS Version Manager) Daemon (~/.sopsenv/config / ~/.config/sopsenv/config / /etc/sopsenv/config / /etc/systemd/system/sopsenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "sopsenv-proxy", visible_alias = "sopsenv-dev", visible_alias = "sopsenv-daemon", visible_alias = "sops-env", visible_alias = "secret-env")]
+        sopsenv: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, and sopsenv proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -1862,7 +1868,13 @@ enum Commands {
         /// Also unset helmenv (Helm Version Manager) Daemon (~/.helmenv/config / ~/.config/helmenv/config / /etc/helmenv/config / /etc/systemd/system/helmenv.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "helmenv-proxy", visible_alias = "helmenv-dev", visible_alias = "helmenv-daemon", visible_alias = "helm-env", visible_alias = "hlm-env")]
         helmenv: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, and helmenv proxy
+        /// Also unset kbenv (Kubectl Version Manager) Daemon (~/.kbenv/config / ~/.config/kbenv/config / /etc/kbenv/config / /etc/systemd/system/kbenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "kbenv-proxy", visible_alias = "kbenv-dev", visible_alias = "kbenv-daemon", visible_alias = "kubectl-env", visible_alias = "k8s-env")]
+        kbenv: bool,
+        /// Also unset sopsenv (SOPS Version Manager) Daemon (~/.sopsenv/config / ~/.config/sopsenv/config / /etc/sopsenv/config / /etc/systemd/system/sopsenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "sopsenv-proxy", visible_alias = "sopsenv-dev", visible_alias = "sopsenv-daemon", visible_alias = "sops-env", visible_alias = "secret-env")]
+        sopsenv: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, and sopsenv proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -2204,6 +2216,8 @@ async fn main() -> Result<()> {
             pkenv,
             tofuenv,
             helmenv,
+            kbenv,
+            sopsenv,
             all,
             shell,
         }) => {
@@ -2507,6 +2521,8 @@ async fn main() -> Result<()> {
                 pkenv,
                 tofuenv,
                 helmenv,
+                kbenv,
+                sopsenv,
                 all,
                 shell.as_deref(),
             )
@@ -2811,6 +2827,8 @@ async fn main() -> Result<()> {
             pkenv,
             tofuenv,
             helmenv,
+            kbenv,
+            sopsenv,
             all,
             shell,
         }) => {
@@ -3113,6 +3131,8 @@ async fn main() -> Result<()> {
                 pkenv,
                 tofuenv,
                 helmenv,
+                kbenv,
+                sopsenv,
                 all,
                 shell.as_deref(),
             )?;
@@ -13979,6 +13999,130 @@ mod tests {
         match cli.command {
             Some(Commands::Off { helmenv, .. }) => {
                 assert!(helmenv);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_kbenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--kbenv"]).unwrap();
+        match cli.command {
+            Some(Commands::On { kbenv, .. }) => {
+                assert!(kbenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--kbenv-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { kbenv, .. }) => {
+                assert!(kbenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--kbenv-dev"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { kbenv, .. }) => {
+                assert!(kbenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--kbenv-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { kbenv, .. }) => {
+                assert!(kbenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--kubectl-env"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { kbenv, .. }) => {
+                assert!(kbenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias5 = Cli::try_parse_from(["proxydoc", "on", "--k8s-env"]).unwrap();
+        match cli_alias5.command {
+            Some(Commands::On { kbenv, .. }) => {
+                assert!(kbenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_kbenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--kbenv"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { kbenv, .. }) => {
+                assert!(kbenv);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_sopsenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--sopsenv"]).unwrap();
+        match cli.command {
+            Some(Commands::On { sopsenv, .. }) => {
+                assert!(sopsenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--sopsenv-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { sopsenv, .. }) => {
+                assert!(sopsenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--sopsenv-dev"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { sopsenv, .. }) => {
+                assert!(sopsenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--sopsenv-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { sopsenv, .. }) => {
+                assert!(sopsenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--sops-env"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { sopsenv, .. }) => {
+                assert!(sopsenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias5 = Cli::try_parse_from(["proxydoc", "on", "--secret-env"]).unwrap();
+        match cli_alias5.command {
+            Some(Commands::On { sopsenv, .. }) => {
+                assert!(sopsenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_sopsenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--sopsenv"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { sopsenv, .. }) => {
+                assert!(sopsenv);
             }
             _ => panic!("Expected Off command"),
         }

@@ -58435,6 +58435,468 @@ pub fn unset_helmenv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_kbenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kbenv_http_proxy"
+                    || k_low == "kbenv_https_proxy"
+                    || k_low == "kbenv_proxy"
+                    || k_low == "kubectl_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"KBENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export kbenv_http_proxy=")
+            || lower.starts_with("export kbenv_https_proxy=")
+            || lower.starts_with("export kbenv_proxy=")
+            || lower.starts_with("export kubectl_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("kbenv_http_proxy=")
+            || lower.starts_with("kbenv_https_proxy=")
+            || lower.starts_with("kbenv_proxy=")
+            || lower.starts_with("kubectl_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export KBENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "kbenv_http_proxy"
+                || k_trim == "kbenv_https_proxy"
+                || k_trim == "kbenv_proxy"
+                || k_trim == "kubectl_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("kbenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"KBENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("kbenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_kbenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "kbenv_proxy", "kbenv_http_proxy", "kubectl_http_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kbenv_http_proxy"
+                    || k_low == "kbenv_https_proxy"
+                    || k_low == "kbenv_proxy"
+                    || k_low == "kubectl_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export kbenv_http_proxy=")
+            || lower.starts_with("export kbenv_https_proxy=")
+            || lower.starts_with("export kbenv_proxy=")
+            || lower.starts_with("export kubectl_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("kbenv_http_proxy=")
+            || lower.starts_with("kbenv_https_proxy=")
+            || lower.starts_with("kbenv_proxy=")
+            || lower.starts_with("kubectl_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "kbenv_http_proxy"
+                || k_trim == "kbenv_https_proxy"
+                || k_trim == "kbenv_proxy"
+                || k_trim == "kubectl_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_kbenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_kbenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_kbenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_kbenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_kbenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_kbenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_sopsenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sopsenv_http_proxy"
+                    || k_low == "sopsenv_https_proxy"
+                    || k_low == "sopsenv_proxy"
+                    || k_low == "sops_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"SOPSENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export sopsenv_http_proxy=")
+            || lower.starts_with("export sopsenv_https_proxy=")
+            || lower.starts_with("export sopsenv_proxy=")
+            || lower.starts_with("export sops_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("sopsenv_http_proxy=")
+            || lower.starts_with("sopsenv_https_proxy=")
+            || lower.starts_with("sopsenv_proxy=")
+            || lower.starts_with("sops_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export SOPSENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "sopsenv_http_proxy"
+                || k_trim == "sopsenv_https_proxy"
+                || k_trim == "sopsenv_proxy"
+                || k_trim == "sops_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("sopsenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"SOPSENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("sopsenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_sopsenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "sopsenv_proxy", "sopsenv_http_proxy", "sops_http_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sopsenv_http_proxy"
+                    || k_low == "sopsenv_https_proxy"
+                    || k_low == "sopsenv_proxy"
+                    || k_low == "sops_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export sopsenv_http_proxy=")
+            || lower.starts_with("export sopsenv_https_proxy=")
+            || lower.starts_with("export sopsenv_proxy=")
+            || lower.starts_with("export sops_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("sopsenv_http_proxy=")
+            || lower.starts_with("sopsenv_https_proxy=")
+            || lower.starts_with("sopsenv_proxy=")
+            || lower.starts_with("sops_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "sopsenv_http_proxy"
+                || k_trim == "sopsenv_https_proxy"
+                || k_trim == "sopsenv_proxy"
+                || k_trim == "sops_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_sopsenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_sopsenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_sopsenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_sopsenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_sopsenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_sopsenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -58735,6 +59197,8 @@ pub async fn turn_on(
     pkenv: bool,
     tofuenv: bool,
     helmenv: bool,
+    kbenv: bool,
+    sopsenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -59034,6 +59498,8 @@ pub async fn turn_on(
     let set_pkenv = pkenv || all;
     let set_tofuenv = tofuenv || all;
     let set_helmenv = helmenv || all;
+    let set_kbenv = kbenv || all;
+    let set_sopsenv = sopsenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -63405,6 +63871,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_kbenv {
+        match set_kbenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ kbenv (Kubectl Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update kbenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_sopsenv {
+        match set_sopsenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ sopsenv (SOPS Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update sopsenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -63718,6 +64214,8 @@ pub fn turn_off(
     pkenv: bool,
     tofuenv: bool,
     helmenv: bool,
+    kbenv: bool,
+    sopsenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -64017,6 +64515,8 @@ pub fn turn_off(
     let unset_pkenv = pkenv || all;
     let unset_tofuenv = tofuenv || all;
     let unset_helmenv = helmenv || all;
+    let unset_kbenv = kbenv || all;
+    let unset_sopsenv = sopsenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -66626,6 +67126,34 @@ pub fn turn_off(
                 "○ helmenv Helm Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update helmenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_kbenv {
+        match unset_kbenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ kbenv Kubectl Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ kbenv Kubectl Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update kbenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_sopsenv {
+        match unset_sopsenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ sopsenv SOPS Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ sopsenv SOPS Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update sopsenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -73320,6 +73848,40 @@ auth: pass123
         let dropin_updated = apply_helmenv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_helmenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_kbenv_proxy() {
+        let conf_initial = "KBENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_kbenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_kbenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/kbenv\n";
+        let dropin_updated = apply_kbenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_kbenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_sopsenv_proxy() {
+        let conf_initial = "SOPSENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_sopsenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_sopsenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/sopsenv\n";
+        let dropin_updated = apply_sopsenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_sopsenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

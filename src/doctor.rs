@@ -68347,6 +68347,566 @@ pub fn get_helmenv_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_kbenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("KBENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("kbenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("KBENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("kbenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".kbenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("kbenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".kbenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("kbenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".kbenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".kbenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/kbenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/kbenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/kbenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_kbenv_config_path() -> Option<PathBuf> {
+    let paths = get_kbenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_kbenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_kbenv_write_path() -> PathBuf {
+    if let Some(p) = get_kbenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("KBENV_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Ok(dir) = std::env::var("KBENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let kbenv_dir = home.join(".kbenv");
+        if kbenv_dir.is_dir() {
+            return kbenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("kbenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".kbenv").join("config");
+    }
+    PathBuf::from("/etc/kbenv/config")
+}
+
+pub fn parse_kbenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "kbenv_proxy", "kbenv_http_proxy", "kubectl_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kbenv_http_proxy"
+                    || k_low == "kbenv_https_proxy"
+                    || k_low == "kbenv_proxy"
+                    || k_low == "kubectl_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export kbenv_http_proxy=")
+            || lower.starts_with("export kbenv_https_proxy=")
+            || lower.starts_with("export kbenv_proxy=")
+            || lower.starts_with("export kubectl_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("kbenv_http_proxy=")
+            || lower.starts_with("kbenv_https_proxy=")
+            || lower.starts_with("kbenv_proxy=")
+            || lower.starts_with("kubectl_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "kbenv_http_proxy"
+                || k_low == "kbenv_https_proxy"
+                || k_low == "kbenv_proxy"
+                || k_low == "kubectl_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_kbenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_kbenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_kbenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("KBENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KBENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("KBENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KBENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("KUBECTL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KUBECTL_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_sopsenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("SOPSENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("sopsenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("SOPSENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("sopsenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".sopsenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("sopsenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".sopsenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("sopsenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".sopsenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".sopsenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/sopsenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/sopsenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/sopsenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_sopsenv_config_path() -> Option<PathBuf> {
+    let paths = get_sopsenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_sopsenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_sopsenv_write_path() -> PathBuf {
+    if let Some(p) = get_sopsenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("SOPSENV_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Ok(dir) = std::env::var("SOPSENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let sopsenv_dir = home.join(".sopsenv");
+        if sopsenv_dir.is_dir() {
+            return sopsenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("sopsenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".sopsenv").join("config");
+    }
+    PathBuf::from("/etc/sopsenv/config")
+}
+
+pub fn parse_sopsenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "sopsenv_proxy", "sopsenv_http_proxy", "sops_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "sopsenv_http_proxy"
+                    || k_low == "sopsenv_https_proxy"
+                    || k_low == "sopsenv_proxy"
+                    || k_low == "sops_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export sopsenv_http_proxy=")
+            || lower.starts_with("export sopsenv_https_proxy=")
+            || lower.starts_with("export sopsenv_proxy=")
+            || lower.starts_with("export sops_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("sopsenv_http_proxy=")
+            || lower.starts_with("sopsenv_https_proxy=")
+            || lower.starts_with("sopsenv_proxy=")
+            || lower.starts_with("sops_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "sopsenv_http_proxy"
+                || k_low == "sopsenv_https_proxy"
+                || k_low == "sopsenv_proxy"
+                || k_low == "sops_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_sopsenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_sopsenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_sopsenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SOPSENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SOPSENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SOPSENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SOPSENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SOPS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SOPS_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -79016,6 +79576,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "helmenv Dev Proxy",
             "~/.helmenv/config & ~/.config/helmenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // kbenv Kubectl Version Manager Daemon (~/.kbenv/config / ~/.config/kbenv/config / /etc/kbenv/config / /etc/systemd/system/kbenv.service.d/http-proxy.conf)
+    if let Some((kbenv_proxy, kbenv_path)) = get_kbenv_proxy() {
+        let ok = verify_proxy_url(&kbenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "kbenv proxy `{}` in {} is dead! (kbenv toolchain proxy will fail)",
+                kbenv_proxy,
+                kbenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "kbenv Dev Proxy",
+            format!("{}", kbenv_path.display()),
+            kbenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (kbenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "kbenv Dev Proxy",
+            "~/.kbenv/config & ~/.config/kbenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // sopsenv SOPS Version Manager Daemon (~/.sopsenv/config / ~/.config/sopsenv/config / /etc/sopsenv/config / /etc/systemd/system/sopsenv.service.d/http-proxy.conf)
+    if let Some((sopsenv_proxy, sopsenv_path)) = get_sopsenv_proxy() {
+        let ok = verify_proxy_url(&sopsenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "sopsenv proxy `{}` in {} is dead! (sopsenv toolchain proxy will fail)",
+                sopsenv_proxy,
+                sopsenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "sopsenv Dev Proxy",
+            format!("{}", sopsenv_path.display()),
+            sopsenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (sopsenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "sopsenv Dev Proxy",
+            "~/.sopsenv/config & ~/.config/sopsenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -90295,5 +90919,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// helmenv_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_helmenv_proxy(input_comment), None);
         assert_eq!(parse_helmenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_kbenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_kbenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "kbenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_kbenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_kbenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// kbenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_kbenv_proxy(input_comment), None);
+        assert_eq!(parse_kbenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_sopsenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_sopsenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "sopsenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_sopsenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_sopsenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// sopsenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_sopsenv_proxy(input_comment), None);
+        assert_eq!(parse_sopsenv_proxy(""), None);
     }
 }
