@@ -3246,6 +3246,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "RULER AI CDN",
         "https://github.com/hsiehpinghan/RULER",
     ),
+    (
+        "rkenv Dev CDN",
+        "https://github.com/dryman/rkenv",
+    ),
+    (
+        "gdenv Dev CDN",
+        "https://github.com/Nicolas-F/gdenv",
+    ),
+    (
+        "MATH AI CDN",
+        "https://github.com/hendrycks/math",
+    ),
+    (
+        "GSM8K AI CDN",
+        "https://github.com/openai/grade-school-math",
+    ),
+    (
+        "MBPP AI CDN",
+        "https://github.com/google-research/google-research",
+    ),
+    (
+        "ARC-AGI AI CDN",
+        "https://github.com/fchollet/ARC-AGI",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5990,6 +6014,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "RULER AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "rkenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "gdenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MATH AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GSM8K AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MBPP AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ARC-AGI AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
