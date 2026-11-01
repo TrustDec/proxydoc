@@ -3486,6 +3486,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "OmniDocBench AI CDN",
         "https://github.com/opendatalab/OmniDocBench",
     ),
+    (
+        "wasmenv Dev CDN",
+        "https://github.com/ayys/wasmenv",
+    ),
+    (
+        "hfenv Dev CDN",
+        "https://github.com/robgro/hfenv",
+    ),
+    (
+        "OCRBench AI CDN",
+        "https://github.com/Yuliang-Liu/MultimodalOCR",
+    ),
+    (
+        "ScienceQA AI CDN",
+        "https://github.com/lupantech/ScienceQA",
+    ),
+    (
+        "InfoVQA AI CDN",
+        "https://github.com/doc-analysis/InfoVQA",
+    ),
+    (
+        "PlotQA AI CDN",
+        "https://github.com/vis-nlp/PlotQA",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6410,6 +6434,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "OmniDocBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "wasmenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "hfenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OCRBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ScienceQA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InfoVQA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "PlotQA AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

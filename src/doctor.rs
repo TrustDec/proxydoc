@@ -79304,6 +79304,590 @@ pub fn get_cueenv_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_wasmenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("WASMENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("wasmenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("WASMENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("wasmenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".wasmenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("wasmenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".wasmenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("wasmenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".wasmenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".wasmenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".wasmenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/wasmenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/wasmenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/wasmenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_wasmenv_config_path() -> Option<PathBuf> {
+    let paths = get_wasmenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_wasmenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_wasmenv_write_path() -> PathBuf {
+    if let Some(p) = get_wasmenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("WASMENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Ok(dir) = std::env::var("WASMENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let wasmenv_dir = home.join(".wasmenv");
+        if wasmenv_dir.is_dir() {
+            return wasmenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("wasmenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".wasmenv").join("config");
+    }
+    PathBuf::from("/etc/wasmenv/config")
+}
+
+pub fn parse_wasmenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "wasmenv_proxy", "wasmenv_http_proxy", "wasm_http_proxy", "wasm_proxy"] {
+                if let Some(v) = obj.get(*k).and_then(|x| x.as_str()) {
+                    let trim = v.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "wasmenv_http_proxy"
+                    || k_low == "wasmenv_https_proxy"
+                    || k_low == "wasmenv_proxy"
+                    || k_low == "wasm_http_proxy"
+                    || k_low == "wasm_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export wasmenv_http_proxy=")
+            || lower.starts_with("export wasmenv_https_proxy=")
+            || lower.starts_with("export wasmenv_proxy=")
+            || lower.starts_with("export wasm_http_proxy=")
+            || lower.starts_with("export wasm_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("wasmenv_http_proxy=")
+            || lower.starts_with("wasmenv_https_proxy=")
+            || lower.starts_with("wasmenv_proxy=")
+            || lower.starts_with("wasm_http_proxy=")
+            || lower.starts_with("wasm_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "wasmenv_http_proxy"
+                || k_low == "wasmenv_https_proxy"
+                || k_low == "wasmenv_proxy"
+                || k_low == "wasm_http_proxy"
+                || k_low == "wasm_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_wasmenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_wasmenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_wasmenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("WASMENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WASMENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("WASMENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WASMENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("WASM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:WASM_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_hfenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("HFENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("hfenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("HFENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("hfenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".hfenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("hfenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".hfenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("hfenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".hfenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".hfenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".hfenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/hfenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/hfenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/hfenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_hfenv_config_path() -> Option<PathBuf> {
+    let paths = get_hfenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_hfenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_hfenv_write_path() -> PathBuf {
+    if let Some(p) = get_hfenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("HFENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Ok(dir) = std::env::var("HFENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let hfenv_dir = home.join(".hfenv");
+        if hfenv_dir.is_dir() {
+            return hfenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("hfenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".hfenv").join("config");
+    }
+    PathBuf::from("/etc/hfenv/config")
+}
+
+pub fn parse_hfenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "hfenv_proxy", "hfenv_http_proxy", "helmfile_http_proxy", "helmfile_proxy"] {
+                if let Some(v) = obj.get(*k).and_then(|x| x.as_str()) {
+                    let trim = v.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "hfenv_http_proxy"
+                    || k_low == "hfenv_https_proxy"
+                    || k_low == "hfenv_proxy"
+                    || k_low == "helmfile_http_proxy"
+                    || k_low == "helmfile_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export hfenv_http_proxy=")
+            || lower.starts_with("export hfenv_https_proxy=")
+            || lower.starts_with("export hfenv_proxy=")
+            || lower.starts_with("export helmfile_http_proxy=")
+            || lower.starts_with("export helmfile_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("hfenv_http_proxy=")
+            || lower.starts_with("hfenv_https_proxy=")
+            || lower.starts_with("hfenv_proxy=")
+            || lower.starts_with("helmfile_http_proxy=")
+            || lower.starts_with("helmfile_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "hfenv_http_proxy"
+                || k_low == "hfenv_https_proxy"
+                || k_low == "hfenv_proxy"
+                || k_low == "helmfile_http_proxy"
+                || k_low == "helmfile_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_hfenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_hfenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_hfenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("HFENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HFENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HFENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HFENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HELMFILE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HELMFILE_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -91189,6 +91773,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "cueenv Dev Proxy",
             "~/.cueenv/config & ~/.config/cueenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // wasmenv WebAssembly Version Manager Daemon (~/.wasmenv/config / ~/.config/wasmenv/config / /etc/wasmenv/config / /etc/systemd/system/wasmenv.service.d/http-proxy.conf)
+    if let Some((wasmenv_proxy, wasmenv_path)) = get_wasmenv_proxy() {
+        let ok = verify_proxy_url(&wasmenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "wasmenv proxy `{}` in {} is dead! (wasmenv toolchain proxy will fail)",
+                wasmenv_proxy,
+                wasmenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "wasmenv Dev Proxy",
+            format!("{}", wasmenv_path.display()),
+            wasmenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (wasmenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "wasmenv Dev Proxy",
+            "~/.wasmenv/config & ~/.config/wasmenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // hfenv Helmfile Version Manager Daemon (~/.hfenv/config / ~/.config/hfenv/config / /etc/hfenv/config / /etc/systemd/system/hfenv.service.d/http-proxy.conf)
+    if let Some((hfenv_proxy, hfenv_path)) = get_hfenv_proxy() {
+        let ok = verify_proxy_url(&hfenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "hfenv proxy `{}` in {} is dead! (hfenv toolchain proxy will fail)",
+                hfenv_proxy,
+                hfenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "hfenv Dev Proxy",
+            format!("{}", hfenv_path.display()),
+            hfenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (hfenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "hfenv Dev Proxy",
+            "~/.hfenv/config & ~/.config/hfenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -103418,5 +104066,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// cueenv_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_cueenv_proxy(input_comment), None);
         assert_eq!(parse_cueenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_wasmenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_wasmenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "wasmenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_wasmenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_wasmenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// wasmenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_wasmenv_proxy(input_comment), None);
+        assert_eq!(parse_wasmenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_hfenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_hfenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "hfenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_hfenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_hfenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// hfenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_hfenv_proxy(input_comment), None);
+        assert_eq!(parse_hfenv_proxy(""), None);
     }
 }
