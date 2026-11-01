@@ -3366,6 +3366,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "MathVerse AI CDN",
         "https://github.com/ZrrSkywalker/MathVerse",
     ),
+    (
+        "kzenv Dev CDN",
+        "https://github.com/kzenv/kzenv",
+    ),
+    (
+        "solenv Dev CDN",
+        "https://github.com/0xKitsune/solenv",
+    ),
+    (
+        "GSM-Symbolic AI CDN",
+        "https://github.com/apple/ml-gsm-symbolic",
+    ),
+    (
+        "MultiPL-E AI CDN",
+        "https://github.com/nuprl/MultiPL-E",
+    ),
+    (
+        "CharXiv AI CDN",
+        "https://github.com/charxiv/charxiv",
+    ),
+    (
+        "CodeSearchNet AI CDN",
+        "https://github.com/github/CodeSearchNet",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6200,6 +6224,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "MathVerse AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "kzenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "solenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GSM-Symbolic AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MultiPL-E AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CharXiv AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CodeSearchNet AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
