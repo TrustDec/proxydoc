@@ -69328,6 +69328,484 @@ pub fn unset_linkerdenv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_fluxenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "fluxenv_http_proxy"
+                    || k_low == "fluxenv_https_proxy"
+                    || k_low == "fluxenv_proxy"
+                    || k_low == "flux_http_proxy"
+                    || k_low == "flux_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"FLUXENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export fluxenv_http_proxy=")
+            || lower.starts_with("export fluxenv_https_proxy=")
+            || lower.starts_with("export fluxenv_proxy=")
+            || lower.starts_with("export flux_http_proxy=")
+            || lower.starts_with("export flux_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("fluxenv_http_proxy=")
+            || lower.starts_with("fluxenv_https_proxy=")
+            || lower.starts_with("fluxenv_proxy=")
+            || lower.starts_with("flux_http_proxy=")
+            || lower.starts_with("flux_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export FLUXENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "fluxenv_http_proxy"
+                || k_trim == "fluxenv_https_proxy"
+                || k_trim == "fluxenv_proxy"
+                || k_trim == "flux_http_proxy"
+                || k_trim == "flux_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("fluxenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"FLUXENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("fluxenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_fluxenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "fluxenv_proxy", "fluxenv_http_proxy", "flux_http_proxy", "flux_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "fluxenv_http_proxy"
+                    || k_low == "fluxenv_https_proxy"
+                    || k_low == "fluxenv_proxy"
+                    || k_low == "flux_http_proxy"
+                    || k_low == "flux_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export fluxenv_http_proxy=")
+            || lower.starts_with("export fluxenv_https_proxy=")
+            || lower.starts_with("export fluxenv_proxy=")
+            || lower.starts_with("export flux_http_proxy=")
+            || lower.starts_with("export flux_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("fluxenv_http_proxy=")
+            || lower.starts_with("fluxenv_https_proxy=")
+            || lower.starts_with("fluxenv_proxy=")
+            || lower.starts_with("flux_http_proxy=")
+            || lower.starts_with("flux_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "fluxenv_http_proxy"
+                || k_trim == "fluxenv_https_proxy"
+                || k_trim == "fluxenv_proxy"
+                || k_trim == "flux_http_proxy"
+                || k_trim == "flux_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_fluxenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_fluxenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_fluxenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_fluxenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_fluxenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_fluxenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_kindenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kindenv_http_proxy"
+                    || k_low == "kindenv_https_proxy"
+                    || k_low == "kindenv_proxy"
+                    || k_low == "kind_http_proxy"
+                    || k_low == "kind_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"KINDENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export kindenv_http_proxy=")
+            || lower.starts_with("export kindenv_https_proxy=")
+            || lower.starts_with("export kindenv_proxy=")
+            || lower.starts_with("export kind_http_proxy=")
+            || lower.starts_with("export kind_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("kindenv_http_proxy=")
+            || lower.starts_with("kindenv_https_proxy=")
+            || lower.starts_with("kindenv_proxy=")
+            || lower.starts_with("kind_http_proxy=")
+            || lower.starts_with("kind_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export KINDENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "kindenv_http_proxy"
+                || k_trim == "kindenv_https_proxy"
+                || k_trim == "kindenv_proxy"
+                || k_trim == "kind_http_proxy"
+                || k_trim == "kind_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("kindenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"KINDENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("kindenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_kindenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "kindenv_proxy", "kindenv_http_proxy", "kind_http_proxy", "kind_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kindenv_http_proxy"
+                    || k_low == "kindenv_https_proxy"
+                    || k_low == "kindenv_proxy"
+                    || k_low == "kind_http_proxy"
+                    || k_low == "kind_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export kindenv_http_proxy=")
+            || lower.starts_with("export kindenv_https_proxy=")
+            || lower.starts_with("export kindenv_proxy=")
+            || lower.starts_with("export kind_http_proxy=")
+            || lower.starts_with("export kind_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("kindenv_http_proxy=")
+            || lower.starts_with("kindenv_https_proxy=")
+            || lower.starts_with("kindenv_proxy=")
+            || lower.starts_with("kind_http_proxy=")
+            || lower.starts_with("kind_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "kindenv_http_proxy"
+                || k_trim == "kindenv_https_proxy"
+                || k_trim == "kindenv_proxy"
+                || k_trim == "kind_http_proxy"
+                || k_trim == "kind_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_kindenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_kindenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_kindenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_kindenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_kindenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_kindenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -69674,6 +70152,8 @@ pub async fn turn_on(
     istioenv: bool,
     ciliumenv: bool,
     linkerdenv: bool,
+    fluxenv: bool,
+    kindenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -70019,6 +70499,8 @@ pub async fn turn_on(
     let set_istioenv = istioenv || all;
     let set_ciliumenv = ciliumenv || all;
     let set_linkerdenv = linkerdenv || all;
+    let set_fluxenv = fluxenv || all;
+    let set_kindenv = kindenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -75080,6 +75562,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_fluxenv {
+        match set_fluxenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ fluxenv (Flux GitOps Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update fluxenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_kindenv {
+        match set_kindenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ kindenv (kind - Kubernetes IN Docker Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update kindenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -75439,6 +75951,8 @@ pub fn turn_off(
     istioenv: bool,
     ciliumenv: bool,
     linkerdenv: bool,
+    fluxenv: bool,
+    kindenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -75784,6 +76298,8 @@ pub fn turn_off(
     let unset_istioenv = istioenv || all;
     let unset_ciliumenv = ciliumenv || all;
     let unset_linkerdenv = linkerdenv || all;
+    let unset_fluxenv = fluxenv || all;
+    let unset_kindenv = kindenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -79037,6 +79553,34 @@ pub fn turn_off(
                 "○ linkerdenv Linkerd Service Mesh Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update linkerdenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_fluxenv {
+        match unset_fluxenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ fluxenv Flux GitOps Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ fluxenv Flux GitOps Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update fluxenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_kindenv {
+        match unset_kindenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ kindenv kind - Kubernetes IN Docker Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ kindenv kind - Kubernetes IN Docker Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update kindenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -86513,6 +87057,40 @@ auth: pass123
         let dropin_updated = apply_linkerdenv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_linkerdenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_fluxenv_proxy() {
+        let conf_initial = "FLUXENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_fluxenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_fluxenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/fluxenv\n";
+        let dropin_updated = apply_fluxenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_fluxenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_kindenv_proxy() {
+        let conf_initial = "KINDENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_kindenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_kindenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/kindenv\n";
+        let dropin_updated = apply_kindenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_kindenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

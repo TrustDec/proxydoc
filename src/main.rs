@@ -1097,7 +1097,13 @@ enum Commands {
         /// Also configure linkerdenv (Linkerd Service Mesh Version Manager) Daemon (~/.linkerdenv/config / ~/.config/linkerdenv/config / /etc/linkerdenv/config / /etc/systemd/system/linkerdenv.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "linkerdenv-proxy", visible_alias = "linkerdenv-dev", visible_alias = "linkerdenv-daemon", visible_alias = "linkerdenv-env", visible_alias = "linkerd-env")]
         linkerdenv: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, sopsenv, ocenv, sbtenv, scalaenv, cljenv, crenv, haxenv, plenv, exenv, luaenv, erlenv, dartenv, renv, kotenv, denoenv, bunenv, pgenv, rkenv, gdenv, anyenv, jlenv, zenv, vlenv, glenv, nimenv, tkenv, hsenv, kzenv, solenv, bzenv, ctenv, cmenv, bufenv, pklenv, opaenv, dbtenv, cueenv, wasmenv, hfenv, kopsenv, tflintenv, argoenv, istioenv, ciliumenv, and linkerdenv proxy
+        /// Also configure fluxenv (Flux GitOps Version Manager) Daemon (~/.fluxenv/config / ~/.config/fluxenv/config / /etc/fluxenv/config / /etc/systemd/system/fluxenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "fluxenv-proxy", visible_alias = "fluxenv-dev", visible_alias = "fluxenv-daemon", visible_alias = "fluxenv-env", visible_alias = "flux-env")]
+        fluxenv: bool,
+        /// Also configure kindenv (kind - Kubernetes IN Docker Version Manager) Daemon (~/.kindenv/config / ~/.config/kindenv/config / /etc/kindenv/config / /etc/systemd/system/kindenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "kindenv-proxy", visible_alias = "kindenv-dev", visible_alias = "kindenv-daemon", visible_alias = "kindenv-env", visible_alias = "kind-env")]
+        kindenv: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, sopsenv, ocenv, sbtenv, scalaenv, cljenv, crenv, haxenv, plenv, exenv, luaenv, erlenv, dartenv, renv, kotenv, denoenv, bunenv, pgenv, rkenv, gdenv, anyenv, jlenv, zenv, vlenv, glenv, nimenv, tkenv, hsenv, kzenv, solenv, bzenv, ctenv, cmenv, bufenv, pklenv, opaenv, dbtenv, cueenv, wasmenv, hfenv, kopsenv, tflintenv, argoenv, istioenv, ciliumenv, linkerdenv, fluxenv, and kindenv proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -2138,7 +2144,13 @@ enum Commands {
         /// Also unset linkerdenv (Linkerd Service Mesh Version Manager) Daemon (~/.linkerdenv/config / ~/.config/linkerdenv/config / /etc/linkerdenv/config / /etc/systemd/system/linkerdenv.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "linkerdenv-proxy", visible_alias = "linkerdenv-dev", visible_alias = "linkerdenv-daemon", visible_alias = "linkerdenv-env", visible_alias = "linkerd-env")]
         linkerdenv: bool,
-        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, sopsenv, ocenv, sbtenv, scalaenv, cljenv, crenv, haxenv, plenv, exenv, luaenv, erlenv, dartenv, renv, kotenv, denoenv, bunenv, pgenv, rkenv, gdenv, anyenv, jlenv, zenv, vlenv, glenv, nimenv, tkenv, hsenv, kzenv, solenv, bzenv, ctenv, cmenv, bufenv, pklenv, opaenv, dbtenv, cueenv, wasmenv, hfenv, kopsenv, tflintenv, argoenv, istioenv, ciliumenv, and linkerdenv proxy
+        /// Also unset fluxenv (Flux GitOps Version Manager) Daemon (~/.fluxenv/config / ~/.config/fluxenv/config / /etc/fluxenv/config / /etc/systemd/system/fluxenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "fluxenv-proxy", visible_alias = "fluxenv-dev", visible_alias = "fluxenv-daemon", visible_alias = "fluxenv-env", visible_alias = "flux-env")]
+        fluxenv: bool,
+        /// Also unset kindenv (kind - Kubernetes IN Docker Version Manager) Daemon (~/.kindenv/config / ~/.config/kindenv/config / /etc/kindenv/config / /etc/systemd/system/kindenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "kindenv-proxy", visible_alias = "kindenv-dev", visible_alias = "kindenv-daemon", visible_alias = "kindenv-env", visible_alias = "kind-env")]
+        kindenv: bool,
+        /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, sopsenv, ocenv, sbtenv, scalaenv, cljenv, crenv, haxenv, plenv, exenv, luaenv, erlenv, dartenv, renv, kotenv, denoenv, bunenv, pgenv, rkenv, gdenv, anyenv, jlenv, zenv, vlenv, glenv, nimenv, tkenv, hsenv, kzenv, solenv, bzenv, ctenv, cmenv, bufenv, pklenv, opaenv, dbtenv, cueenv, wasmenv, hfenv, kopsenv, tflintenv, argoenv, istioenv, ciliumenv, linkerdenv, fluxenv, and kindenv proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -2526,6 +2538,8 @@ async fn main() -> Result<()> {
             istioenv,
             ciliumenv,
             linkerdenv,
+            fluxenv,
+            kindenv,
             all,
             shell,
         }) => {
@@ -2875,6 +2889,8 @@ async fn main() -> Result<()> {
                 istioenv,
                 ciliumenv,
                 linkerdenv,
+                fluxenv,
+                kindenv,
                 all,
                 shell.as_deref(),
             )
@@ -3225,6 +3241,8 @@ async fn main() -> Result<()> {
             istioenv,
             ciliumenv,
             linkerdenv,
+            fluxenv,
+            kindenv,
             all,
             shell,
         }) => {
@@ -3573,6 +3591,8 @@ async fn main() -> Result<()> {
                 istioenv,
                 ciliumenv,
                 linkerdenv,
+                fluxenv,
+                kindenv,
                 all,
                 shell.as_deref(),
             )?;
@@ -17283,6 +17303,130 @@ mod tests {
         match cli.command {
             Some(Commands::Off { linkerdenv, .. }) => {
                 assert!(linkerdenv);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_fluxenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--fluxenv"]).unwrap();
+        match cli.command {
+            Some(Commands::On { fluxenv, .. }) => {
+                assert!(fluxenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--fluxenv-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { fluxenv, .. }) => {
+                assert!(fluxenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--fluxenv-dev"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { fluxenv, .. }) => {
+                assert!(fluxenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--fluxenv-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { fluxenv, .. }) => {
+                assert!(fluxenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--fluxenv-env"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { fluxenv, .. }) => {
+                assert!(fluxenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias5 = Cli::try_parse_from(["proxydoc", "on", "--flux-env"]).unwrap();
+        match cli_alias5.command {
+            Some(Commands::On { fluxenv, .. }) => {
+                assert!(fluxenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_fluxenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--fluxenv"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { fluxenv, .. }) => {
+                assert!(fluxenv);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_kindenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--kindenv"]).unwrap();
+        match cli.command {
+            Some(Commands::On { kindenv, .. }) => {
+                assert!(kindenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--kindenv-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { kindenv, .. }) => {
+                assert!(kindenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--kindenv-dev"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { kindenv, .. }) => {
+                assert!(kindenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--kindenv-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { kindenv, .. }) => {
+                assert!(kindenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--kindenv-env"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { kindenv, .. }) => {
+                assert!(kindenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias5 = Cli::try_parse_from(["proxydoc", "on", "--kind-env"]).unwrap();
+        match cli_alias5.command {
+            Some(Commands::On { kindenv, .. }) => {
+                assert!(kindenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_kindenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--kindenv"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { kindenv, .. }) => {
+                assert!(kindenv);
             }
             _ => panic!("Expected Off command"),
         }
