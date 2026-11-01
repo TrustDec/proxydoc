@@ -65550,6 +65550,549 @@ pub fn get_choosenim_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_coursier_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("COURSIER_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("coursier.properties");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("coursier.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Ok(dir) = std::env::var("COURSIER_DIR") {
+        let p = PathBuf::from(dir.trim()).join("coursier.properties");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("coursier.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Ok(dir) = std::env::var("COURSIER_CACHE") {
+        let p = PathBuf::from(dir.trim()).join("coursier.properties");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".config").join("coursier").join("coursier.properties");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".coursier").join("coursier.properties");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("coursier").join("coursier.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".coursier").join("coursier.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".config").join("coursier").join("coursier.conf");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".coursierrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/coursier.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/coursier/coursier.properties");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_json = PathBuf::from("/etc/coursier/coursier.json");
+    if etc_json.exists() && !paths.contains(&etc_json) {
+        paths.push(etc_json);
+    }
+    let etc_conf = PathBuf::from("/etc/coursier/coursier.conf");
+    if etc_conf.exists() && !paths.contains(&etc_conf) {
+        paths.push(etc_conf);
+    }
+    paths
+}
+
+pub fn get_coursier_config_path() -> Option<PathBuf> {
+    let paths = get_coursier_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_coursier_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_coursier_write_path() -> PathBuf {
+    if let Some(p) = get_coursier_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("COURSIER_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("coursier.properties");
+    }
+    if let Ok(dir) = std::env::var("COURSIER_DIR") {
+        return PathBuf::from(dir.trim()).join("coursier.properties");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let cfg_dir = home.join(".config").join("coursier");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("coursier.properties");
+        }
+        let cs_dir = home.join(".coursier");
+        if cs_dir.is_dir() {
+            return cs_dir.join("coursier.properties");
+        }
+        return home.join(".config").join("coursier").join("coursier.properties");
+    }
+    PathBuf::from("/etc/coursier/coursier.properties")
+}
+
+pub fn parse_coursier_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "coursier_proxy", "coursier_http_proxy", "cs_http_proxy", "http.proxyHost"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "coursier_http_proxy"
+                    || k_low == "coursier_https_proxy"
+                    || k_low == "coursier_proxy"
+                    || k_low == "cs_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export coursier_http_proxy=")
+            || lower.starts_with("export coursier_https_proxy=")
+            || lower.starts_with("export coursier_proxy=")
+            || lower.starts_with("export cs_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("coursier_http_proxy=")
+            || lower.starts_with("coursier_https_proxy=")
+            || lower.starts_with("coursier_proxy=")
+            || lower.starts_with("cs_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("coursier_http_proxy")
+            || clean.starts_with("coursier_https_proxy")
+            || clean.starts_with("coursier_proxy")
+            || clean.starts_with("cs_http_proxy")
+            || clean.starts_with("http.proxyhost")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_coursier_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_coursier_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_coursier_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("COURSIER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:COURSIER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("COURSIER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:COURSIER_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CS_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CS_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_kerl_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("KERL_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("kerlrc");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Ok(dir) = std::env::var("KERL_BASE_DIR") {
+        let p = PathBuf::from(dir.trim()).join("kerlrc");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join(".kerlrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".kerlrc");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("kerl").join("kerlrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".config").join("kerl").join("config");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".kerl").join("config");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".kerlrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/kerl.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_kerlrc = PathBuf::from("/etc/kerlrc");
+    if etc_kerlrc.exists() && !paths.contains(&etc_kerlrc) {
+        paths.push(etc_kerlrc);
+    }
+    let etc_config = PathBuf::from("/etc/kerl/kerlrc");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_conf2 = PathBuf::from("/etc/kerl/config");
+    if etc_conf2.exists() && !paths.contains(&etc_conf2) {
+        paths.push(etc_conf2);
+    }
+    paths
+}
+
+pub fn get_kerl_config_path() -> Option<PathBuf> {
+    let paths = get_kerl_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_kerl_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_kerl_write_path() -> PathBuf {
+    if let Some(p) = get_kerl_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("KERL_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("kerlrc");
+    }
+    if let Ok(dir) = std::env::var("KERL_BASE_DIR") {
+        return PathBuf::from(dir.trim()).join(".kerlrc");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let kerl_cfg = home.join(".config").join("kerl");
+        if kerl_cfg.is_dir() {
+            return kerl_cfg.join("kerlrc");
+        }
+        return home.join(".kerlrc");
+    }
+    PathBuf::from("/etc/kerlrc")
+}
+
+pub fn parse_kerl_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "kerl_proxy", "kerl_http_proxy", "erl_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kerl_http_proxy"
+                    || k_low == "kerl_https_proxy"
+                    || k_low == "kerl_proxy"
+                    || k_low == "erl_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export kerl_http_proxy=")
+            || lower.starts_with("export kerl_https_proxy=")
+            || lower.starts_with("export kerl_proxy=")
+            || lower.starts_with("export erl_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("kerl_http_proxy=")
+            || lower.starts_with("kerl_https_proxy=")
+            || lower.starts_with("kerl_proxy=")
+            || lower.starts_with("erl_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("kerl_http_proxy")
+            || clean.starts_with("kerl_https_proxy")
+            || clean.starts_with("kerl_proxy")
+            || clean.starts_with("erl_http_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_kerl_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_kerl_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_kerl_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("KERL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KERL_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("KERL_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:KERL_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ERL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ERL_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -75899,6 +76442,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "choosenim Dev Proxy",
             "~/.choosenim/choosenim.json & ~/.config/choosenim/choosenim.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // coursier Scala Application & Toolchain Manager Daemon (~/.config/coursier/coursier.properties / ~/.coursier/coursier.properties / /etc/coursier/coursier.properties / /etc/systemd/system/coursier.service.d/http-proxy.conf)
+    if let Some((coursier_proxy, coursier_path)) = get_coursier_proxy() {
+        let ok = verify_proxy_url(&coursier_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "coursier proxy `{}` in {} is dead! (coursier toolchain proxy will fail)",
+                coursier_proxy,
+                coursier_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "coursier Dev Proxy",
+            format!("{}", coursier_path.display()),
+            coursier_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (coursier fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "coursier Dev Proxy",
+            "~/.config/coursier/coursier.properties & ~/.coursier/coursier.properties",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // kerl Erlang/OTP Toolchain & Version Manager Daemon (~/.kerlrc / ~/.config/kerl/kerlrc / /etc/kerlrc / /etc/systemd/system/kerl.service.d/http-proxy.conf)
+    if let Some((kerl_proxy, kerl_path)) = get_kerl_proxy() {
+        let ok = verify_proxy_url(&kerl_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "kerl proxy `{}` in {} is dead! (kerl toolchain proxy will fail)",
+                kerl_proxy,
+                kerl_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "kerl Dev Proxy",
+            format!("{}", kerl_path.display()),
+            kerl_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (kerl fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "kerl Dev Proxy",
+            "~/.kerlrc & ~/.config/kerl/kerlrc",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -86928,5 +87535,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// choosenim_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_choosenim_proxy(input_comment), None);
         assert_eq!(parse_choosenim_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_coursier_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_coursier_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "coursier_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_coursier_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_coursier_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// coursier_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_coursier_proxy(input_comment), None);
+        assert_eq!(parse_coursier_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_kerl_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_kerl_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "kerl_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_kerl_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_kerl_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// kerl_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_kerl_proxy(input_comment), None);
+        assert_eq!(parse_kerl_proxy(""), None);
     }
 }

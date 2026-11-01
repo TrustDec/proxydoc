@@ -2910,6 +2910,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "MiniMax AI CDN",
         "https://github.com/MiniMax-AI/MiniMax-01",
     ),
+    (
+        "coursier Dev CDN",
+        "https://github.com/coursier/coursier",
+    ),
+    (
+        "kerl Dev CDN",
+        "https://github.com/kerl/kerl",
+    ),
+    (
+        "Omni-MATH AI CDN",
+        "https://github.com/K-and-K/Omni-MATH",
+    ),
+    (
+        "DocBee AI CDN",
+        "https://github.com/m-bain/docbee",
+    ),
+    (
+        "SimPO AI CDN",
+        "https://github.com/princeton-nlp/SimPO",
+    ),
+    (
+        "LISA AI CDN",
+        "https://github.com/dvlab-research/LISA",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5402,6 +5426,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "MiniMax AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "coursier Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "kerl Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Omni-MATH AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DocBee AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SimPO AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LISA AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

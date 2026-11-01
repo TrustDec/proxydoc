@@ -211,6 +211,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (53535, false, "juliaup (Julia Version Manager) Toolchain Manager Daemon (HTTP/API)"),
     (54545, false, "elan (Lean Theorem Prover Toolchain Manager) Daemon (HTTP/API)"),
     (55555, false, "choosenim (Nim Toolchain & Version Manager) Daemon (HTTP/API)"),
+    (56565, false, "coursier (Scala Toolchain & Application Manager) Daemon (HTTP/API)"),
+    (57575, false, "kerl (Erlang/OTP Toolchain & Version Manager) Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
