@@ -70063,6 +70063,566 @@ pub fn get_cljenv_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_crenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("CRENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("crenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("CRENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("crenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".crenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("crenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".crenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("crenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".crenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".crenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/crenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/crenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/crenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_crenv_config_path() -> Option<PathBuf> {
+    let paths = get_crenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_crenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_crenv_write_path() -> PathBuf {
+    if let Some(p) = get_crenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("CRENV_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Ok(dir) = std::env::var("CRENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let crenv_dir = home.join(".crenv");
+        if crenv_dir.is_dir() {
+            return crenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("crenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".crenv").join("config");
+    }
+    PathBuf::from("/etc/crenv/config")
+}
+
+pub fn parse_crenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "crenv_proxy", "crenv_http_proxy", "crystal_http_proxy", "crystal_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "crenv_http_proxy"
+                    || k_low == "crenv_https_proxy"
+                    || k_low == "crenv_proxy"
+                    || k_low == "crystal_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export crenv_http_proxy=")
+            || lower.starts_with("export crenv_https_proxy=")
+            || lower.starts_with("export crenv_proxy=")
+            || lower.starts_with("export crystal_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("crenv_http_proxy=")
+            || lower.starts_with("crenv_https_proxy=")
+            || lower.starts_with("crenv_proxy=")
+            || lower.starts_with("crystal_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "crenv_http_proxy"
+                || k_low == "crenv_https_proxy"
+                || k_low == "crenv_proxy"
+                || k_low == "crystal_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_crenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_crenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_crenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CRENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CRENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CRENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CRENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CRYSTAL_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CRYSTAL_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_haxenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("HAXENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("haxenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("HAXENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("haxenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".haxenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("haxenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".haxenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("haxenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".haxenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".haxenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/haxenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/haxenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/haxenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_haxenv_config_path() -> Option<PathBuf> {
+    let paths = get_haxenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_haxenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_haxenv_write_path() -> PathBuf {
+    if let Some(p) = get_haxenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("HAXENV_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Ok(dir) = std::env::var("HAXENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let haxenv_dir = home.join(".haxenv");
+        if haxenv_dir.is_dir() {
+            return haxenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("haxenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".haxenv").join("config");
+    }
+    PathBuf::from("/etc/haxenv/config")
+}
+
+pub fn parse_haxenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "haxenv_proxy", "haxenv_http_proxy", "haxe_http_proxy", "haxe_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "haxenv_http_proxy"
+                    || k_low == "haxenv_https_proxy"
+                    || k_low == "haxenv_proxy"
+                    || k_low == "haxe_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export haxenv_http_proxy=")
+            || lower.starts_with("export haxenv_https_proxy=")
+            || lower.starts_with("export haxenv_proxy=")
+            || lower.starts_with("export haxe_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("haxenv_http_proxy=")
+            || lower.starts_with("haxenv_https_proxy=")
+            || lower.starts_with("haxenv_proxy=")
+            || lower.starts_with("haxe_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "haxenv_http_proxy"
+                || k_low == "haxenv_https_proxy"
+                || k_low == "haxenv_proxy"
+                || k_low == "haxe_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_haxenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_haxenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_haxenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("HAXENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HAXENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HAXENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HAXENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HAXE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HAXE_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -80924,6 +81484,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "cljenv Dev Proxy",
             "~/.cljenv/config & ~/.config/cljenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // crenv Crystal Version Manager Daemon (~/.crenv/config / ~/.config/crenv/config / /etc/crenv/config / /etc/systemd/system/crenv.service.d/http-proxy.conf)
+    if let Some((crenv_proxy, crenv_path)) = get_crenv_proxy() {
+        let ok = verify_proxy_url(&crenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "crenv proxy `{}` in {} is dead! (crenv toolchain proxy will fail)",
+                crenv_proxy,
+                crenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "crenv Dev Proxy",
+            format!("{}", crenv_path.display()),
+            crenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (crenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "crenv Dev Proxy",
+            "~/.crenv/config & ~/.config/crenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // haxenv Haxe Version Manager Daemon (~/.haxenv/config / ~/.config/haxenv/config / /etc/haxenv/config / /etc/systemd/system/haxenv.service.d/http-proxy.conf)
+    if let Some((haxenv_proxy, haxenv_path)) = get_haxenv_proxy() {
+        let ok = verify_proxy_url(&haxenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "haxenv proxy `{}` in {} is dead! (haxenv toolchain proxy will fail)",
+                haxenv_proxy,
+                haxenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "haxenv Dev Proxy",
+            format!("{}", haxenv_path.display()),
+            haxenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (haxenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "haxenv Dev Proxy",
+            "~/.haxenv/config & ~/.config/haxenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -92353,5 +92977,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// cljenv_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_cljenv_proxy(input_comment), None);
         assert_eq!(parse_cljenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_crenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_crenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "crenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_crenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_crenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// crenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_crenv_proxy(input_comment), None);
+        assert_eq!(parse_crenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_haxenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_haxenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "haxenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_haxenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_haxenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// haxenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_haxenv_proxy(input_comment), None);
+        assert_eq!(parse_haxenv_proxy(""), None);
     }
 }

@@ -227,6 +227,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (65525, false, "sbtenv (sbt Version Manager) Daemon (HTTP/API)"),
     (65526, false, "scalaenv (Scala Version Manager) Daemon (HTTP/API)"),
     (65527, false, "cljenv (Clojure Version Manager) Daemon (HTTP/API)"),
+    (65528, false, "crenv (Crystal Version Manager) Daemon (HTTP/API)"),
+    (65529, false, "haxenv (Haxe Version Manager) Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
