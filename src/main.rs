@@ -1067,7 +1067,13 @@ enum Commands {
         /// Also configure opaenv (Open Policy Agent Version Manager) Daemon (~/.opaenv/config / ~/.config/opaenv/config / /etc/opaenv/config / /etc/systemd/system/opaenv.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "opaenv-proxy", visible_alias = "opaenv-dev", visible_alias = "opaenv-daemon", visible_alias = "opaenv-env", visible_alias = "opa-env")]
         opaenv: bool,
-        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, sopsenv, ocenv, sbtenv, scalaenv, cljenv, crenv, haxenv, plenv, exenv, luaenv, erlenv, dartenv, renv, kotenv, denoenv, bunenv, pgenv, rkenv, gdenv, anyenv, jlenv, zenv, vlenv, glenv, nimenv, tkenv, hsenv, kzenv, solenv, bzenv, ctenv, cmenv, bufenv, pklenv, and opaenv proxy
+        /// Also configure dbtenv (dbt Version Manager) Daemon (~/.dbtenv/config / ~/.config/dbtenv/config / /etc/dbtenv/config / /etc/systemd/system/dbtenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dbtenv-proxy", visible_alias = "dbtenv-dev", visible_alias = "dbtenv-daemon", visible_alias = "dbtenv-env", visible_alias = "dbt-env")]
+        dbtenv: bool,
+        /// Also configure cueenv (CUE Version Manager) Daemon (~/.cueenv/config / ~/.config/cueenv/config / /etc/cueenv/config / /etc/systemd/system/cueenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cueenv-proxy", visible_alias = "cueenv-dev", visible_alias = "cueenv-daemon", visible_alias = "cueenv-env", visible_alias = "cue-env")]
+        cueenv: bool,
+        /// Also configure git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, sopsenv, ocenv, sbtenv, scalaenv, cljenv, crenv, haxenv, plenv, exenv, luaenv, erlenv, dartenv, renv, kotenv, denoenv, bunenv, pgenv, rkenv, gdenv, anyenv, jlenv, zenv, vlenv, glenv, nimenv, tkenv, hsenv, kzenv, solenv, bzenv, ctenv, cmenv, bufenv, pklenv, opaenv, dbtenv, and cueenv proxy
         #[arg(short, long)]
         all: bool,
         /// Shell format for environment variables: bash, zsh, fish, pwsh (auto-detected if omitted)
@@ -2078,6 +2084,12 @@ enum Commands {
         /// Also unset opaenv (Open Policy Agent Version Manager) Daemon (~/.opaenv/config / ~/.config/opaenv/config / /etc/opaenv/config / /etc/systemd/system/opaenv.service.d/http-proxy.conf)
         #[arg(long, visible_alias = "opaenv-proxy", visible_alias = "opaenv-dev", visible_alias = "opaenv-daemon", visible_alias = "opaenv-env", visible_alias = "opa-env")]
         opaenv: bool,
+        /// Also unset dbtenv (dbt Version Manager) Daemon (~/.dbtenv/config / ~/.config/dbtenv/config / /etc/dbtenv/config / /etc/systemd/system/dbtenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "dbtenv-proxy", visible_alias = "dbtenv-dev", visible_alias = "dbtenv-daemon", visible_alias = "dbtenv-env", visible_alias = "dbt-env")]
+        dbtenv: bool,
+        /// Also unset cueenv (CUE Version Manager) Daemon (~/.cueenv/config / ~/.config/cueenv/config / /etc/cueenv/config / /etc/systemd/system/cueenv.service.d/http-proxy.conf)
+        #[arg(long, visible_alias = "cueenv-proxy", visible_alias = "cueenv-dev", visible_alias = "cueenv-daemon", visible_alias = "cueenv-env", visible_alias = "cue-env")]
+        cueenv: bool,
         /// Also unset git, cargo, npm, yarn, pnpm, bun, pip, conda, docker, gradle, maven, vscode, gh, glab, jetbrains, nuget, gem, svn, hg, uv, go, bazel, composer, conan, sbt, kube, julia, nix, cabal, stack, hex, r, opam, lein, cpan, luarocks, nimble, rebar3, scoop, bundle, gcloud, aws, azure, mamba, podman, vagrant, choco, colima, minikube, spack, macports, apt, dnf, zypper, pacman, pkg, portage, docker daemon, flatpak, snap, ollama, containerd, buildkit, k3s, microk8s, k0s, rke2, nomad, kubelet, gitlab-runner, actions-runner, jenkins, buildkite-agent, woodpecker-agent, drone-runner, act-runner, circleci-runner, azure-pipelines-agent, teamcity-agent, bamboo-agent, tfc-agent, concourse-worker, tentacle-agent, puppet-agent, chef-client, salt-minion, datadog-agent, newrelic-infra, elastic-agent, grafana-alloy, otelcol, vector, fluent-bit, fluentd, telegraf, logstash, prometheus, alertmanager, promtail, vmagent, filebeat, metricbeat, heartbeat, auditbeat, packetbeat, winlogbeat, consul, vault, traefik, caddy, envoy, haproxy, nginx, kong, apisix, squid, privoxy, tinyproxy, mitmproxy, tor, cloudflared, ngrok, frpc, tailscale, zerotier, gost, rathole, chisel, nebula, bore, brook, npc, shadowsocks, v2ray, sing-box, hysteria, trojan, naive, tuic, juicity, snell, leaf, mihomo, stunnel, shadow-tls, tun2socks, wstunnel, cloak, wireproxy, mtg, kcptun, glider, redsocks, dante, 3proxy, polipo, pproxy, microsocks, cntlm, cow, sniproxy, dnsproxy, mosdns, smartdns, coredns, adguard, dnscrypt, unbound, dnsmasq, pihole, blocky, stubby, kresd, pdns, dnsdist, bind, nextdns, pdnsd, maradns, i2pd, dae, yggdrasil, cjdns, tinc, openvpn, softether, openconnect, strongswan, wireguard, headscale, netbird, warp, amnezia, openziti, firezone, netmaker, pritunl, twingate, easytier, teleport, pomerium, innernet, defguard, inlets, zrok, n2n, hyprspace, fastd, edgevpn, boringproxy, ghostunnel, freelan, omniedge, lantern, tunsafe, sshuttle, psiphon, localtunnel, pagekite, toxiproxy, telepresence, localxpose, packetriot, sish, pinggy, loophole, tunnelmole, expose, playit, pgrok, cpolar, tmate, upterm, natapp, lanproxy, teleconsole, tunnelto, webhookrelay, jprq, mysocketctl, openp2p, rport, mirrord, kt-connect, devspace, geph, okteto, skaffold, tilt, garden, daytona, vcluster, coder, devpod, gitpod, devcontainer, mise, pixi, proto, flox, devenv, devbox, aqua, hermit, asdf, vfox, sdkman, rustup, fnm, volta, pyenv, nvm, rbenv, gvm, nodenv, jenv, goenv, phpenv, swiftenv, perlbrew, luaver, ghcup, zvm, juliaup, elan, choosenim, coursier, kerl, tenv, tfswitch, tgswitch, tfenv, tgenv, pkenv, tofuenv, helmenv, kbenv, sopsenv, ocenv, sbtenv, scalaenv, cljenv, crenv, haxenv, plenv, exenv, luaenv, erlenv, dartenv, renv, kotenv, denoenv, bunenv, pgenv, rkenv, gdenv, anyenv, jlenv, zenv, vlenv, glenv, nimenv, tkenv, hsenv, kzenv, solenv, bzenv, ctenv, cmenv, bufenv, pklenv, and opaenv proxy
         #[arg(short, long)]
         all: bool,
@@ -2456,6 +2468,8 @@ async fn main() -> Result<()> {
             bufenv,
             pklenv,
             opaenv,
+            dbtenv,
+            cueenv,
             all,
             shell,
         }) => {
@@ -2795,6 +2809,8 @@ async fn main() -> Result<()> {
                 bufenv,
                 pklenv,
                 opaenv,
+                dbtenv,
+                cueenv,
                 all,
                 shell.as_deref(),
             )
@@ -3135,6 +3151,8 @@ async fn main() -> Result<()> {
             bufenv,
             pklenv,
             opaenv,
+            dbtenv,
+            cueenv,
             all,
             shell,
         }) => {
@@ -3473,6 +3491,8 @@ async fn main() -> Result<()> {
                 bufenv,
                 pklenv,
                 opaenv,
+                dbtenv,
+                cueenv,
                 all,
                 shell.as_deref(),
             )?;
@@ -16563,6 +16583,130 @@ mod tests {
         match cli.command {
             Some(Commands::Off { opaenv, .. }) => {
                 assert!(opaenv);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_dbtenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--dbtenv"]).unwrap();
+        match cli.command {
+            Some(Commands::On { dbtenv, .. }) => {
+                assert!(dbtenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--dbtenv-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { dbtenv, .. }) => {
+                assert!(dbtenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--dbtenv-dev"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { dbtenv, .. }) => {
+                assert!(dbtenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--dbtenv-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { dbtenv, .. }) => {
+                assert!(dbtenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--dbtenv-env"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { dbtenv, .. }) => {
+                assert!(dbtenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias5 = Cli::try_parse_from(["proxydoc", "on", "--dbt-env"]).unwrap();
+        match cli_alias5.command {
+            Some(Commands::On { dbtenv, .. }) => {
+                assert!(dbtenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_dbtenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--dbtenv"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { dbtenv, .. }) => {
+                assert!(dbtenv);
+            }
+            _ => panic!("Expected Off command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_on_cueenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "on", "--cueenv"]).unwrap();
+        match cli.command {
+            Some(Commands::On { cueenv, .. }) => {
+                assert!(cueenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias = Cli::try_parse_from(["proxydoc", "on", "--cueenv-proxy"]).unwrap();
+        match cli_alias.command {
+            Some(Commands::On { cueenv, .. }) => {
+                assert!(cueenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias2 = Cli::try_parse_from(["proxydoc", "on", "--cueenv-dev"]).unwrap();
+        match cli_alias2.command {
+            Some(Commands::On { cueenv, .. }) => {
+                assert!(cueenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias3 = Cli::try_parse_from(["proxydoc", "on", "--cueenv-daemon"]).unwrap();
+        match cli_alias3.command {
+            Some(Commands::On { cueenv, .. }) => {
+                assert!(cueenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias4 = Cli::try_parse_from(["proxydoc", "on", "--cueenv-env"]).unwrap();
+        match cli_alias4.command {
+            Some(Commands::On { cueenv, .. }) => {
+                assert!(cueenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+
+        let cli_alias5 = Cli::try_parse_from(["proxydoc", "on", "--cue-env"]).unwrap();
+        match cli_alias5.command {
+            Some(Commands::On { cueenv, .. }) => {
+                assert!(cueenv);
+            }
+            _ => panic!("Expected On command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_off_cueenv() {
+        let cli = Cli::try_parse_from(["proxydoc", "off", "--cueenv"]).unwrap();
+        match cli.command {
+            Some(Commands::Off { cueenv, .. }) => {
+                assert!(cueenv);
             }
             _ => panic!("Expected Off command"),
         }

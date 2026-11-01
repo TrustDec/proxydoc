@@ -66937,6 +66937,484 @@ pub fn unset_opaenv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_dbtenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dbtenv_http_proxy"
+                    || k_low == "dbtenv_https_proxy"
+                    || k_low == "dbtenv_proxy"
+                    || k_low == "dbt_http_proxy"
+                    || k_low == "dbt_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"DBTENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export dbtenv_http_proxy=")
+            || lower.starts_with("export dbtenv_https_proxy=")
+            || lower.starts_with("export dbtenv_proxy=")
+            || lower.starts_with("export dbt_http_proxy=")
+            || lower.starts_with("export dbt_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("dbtenv_http_proxy=")
+            || lower.starts_with("dbtenv_https_proxy=")
+            || lower.starts_with("dbtenv_proxy=")
+            || lower.starts_with("dbt_http_proxy=")
+            || lower.starts_with("dbt_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export DBTENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "dbtenv_http_proxy"
+                || k_trim == "dbtenv_https_proxy"
+                || k_trim == "dbtenv_proxy"
+                || k_trim == "dbt_http_proxy"
+                || k_trim == "dbt_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("dbtenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"DBTENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("dbtenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_dbtenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "dbtenv_proxy", "dbtenv_http_proxy", "dbt_http_proxy", "dbt_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "dbtenv_http_proxy"
+                    || k_low == "dbtenv_https_proxy"
+                    || k_low == "dbtenv_proxy"
+                    || k_low == "dbt_http_proxy"
+                    || k_low == "dbt_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export dbtenv_http_proxy=")
+            || lower.starts_with("export dbtenv_https_proxy=")
+            || lower.starts_with("export dbtenv_proxy=")
+            || lower.starts_with("export dbt_http_proxy=")
+            || lower.starts_with("export dbt_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("dbtenv_http_proxy=")
+            || lower.starts_with("dbtenv_https_proxy=")
+            || lower.starts_with("dbtenv_proxy=")
+            || lower.starts_with("dbt_http_proxy=")
+            || lower.starts_with("dbt_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "dbtenv_http_proxy"
+                || k_trim == "dbtenv_https_proxy"
+                || k_trim == "dbtenv_proxy"
+                || k_trim == "dbt_http_proxy"
+                || k_trim == "dbt_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_dbtenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_dbtenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_dbtenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_dbtenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_dbtenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_dbtenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_cueenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cueenv_http_proxy"
+                    || k_low == "cueenv_https_proxy"
+                    || k_low == "cueenv_proxy"
+                    || k_low == "cue_http_proxy"
+                    || k_low == "cue_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"CUEENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export cueenv_http_proxy=")
+            || lower.starts_with("export cueenv_https_proxy=")
+            || lower.starts_with("export cueenv_proxy=")
+            || lower.starts_with("export cue_http_proxy=")
+            || lower.starts_with("export cue_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("cueenv_http_proxy=")
+            || lower.starts_with("cueenv_https_proxy=")
+            || lower.starts_with("cueenv_proxy=")
+            || lower.starts_with("cue_http_proxy=")
+            || lower.starts_with("cue_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export CUEENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "cueenv_http_proxy"
+                || k_trim == "cueenv_https_proxy"
+                || k_trim == "cueenv_proxy"
+                || k_trim == "cue_http_proxy"
+                || k_trim == "cue_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("cueenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"CUEENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("cueenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_cueenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "cueenv_proxy", "cueenv_http_proxy", "cue_http_proxy", "cue_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cueenv_http_proxy"
+                    || k_low == "cueenv_https_proxy"
+                    || k_low == "cueenv_proxy"
+                    || k_low == "cue_http_proxy"
+                    || k_low == "cue_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export cueenv_http_proxy=")
+            || lower.starts_with("export cueenv_https_proxy=")
+            || lower.starts_with("export cueenv_proxy=")
+            || lower.starts_with("export cue_http_proxy=")
+            || lower.starts_with("export cue_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("cueenv_http_proxy=")
+            || lower.starts_with("cueenv_https_proxy=")
+            || lower.starts_with("cueenv_proxy=")
+            || lower.starts_with("cue_http_proxy=")
+            || lower.starts_with("cue_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "cueenv_http_proxy"
+                || k_trim == "cueenv_https_proxy"
+                || k_trim == "cueenv_proxy"
+                || k_trim == "cue_http_proxy"
+                || k_trim == "cue_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_cueenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_cueenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_cueenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_cueenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_cueenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_cueenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -67273,6 +67751,8 @@ pub async fn turn_on(
     bufenv: bool,
     pklenv: bool,
     opaenv: bool,
+    dbtenv: bool,
+    cueenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -67608,6 +68088,8 @@ pub async fn turn_on(
     let set_bufenv = bufenv || all;
     let set_pklenv = pklenv || all;
     let set_opaenv = opaenv || all;
+    let set_dbtenv = dbtenv || all;
+    let set_cueenv = cueenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -72519,6 +73001,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_dbtenv {
+        match set_dbtenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ dbtenv (dbt Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update dbtenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_cueenv {
+        match set_cueenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ cueenv (CUE Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update cueenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -72868,6 +73380,8 @@ pub fn turn_off(
     bufenv: bool,
     pklenv: bool,
     opaenv: bool,
+    dbtenv: bool,
+    cueenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -73203,6 +73717,8 @@ pub fn turn_off(
     let unset_bufenv = bufenv || all;
     let unset_pklenv = pklenv || all;
     let unset_opaenv = opaenv || all;
+    let unset_dbtenv = dbtenv || all;
+    let unset_cueenv = cueenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -76316,6 +76832,34 @@ pub fn turn_off(
                 "○ opaenv Open Policy Agent Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update opaenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_dbtenv {
+        match unset_dbtenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ dbtenv dbt Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ dbtenv dbt Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update dbtenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_cueenv {
+        match unset_cueenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ cueenv CUE Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ cueenv CUE Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update cueenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -83622,6 +84166,40 @@ auth: pass123
         let dropin_updated = apply_opaenv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_opaenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_dbtenv_proxy() {
+        let conf_initial = "DBTENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_dbtenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_dbtenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/dbtenv\n";
+        let dropin_updated = apply_dbtenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_dbtenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cueenv_proxy() {
+        let conf_initial = "CUEENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_cueenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_cueenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/cueenv\n";
+        let dropin_updated = apply_cueenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_cueenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }
