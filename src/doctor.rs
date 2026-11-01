@@ -64439,6 +64439,556 @@ pub fn get_ghcup_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_zvm_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("ZVM_INSTALL_DIR") {
+        let p = PathBuf::from(dir.trim()).join("settings.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = PathBuf::from(dir.trim()).join("config");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    if let Ok(dir) = std::env::var("ZVM_DIR") {
+        let p = PathBuf::from(dir.trim()).join("settings.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("ZVM_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("settings.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".zvm").join("settings.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".zvm").join("config.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".zvm").join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("zvm").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".config").join("zvm").join("settings.json");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+        let p6 = home.join(".config").join("zvm").join("config");
+        if p6.exists() && !paths.contains(&p6) {
+            paths.push(p6);
+        }
+    }
+    let local = PathBuf::from(".zvmrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/zvm.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/zvm/config.json");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_settings = PathBuf::from("/etc/zvm/settings.json");
+    if etc_settings.exists() && !paths.contains(&etc_settings) {
+        paths.push(etc_settings);
+    }
+    let etc_vars = PathBuf::from("/etc/zvm/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_zvm_config_path() -> Option<PathBuf> {
+    let paths = get_zvm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_zvm_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_zvm_write_path() -> PathBuf {
+    if let Some(p) = get_zvm_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("ZVM_INSTALL_DIR") {
+        return PathBuf::from(dir.trim()).join("settings.json");
+    }
+    if let Ok(dir) = std::env::var("ZVM_DIR") {
+        return PathBuf::from(dir.trim()).join("settings.json");
+    }
+    if let Ok(dir) = std::env::var("ZVM_ROOT") {
+        return PathBuf::from(dir.trim()).join("settings.json");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let zvm_dir = home.join(".zvm");
+        if zvm_dir.is_dir() {
+            return zvm_dir.join("settings.json");
+        }
+        let cfg_dir = home.join(".config").join("zvm");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config.json");
+        }
+        return home.join(".zvm").join("settings.json");
+    }
+    PathBuf::from("/etc/zvm/settings.json")
+}
+
+pub fn parse_zvm_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "zvm_proxy", "zvm_http_proxy", "zig_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "zvm_http_proxy"
+                    || k_low == "zvm_https_proxy"
+                    || k_low == "zvm_proxy"
+                    || k_low == "zig_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export zvm_http_proxy=")
+            || lower.starts_with("export zvm_https_proxy=")
+            || lower.starts_with("export zvm_proxy=")
+            || lower.starts_with("export zig_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("zvm_http_proxy=")
+            || lower.starts_with("zvm_https_proxy=")
+            || lower.starts_with("zvm_proxy=")
+            || lower.starts_with("zig_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("zvm_http_proxy")
+            || clean.starts_with("zvm_https_proxy")
+            || clean.starts_with("zvm_proxy")
+            || clean.starts_with("zig_http_proxy")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_zvm_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_zvm_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_zvm_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("ZVM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ZVM_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("ZVM_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:ZVM_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_juliaup_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("JULIAUP_DIR") {
+        let p = PathBuf::from(dir.trim()).join("juliaup.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("config.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = PathBuf::from(dir.trim()).join("config");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    if let Ok(dir) = std::env::var("JULIA_DEPOT_PATH") {
+        let p = PathBuf::from(dir.trim()).join("juliaup").join("juliaup.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".julia").join("juliaup").join("juliaup.json");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".juliaup").join("juliaup.json");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".juliaup").join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".juliaup").join("vars");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".config").join("juliaup").join("juliaup.json");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+        let p6 = home.join(".config").join("juliaup").join("config.json");
+        if p6.exists() && !paths.contains(&p6) {
+            paths.push(p6);
+        }
+    }
+    let local = PathBuf::from(".juliaup.json");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/juliaup.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/juliaup/juliaup.json");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_vars = PathBuf::from("/etc/juliaup/vars");
+    if etc_vars.exists() && !paths.contains(&etc_vars) {
+        paths.push(etc_vars);
+    }
+    paths
+}
+
+pub fn get_juliaup_config_path() -> Option<PathBuf> {
+    let paths = get_juliaup_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_juliaup_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_juliaup_write_path() -> PathBuf {
+    if let Some(p) = get_juliaup_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("JULIAUP_DIR") {
+        return PathBuf::from(dir.trim()).join("juliaup.json");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let juliaup_dir = home.join(".julia").join("juliaup");
+        if juliaup_dir.is_dir() {
+            return juliaup_dir.join("juliaup.json");
+        }
+        let direct_dir = home.join(".juliaup");
+        if direct_dir.is_dir() {
+            return direct_dir.join("juliaup.json");
+        }
+        let cfg_dir = home.join(".config").join("juliaup");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("juliaup.json");
+        }
+        return home.join(".julia").join("juliaup").join("juliaup.json");
+    }
+    PathBuf::from("/etc/juliaup/juliaup.json")
+}
+
+pub fn parse_juliaup_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "juliaup_proxy", "juliaup_http_proxy", "julia_pkg_server"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "juliaup_http_proxy"
+                    || k_low == "juliaup_https_proxy"
+                    || k_low == "juliaup_proxy"
+                    || k_low == "julia_pkg_server"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export juliaup_http_proxy=")
+            || lower.starts_with("export juliaup_https_proxy=")
+            || lower.starts_with("export juliaup_proxy=")
+            || lower.starts_with("export julia_pkg_server=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("juliaup_http_proxy=")
+            || lower.starts_with("juliaup_https_proxy=")
+            || lower.starts_with("juliaup_proxy=")
+            || lower.starts_with("julia_pkg_server=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        if clean.starts_with("juliaup_http_proxy")
+            || clean.starts_with("juliaup_https_proxy")
+            || clean.starts_with("juliaup_proxy")
+            || clean.starts_with("julia_pkg_server")
+            || clean.starts_with("http_proxy")
+            || clean.starts_with("https_proxy")
+            || clean.starts_with("proxy")
+        {
+            if let Some((_, v)) = trimmed.split_once('=').or_else(|| trimmed.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() && !val.starts_with('#') {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_juliaup_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_juliaup_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_juliaup_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("JULIAUP_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JULIAUP_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("JULIAUP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:JULIAUP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -74660,6 +75210,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "ghcup Dev Proxy",
             "~/.ghcup/config.yaml & ~/.config/ghcup/config.yaml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // zvm Zig Toolchain & Version Manager Daemon (~/.zvm/settings.json / ~/.config/zvm/config.json / /etc/zvm/config.json / /etc/systemd/system/zvm.service.d/http-proxy.conf)
+    if let Some((zvm_proxy, zvm_path)) = get_zvm_proxy() {
+        let ok = verify_proxy_url(&zvm_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "zvm proxy `{}` in {} is dead! (zvm toolchain proxy will fail)",
+                zvm_proxy,
+                zvm_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "zvm Dev Proxy",
+            format!("{}", zvm_path.display()),
+            zvm_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (zvm fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "zvm Dev Proxy",
+            "~/.zvm/settings.json & ~/.config/zvm/config.json",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // juliaup Julia Toolchain & Version Manager Daemon (~/.julia/juliaup/juliaup.json / ~/.config/juliaup/juliaup.json / /etc/juliaup/juliaup.json / /etc/systemd/system/juliaup.service.d/http-proxy.conf)
+    if let Some((juliaup_proxy, juliaup_path)) = get_juliaup_proxy() {
+        let ok = verify_proxy_url(&juliaup_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "juliaup proxy `{}` in {} is dead! (juliaup toolchain proxy will fail)",
+                juliaup_proxy,
+                juliaup_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "juliaup Dev Proxy",
+            format!("{}", juliaup_path.display()),
+            juliaup_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (juliaup fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "juliaup Dev Proxy",
+            "~/.julia/juliaup/juliaup.json & ~/.config/juliaup/juliaup.json",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -85589,5 +86203,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// ghcup_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_ghcup_proxy(input_comment), None);
         assert_eq!(parse_ghcup_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_zvm_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_zvm_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "zvm_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_zvm_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_zvm_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// zvm_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_zvm_proxy(input_comment), None);
+        assert_eq!(parse_zvm_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_juliaup_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_juliaup_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let ini_config = "juliaup_http_proxy = http://127.0.0.1:7890\n";
+        assert_eq!(
+            parse_juliaup_proxy(ini_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_juliaup_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// juliaup_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_juliaup_proxy(input_comment), None);
+        assert_eq!(parse_juliaup_proxy(""), None);
     }
 }
