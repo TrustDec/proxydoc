@@ -62147,6 +62147,494 @@ pub fn unset_denoenv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_bunenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "bunenv_http_proxy"
+                    || k_low == "bunenv_https_proxy"
+                    || k_low == "bunenv_proxy"
+                    || k_low == "bun_http_proxy"
+                    || k_low == "bun_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"BUNENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export bunenv_http_proxy=")
+            || lower.starts_with("export bunenv_https_proxy=")
+            || lower.starts_with("export bunenv_proxy=")
+            || lower.starts_with("export bun_http_proxy=")
+            || lower.starts_with("export bun_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("bunenv_http_proxy=")
+            || lower.starts_with("bunenv_https_proxy=")
+            || lower.starts_with("bunenv_proxy=")
+            || lower.starts_with("bun_http_proxy=")
+            || lower.starts_with("bun_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export BUNENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "bunenv_http_proxy"
+                || k_trim == "bunenv_https_proxy"
+                || k_trim == "bunenv_proxy"
+                || k_trim == "bun_http_proxy"
+                || k_trim == "bun_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("bunenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"BUNENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("bunenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_bunenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "bunenv_proxy", "bunenv_http_proxy", "bun_http_proxy", "bun_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "bunenv_http_proxy"
+                    || k_low == "bunenv_https_proxy"
+                    || k_low == "bunenv_proxy"
+                    || k_low == "bun_http_proxy"
+                    || k_low == "bun_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export bunenv_http_proxy=")
+            || lower.starts_with("export bunenv_https_proxy=")
+            || lower.starts_with("export bunenv_proxy=")
+            || lower.starts_with("export bun_http_proxy=")
+            || lower.starts_with("export bun_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("bunenv_http_proxy=")
+            || lower.starts_with("bunenv_https_proxy=")
+            || lower.starts_with("bunenv_proxy=")
+            || lower.starts_with("bun_http_proxy=")
+            || lower.starts_with("bun_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "bunenv_http_proxy"
+                || k_trim == "bunenv_https_proxy"
+                || k_trim == "bunenv_proxy"
+                || k_trim == "bun_http_proxy"
+                || k_trim == "bun_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_bunenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_bunenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_bunenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_bunenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_bunenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_bunenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_pgenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pgenv_http_proxy"
+                    || k_low == "pgenv_https_proxy"
+                    || k_low == "pgenv_proxy"
+                    || k_low == "pg_http_proxy"
+                    || k_low == "pg_proxy"
+                    || k_low == "postgres_http_proxy"
+                    || k_low == "postgres_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"PGENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export pgenv_http_proxy=")
+            || lower.starts_with("export pgenv_https_proxy=")
+            || lower.starts_with("export pgenv_proxy=")
+            || lower.starts_with("export pg_http_proxy=")
+            || lower.starts_with("export pg_proxy=")
+            || lower.starts_with("export postgres_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("pgenv_http_proxy=")
+            || lower.starts_with("pgenv_https_proxy=")
+            || lower.starts_with("pgenv_proxy=")
+            || lower.starts_with("pg_http_proxy=")
+            || lower.starts_with("pg_proxy=")
+            || lower.starts_with("postgres_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export PGENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "pgenv_http_proxy"
+                || k_trim == "pgenv_https_proxy"
+                || k_trim == "pgenv_proxy"
+                || k_trim == "pg_http_proxy"
+                || k_trim == "pg_proxy"
+                || k_trim == "postgres_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("pgenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"PGENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("pgenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_pgenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "pgenv_proxy", "pgenv_http_proxy", "pg_http_proxy", "pg_proxy", "postgres_http_proxy", "postgres_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pgenv_http_proxy"
+                    || k_low == "pgenv_https_proxy"
+                    || k_low == "pgenv_proxy"
+                    || k_low == "pg_http_proxy"
+                    || k_low == "pg_proxy"
+                    || k_low == "postgres_http_proxy"
+                    || k_low == "postgres_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export pgenv_http_proxy=")
+            || lower.starts_with("export pgenv_https_proxy=")
+            || lower.starts_with("export pgenv_proxy=")
+            || lower.starts_with("export pg_http_proxy=")
+            || lower.starts_with("export pg_proxy=")
+            || lower.starts_with("export postgres_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("pgenv_http_proxy=")
+            || lower.starts_with("pgenv_https_proxy=")
+            || lower.starts_with("pgenv_proxy=")
+            || lower.starts_with("pg_http_proxy=")
+            || lower.starts_with("pg_proxy=")
+            || lower.starts_with("postgres_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "pgenv_http_proxy"
+                || k_trim == "pgenv_https_proxy"
+                || k_trim == "pgenv_proxy"
+                || k_trim == "pg_http_proxy"
+                || k_trim == "pg_proxy"
+                || k_trim == "postgres_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_pgenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_pgenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_pgenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_pgenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_pgenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_pgenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -62463,6 +62951,8 @@ pub async fn turn_on(
     renv: bool,
     kotenv: bool,
     denoenv: bool,
+    bunenv: bool,
+    pgenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -62778,6 +63268,8 @@ pub async fn turn_on(
     let set_renv = renv || all;
     let set_kotenv = kotenv || all;
     let set_denoenv = denoenv || all;
+    let set_bunenv = bunenv || all;
+    let set_pgenv = pgenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -67389,6 +67881,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_bunenv {
+        match set_bunenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ bunenv (Bun Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update bunenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_pgenv {
+        match set_pgenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ pgenv (PostgreSQL Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update pgenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -67718,6 +68240,8 @@ pub fn turn_off(
     renv: bool,
     kotenv: bool,
     denoenv: bool,
+    bunenv: bool,
+    pgenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -68033,6 +68557,8 @@ pub fn turn_off(
     let unset_renv = renv || all;
     let unset_kotenv = kotenv || all;
     let unset_denoenv = denoenv || all;
+    let unset_bunenv = bunenv || all;
+    let unset_pgenv = pgenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -70866,6 +71392,34 @@ pub fn turn_off(
                 "○ denoenv Deno Environment Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update denoenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_bunenv {
+        match unset_bunenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ bunenv Bun Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ bunenv Bun Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update bunenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_pgenv {
+        match unset_pgenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ pgenv PostgreSQL Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ pgenv PostgreSQL Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update pgenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -77832,6 +78386,40 @@ auth: pass123
         let dropin_updated = apply_denoenv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_denoenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_bunenv_proxy() {
+        let conf_initial = "BUNENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_bunenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_bunenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/bunenv\n";
+        let dropin_updated = apply_bunenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_bunenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_pgenv_proxy() {
+        let conf_initial = "PGENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_pgenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_pgenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/pgenv\n";
+        let dropin_updated = apply_pgenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_pgenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

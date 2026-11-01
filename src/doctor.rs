@@ -72879,6 +72879,609 @@ pub fn get_denoenv_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_bunenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("BUNENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("bunenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("BUNENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("bunenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".bunenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("bunenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".bunenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("bunenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".bunenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".bunenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".bunenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/bunenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/bunenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/bunenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_bunenv_config_path() -> Option<PathBuf> {
+    let paths = get_bunenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_bunenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_bunenv_write_path() -> PathBuf {
+    if let Some(p) = get_bunenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("BUNENV_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Ok(dir) = std::env::var("BUNENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let bunenv_dir = home.join(".bunenv");
+        if bunenv_dir.is_dir() {
+            return bunenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("bunenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".bunenv").join("config");
+    }
+    PathBuf::from("/etc/bunenv/config")
+}
+
+pub fn parse_bunenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "bunenv_proxy", "bunenv_http_proxy", "bun_http_proxy", "bun_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "bunenv_http_proxy"
+                    || k_low == "bunenv_https_proxy"
+                    || k_low == "bunenv_proxy"
+                    || k_low == "bun_http_proxy"
+                    || k_low == "bun_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export bunenv_http_proxy=")
+            || lower.starts_with("export bunenv_https_proxy=")
+            || lower.starts_with("export bunenv_proxy=")
+            || lower.starts_with("export bun_http_proxy=")
+            || lower.starts_with("export bun_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("bunenv_http_proxy=")
+            || lower.starts_with("bunenv_https_proxy=")
+            || lower.starts_with("bunenv_proxy=")
+            || lower.starts_with("bun_http_proxy=")
+            || lower.starts_with("bun_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "bunenv_http_proxy"
+                || k_low == "bunenv_https_proxy"
+                || k_low == "bunenv_proxy"
+                || k_low == "bun_http_proxy"
+                || k_low == "bun_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_bunenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_bunenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_bunenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("BUNENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BUNENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BUNENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BUNENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("BUN_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:BUN_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_pgenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("PGENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("pgenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("PGENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("pgenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".pgenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("pgenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".pgenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("pgenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".pgenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".pgenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".pgenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/pgenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/pgenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/pgenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_pgenv_config_path() -> Option<PathBuf> {
+    let paths = get_pgenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_pgenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pgenv_write_path() -> PathBuf {
+    if let Some(p) = get_pgenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("PGENV_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Ok(dir) = std::env::var("PGENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let pgenv_dir = home.join(".pgenv");
+        if pgenv_dir.is_dir() {
+            return pgenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("pgenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".pgenv").join("config");
+    }
+    PathBuf::from("/etc/pgenv/config")
+}
+
+pub fn parse_pgenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "pgenv_proxy", "pgenv_http_proxy", "pg_http_proxy", "pg_proxy", "postgres_http_proxy", "postgres_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "pgenv_http_proxy"
+                    || k_low == "pgenv_https_proxy"
+                    || k_low == "pgenv_proxy"
+                    || k_low == "pg_http_proxy"
+                    || k_low == "pg_proxy"
+                    || k_low == "postgres_http_proxy"
+                    || k_low == "postgres_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export pgenv_http_proxy=")
+            || lower.starts_with("export pgenv_https_proxy=")
+            || lower.starts_with("export pgenv_proxy=")
+            || lower.starts_with("export pg_http_proxy=")
+            || lower.starts_with("export pg_proxy=")
+            || lower.starts_with("export postgres_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("pgenv_http_proxy=")
+            || lower.starts_with("pgenv_https_proxy=")
+            || lower.starts_with("pgenv_proxy=")
+            || lower.starts_with("pg_http_proxy=")
+            || lower.starts_with("pg_proxy=")
+            || lower.starts_with("postgres_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "pgenv_http_proxy"
+                || k_low == "pgenv_https_proxy"
+                || k_low == "pgenv_proxy"
+                || k_low == "pg_http_proxy"
+                || k_low == "pg_proxy"
+                || k_low == "postgres_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_pgenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_pgenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_pgenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PGENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PGENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PGENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PGENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PG_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PG_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("POSTGRES_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:POSTGRES_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -84060,6 +84663,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "denoenv Dev Proxy",
             "~/.denoenv/config & ~/.config/denoenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // bunenv Bun Version Manager Daemon (~/.bunenv/config / ~/.config/bunenv/config / /etc/bunenv/config / /etc/systemd/system/bunenv.service.d/http-proxy.conf)
+    if let Some((bunenv_proxy, bunenv_path)) = get_bunenv_proxy() {
+        let ok = verify_proxy_url(&bunenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "bunenv proxy `{}` in {} is dead! (bunenv toolchain proxy will fail)",
+                bunenv_proxy,
+                bunenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "bunenv Dev Proxy",
+            format!("{}", bunenv_path.display()),
+            bunenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (bunenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "bunenv Dev Proxy",
+            "~/.bunenv/config & ~/.config/bunenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // pgenv PostgreSQL Version Manager Daemon (~/.pgenv/config / ~/.config/pgenv/config / /etc/pgenv/config / /etc/systemd/system/pgenv.service.d/http-proxy.conf)
+    if let Some((pgenv_proxy, pgenv_path)) = get_pgenv_proxy() {
+        let ok = verify_proxy_url(&pgenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "pgenv proxy `{}` in {} is dead! (pgenv toolchain proxy will fail)",
+                pgenv_proxy,
+                pgenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "pgenv Dev Proxy",
+            format!("{}", pgenv_path.display()),
+            pgenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (pgenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "pgenv Dev Proxy",
+            "~/.pgenv/config & ~/.config/pgenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -95739,5 +96406,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// denoenv_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_denoenv_proxy(input_comment), None);
         assert_eq!(parse_denoenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_bunenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_bunenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "bunenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_bunenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_bunenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// bunenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_bunenv_proxy(input_comment), None);
+        assert_eq!(parse_bunenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_pgenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_pgenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "pgenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_pgenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_pgenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// pgenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_pgenv_proxy(input_comment), None);
+        assert_eq!(parse_pgenv_proxy(""), None);
     }
 }
