@@ -2934,6 +2934,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "LISA AI CDN",
         "https://github.com/dvlab-research/LISA",
     ),
+    (
+        "tenv Dev CDN",
+        "https://github.com/tofuutils/tenv",
+    ),
+    (
+        "tfswitch Dev CDN",
+        "https://github.com/warrensbox/terraform-switcher",
+    ),
+    (
+        "MAmmoTH2 AI CDN",
+        "https://github.com/TIGER-AI-Lab/MAmmoTH2",
+    ),
+    (
+        "Video-LLaVA AI CDN",
+        "https://github.com/PKU-YuanGroup/Video-LLaVA",
+    ),
+    (
+        "WebVoyager AI CDN",
+        "https://github.com/MinorJerry/WebVoyager",
+    ),
+    (
+        "Math-Shepherd AI CDN",
+        "https://github.com/DAMO-NLP-SG/Math-Shepherd",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5444,6 +5468,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "LISA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "tenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "tfswitch Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MAmmoTH2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Video-LLaVA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "WebVoyager AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Math-Shepherd AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

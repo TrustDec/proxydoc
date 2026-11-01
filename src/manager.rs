@@ -56571,6 +56571,476 @@ pub fn unset_kerl_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_tenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tenv_http_proxy"
+                    || k_low == "tenv_https_proxy"
+                    || k_low == "tenv_proxy"
+                    || k_low == "tofu_http_proxy"
+                    || k_low == "tofu_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"TENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export tenv_http_proxy=")
+            || lower.starts_with("export tenv_https_proxy=")
+            || lower.starts_with("export tenv_proxy=")
+            || lower.starts_with("export tofu_http_proxy=")
+            || lower.starts_with("export tofu_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("tenv_http_proxy=")
+            || lower.starts_with("tenv_https_proxy=")
+            || lower.starts_with("tenv_proxy=")
+            || lower.starts_with("tofu_http_proxy=")
+            || lower.starts_with("tofu_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export TENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "tenv_http_proxy"
+                || k_trim == "tenv_https_proxy"
+                || k_trim == "tenv_proxy"
+                || k_trim == "tofu_http_proxy"
+                || k_trim == "tofu_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy: \"{}\"", proxy_url));
+            lines.push(format!("tenv_http_proxy: \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"TENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy: \"{}\"", proxy_url));
+        lines.push(format!("tenv_http_proxy: \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_tenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "tenv_proxy", "tenv_http_proxy", "tofu_http_proxy", "tofu_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tenv_http_proxy"
+                    || k_low == "tenv_https_proxy"
+                    || k_low == "tenv_proxy"
+                    || k_low == "tofu_http_proxy"
+                    || k_low == "tofu_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export tenv_http_proxy=")
+            || lower.starts_with("export tenv_https_proxy=")
+            || lower.starts_with("export tenv_proxy=")
+            || lower.starts_with("export tofu_http_proxy=")
+            || lower.starts_with("export tofu_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("tenv_http_proxy=")
+            || lower.starts_with("tenv_https_proxy=")
+            || lower.starts_with("tenv_proxy=")
+            || lower.starts_with("tofu_http_proxy=")
+            || lower.starts_with("tofu_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "tenv_http_proxy"
+                || k_trim == "tenv_https_proxy"
+                || k_trim == "tenv_proxy"
+                || k_trim == "tofu_http_proxy"
+                || k_trim == "tofu_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_tenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_tenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_tenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_tfswitch_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tfswitch_http_proxy"
+                    || k_low == "tfswitch_https_proxy"
+                    || k_low == "tfswitch_proxy"
+                    || k_low == "tf_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"TFSWITCH_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export tfswitch_http_proxy=")
+            || lower.starts_with("export tfswitch_https_proxy=")
+            || lower.starts_with("export tfswitch_proxy=")
+            || lower.starts_with("export tf_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("tfswitch_http_proxy=")
+            || lower.starts_with("tfswitch_https_proxy=")
+            || lower.starts_with("tfswitch_proxy=")
+            || lower.starts_with("tf_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export TFSWITCH_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "tfswitch_http_proxy"
+                || k_trim == "tfswitch_https_proxy"
+                || k_trim == "tfswitch_proxy"
+                || k_trim == "tf_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("tfswitch_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"TFSWITCH_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("tfswitch_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_tfswitch_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "tfswitch_proxy", "tfswitch_http_proxy", "tf_http_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tfswitch_http_proxy"
+                    || k_low == "tfswitch_https_proxy"
+                    || k_low == "tfswitch_proxy"
+                    || k_low == "tf_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export tfswitch_http_proxy=")
+            || lower.starts_with("export tfswitch_https_proxy=")
+            || lower.starts_with("export tfswitch_proxy=")
+            || lower.starts_with("export tf_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("tfswitch_http_proxy=")
+            || lower.starts_with("tfswitch_https_proxy=")
+            || lower.starts_with("tfswitch_proxy=")
+            || lower.starts_with("tf_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "tfswitch_http_proxy"
+                || k_trim == "tfswitch_https_proxy"
+                || k_trim == "tfswitch_proxy"
+                || k_trim == "tf_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_tfswitch_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_tfswitch_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_tfswitch_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_tfswitch_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_tfswitch_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_tfswitch_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -56863,6 +57333,8 @@ pub async fn turn_on(
     choosenim: bool,
     coursier: bool,
     kerl: bool,
+    tenv: bool,
+    tfswitch: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -57154,6 +57626,8 @@ pub async fn turn_on(
     let set_choosenim = choosenim || all;
     let set_coursier = coursier || all;
     let set_kerl = kerl || all;
+    let set_tenv = tenv || all;
+    let set_tfswitch = tfswitch || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -61405,6 +61879,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_tenv {
+        match set_tenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ tenv (OpenTofu, Terraform, Terragrunt & Atmos) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update tenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_tfswitch {
+        match set_tfswitch_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ tfswitch (Terraform Switcher) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update tfswitch config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -61710,6 +62214,8 @@ pub fn turn_off(
     choosenim: bool,
     coursier: bool,
     kerl: bool,
+    tenv: bool,
+    tfswitch: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -62001,6 +62507,8 @@ pub fn turn_off(
     let unset_choosenim = choosenim || all;
     let unset_coursier = coursier || all;
     let unset_kerl = kerl || all;
+    let unset_tenv = tenv || all;
+    let unset_tfswitch = tfswitch || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -64498,6 +65006,34 @@ pub fn turn_off(
                 "○ kerl Erlang/OTP Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update kerl config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tenv {
+        match unset_tenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ tenv OpenTofu, Terraform, Terragrunt & Atmos toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ tenv OpenTofu, Terraform, Terragrunt & Atmos toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update tenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_tfswitch {
+        match unset_tfswitch_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ tfswitch Terraform Switcher toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ tfswitch Terraform Switcher toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update tfswitch config: {}", "▲".yellow(), e),
         }
     }
 
@@ -71056,6 +71592,40 @@ auth: pass123
         let dropin_updated = apply_kerl_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_kerl_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tenv_proxy() {
+        let yaml_initial = "tenv_version: 1.0.0\n";
+        let yaml_updated = apply_tenv_proxy(yaml_initial, "http://10.0.0.128:7890");
+        assert!(yaml_updated.contains("tenv_http_proxy: \"http://10.0.0.128:7890\""));
+        let (yaml_cleaned, yaml_removed) = remove_tenv_proxy(&yaml_updated);
+        assert!(yaml_removed);
+        assert!(!yaml_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/tenv\n";
+        let dropin_updated = apply_tenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_tenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_tfswitch_proxy() {
+        let toml_initial = "version = \"0.13.0\"\n";
+        let toml_updated = apply_tfswitch_proxy(toml_initial, "http://10.0.0.128:7890");
+        assert!(toml_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (toml_cleaned, toml_removed) = remove_tfswitch_proxy(&toml_updated);
+        assert!(toml_removed);
+        assert!(!toml_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/tfswitch\n";
+        let dropin_updated = apply_tfswitch_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_tfswitch_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }
