@@ -3630,6 +3630,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "WorldSense AI CDN",
         "https://github.com/WorldSense-Bench/WorldSense",
     ),
+    (
+        "trivyenv Dev CDN",
+        "https://github.com/aquasecurity/trivy",
+    ),
+    (
+        "syftenv Dev CDN",
+        "https://github.com/anchore/syft",
+    ),
+    (
+        "ActivityNet-QA AI CDN",
+        "https://github.com/MILVLG/activitynet-qa",
+    ),
+    (
+        "PerceptionTest AI CDN",
+        "https://github.com/google-deepmind/perception_test",
+    ),
+    (
+        "FunQA AI CDN",
+        "https://github.com/FudanVI/FunQA",
+    ),
+    (
+        "Q-Bench AI CDN",
+        "https://github.com/Q-Future/Q-Bench",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6662,6 +6686,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "WorldSense AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "trivyenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "syftenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ActivityNet-QA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "PerceptionTest AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FunQA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Q-Bench AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
