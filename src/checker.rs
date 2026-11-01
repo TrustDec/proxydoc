@@ -3678,6 +3678,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "SEED-Bench-2 AI CDN",
         "https://github.com/AILab-CVC/SEED-Bench-2",
     ),
+    (
+        "diveenv Dev CDN",
+        "https://github.com/wagoodman/dive",
+    ),
+    (
+        "orasenv Dev CDN",
+        "https://github.com/oras-project/oras",
+    ),
+    (
+        "VideoMME AI CDN",
+        "https://github.com/BradyFU/Video-MME",
+    ),
+    (
+        "MMMU-Pro AI CDN",
+        "https://github.com/MMMU-Benchmark/MMMU",
+    ),
+    (
+        "BLINK AI CDN",
+        "https://github.com/bfsi2/BLINK_Benchmark",
+    ),
+    (
+        "OmniBench AI CDN",
+        "https://github.com/omni-bench/OmniBench",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6746,6 +6770,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "SEED-Bench-2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "diveenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "orasenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "VideoMME AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MMMU-Pro AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "BLINK AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OmniBench AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
