@@ -3558,6 +3558,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "T-Eval AI CDN",
         "https://github.com/open-compass/T-Eval",
     ),
+    (
+        "ciliumenv Dev CDN",
+        "https://github.com/cilium/cilium-cli",
+    ),
+    (
+        "linkerdenv Dev CDN",
+        "https://github.com/linkerd/linkerd2",
+    ),
+    (
+        "ScreenQA AI CDN",
+        "https://github.com/google-research-datasets/screen_qa",
+    ),
+    (
+        "Video-Bench AI CDN",
+        "https://github.com/mbzuai-oryx/Video-ChatGPT",
+    ),
+    (
+        "MathBench AI CDN",
+        "https://github.com/open-compass/MathBench",
+    ),
+    (
+        "VL-CheckList AI CDN",
+        "https://github.com/om-ai-lab/VL-CheckList",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6536,6 +6560,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "T-Eval AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ciliumenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "linkerdenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "ScreenQA AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Video-Bench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MathBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "VL-CheckList AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

@@ -81072,6 +81072,598 @@ pub fn get_istioenv_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_ciliumenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("CILIUMENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("ciliumenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("CILIUMENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("ciliumenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".ciliumenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("ciliumenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".ciliumenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("ciliumenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".ciliumenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".ciliumenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".ciliumenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/ciliumenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/ciliumenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/ciliumenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_ciliumenv_config_path() -> Option<PathBuf> {
+    let paths = get_ciliumenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_ciliumenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_ciliumenv_write_path() -> PathBuf {
+    if let Some(p) = get_ciliumenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("CILIUMENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Ok(dir) = std::env::var("CILIUMENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let ciliumenv_dir = home.join(".ciliumenv");
+        if ciliumenv_dir.is_dir() {
+            return ciliumenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("ciliumenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".ciliumenv").join("config");
+    }
+    PathBuf::from("/etc/ciliumenv/config")
+}
+
+pub fn parse_ciliumenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "ciliumenv_proxy", "ciliumenv_http_proxy", "cilium_http_proxy", "cilium_proxy"] {
+                if let Some(v) = obj.get(*k).and_then(|x| x.as_str()) {
+                    let trim = v.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "ciliumenv_http_proxy"
+                    || k_low == "ciliumenv_https_proxy"
+                    || k_low == "ciliumenv_proxy"
+                    || k_low == "cilium_http_proxy"
+                    || k_low == "cilium_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export ciliumenv_http_proxy=")
+            || lower.starts_with("export ciliumenv_https_proxy=")
+            || lower.starts_with("export ciliumenv_proxy=")
+            || lower.starts_with("export cilium_http_proxy=")
+            || lower.starts_with("export cilium_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("ciliumenv_http_proxy=")
+            || lower.starts_with("ciliumenv_https_proxy=")
+            || lower.starts_with("ciliumenv_proxy=")
+            || lower.starts_with("cilium_http_proxy=")
+            || lower.starts_with("cilium_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "ciliumenv_http_proxy"
+                || k_low == "ciliumenv_https_proxy"
+                || k_low == "ciliumenv_proxy"
+                || k_low == "cilium_http_proxy"
+                || k_low == "cilium_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_ciliumenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_ciliumenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_ciliumenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("CILIUMENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CILIUMENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CILIUMENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CILIUMENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("CILIUM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:CILIUM_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_linkerdenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("LINKERDENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("linkerdenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("LINKERDENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("linkerdenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".linkerdenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("linkerdenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".linkerdenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("linkerdenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".linkerdenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".linkerdenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".linkerdenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/linkerdenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/linkerdenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/linkerdenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_linkerdenv_config_path() -> Option<PathBuf> {
+    let paths = get_linkerdenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_linkerdenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_linkerdenv_write_path() -> PathBuf {
+    if let Some(p) = get_linkerdenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("LINKERDENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Ok(dir) = std::env::var("LINKERDENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let linkerdenv_dir = home.join(".linkerdenv");
+        if linkerdenv_dir.is_dir() {
+            return linkerdenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("linkerdenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".linkerdenv").join("config");
+    }
+    PathBuf::from("/etc/linkerdenv/config")
+}
+
+pub fn parse_linkerdenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "linkerdenv_proxy", "linkerdenv_http_proxy", "linkerd_http_proxy", "linkerd_proxy"] {
+                if let Some(v) = obj.get(*k).and_then(|x| x.as_str()) {
+                    let trim = v.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "linkerdenv_http_proxy"
+                    || k_low == "linkerdenv_https_proxy"
+                    || k_low == "linkerdenv_proxy"
+                    || k_low == "linkerd_http_proxy"
+                    || k_low == "linkerd_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export linkerdenv_http_proxy=")
+            || lower.starts_with("export linkerdenv_https_proxy=")
+            || lower.starts_with("export linkerdenv_proxy=")
+            || lower.starts_with("export linkerd_http_proxy=")
+            || lower.starts_with("export linkerd_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("linkerdenv_http_proxy=")
+            || lower.starts_with("linkerdenv_https_proxy=")
+            || lower.starts_with("linkerdenv_proxy=")
+            || lower.starts_with("linkerd_http_proxy=")
+            || lower.starts_with("linkerd_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "linkerdenv_http_proxy"
+                || k_low == "linkerdenv_https_proxy"
+                || k_low == "linkerdenv_proxy"
+                || k_low == "linkerd_http_proxy"
+                || k_low == "linkerd_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_linkerdenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_linkerdenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_linkerdenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("LINKERDENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LINKERDENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LINKERDENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LINKERDENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("LINKERD_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:LINKERD_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -93149,6 +93741,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "istioenv Dev Proxy",
             "~/.istioenv/config & ~/.config/istioenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // ciliumenv Cilium CLI Version Manager Daemon (~/.ciliumenv/config / ~/.config/ciliumenv/config / /etc/ciliumenv/config / /etc/systemd/system/ciliumenv.service.d/http-proxy.conf)
+    if let Some((ciliumenv_proxy, ciliumenv_path)) = get_ciliumenv_proxy() {
+        let ok = verify_proxy_url(&ciliumenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "ciliumenv proxy `{}` in {} is dead! (ciliumenv toolchain proxy will fail)",
+                ciliumenv_proxy,
+                ciliumenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "ciliumenv Dev Proxy",
+            format!("{}", ciliumenv_path.display()),
+            ciliumenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (ciliumenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "ciliumenv Dev Proxy",
+            "~/.ciliumenv/config & ~/.config/ciliumenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // linkerdenv Linkerd Service Mesh Version Manager Daemon (~/.linkerdenv/config / ~/.config/linkerdenv/config / /etc/linkerdenv/config / /etc/systemd/system/linkerdenv.service.d/http-proxy.conf)
+    if let Some((linkerdenv_proxy, linkerdenv_path)) = get_linkerdenv_proxy() {
+        let ok = verify_proxy_url(&linkerdenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "linkerdenv proxy `{}` in {} is dead! (linkerdenv toolchain proxy will fail)",
+                linkerdenv_proxy,
+                linkerdenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "linkerdenv Dev Proxy",
+            format!("{}", linkerdenv_path.display()),
+            linkerdenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (linkerdenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "linkerdenv Dev Proxy",
+            "~/.linkerdenv/config & ~/.config/linkerdenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -105528,5 +106184,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// istioenv_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_istioenv_proxy(input_comment), None);
         assert_eq!(parse_istioenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_ciliumenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_ciliumenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "ciliumenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_ciliumenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_ciliumenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// ciliumenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_ciliumenv_proxy(input_comment), None);
+        assert_eq!(parse_ciliumenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_linkerdenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_linkerdenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "linkerdenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_linkerdenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_linkerdenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// linkerdenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_linkerdenv_proxy(input_comment), None);
+        assert_eq!(parse_linkerdenv_proxy(""), None);
     }
 }
