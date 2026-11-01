@@ -3174,6 +3174,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "CORE-Bench AI CDN",
         "https://github.com/siegelwork-group/CORE-Bench",
     ),
+    (
+        "dartenv Dev CDN",
+        "https://github.com/yuew/dartenv",
+    ),
+    (
+        "renv Dev CDN",
+        "https://github.com/r-lib/renv",
+    ),
+    (
+        "Cybench AI CDN",
+        "https://github.com/cybench/cybench",
+    ),
+    (
+        "SafetyBench AI CDN",
+        "https://github.com/thu-coai/SafetyBench",
+    ),
+    (
+        "LongBench AI CDN",
+        "https://github.com/THUDM/LongBench",
+    ),
+    (
+        "FinQA AI CDN",
+        "https://github.com/czyssrs/FinQA",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5864,6 +5888,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "CORE-Bench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "dartenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "renv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Cybench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SafetyBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "LongBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FinQA AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

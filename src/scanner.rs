@@ -233,6 +233,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (65531, false, "exenv (Elixir Version Manager) Daemon (HTTP/API)"),
     (65532, false, "luaenv (Lua Version Manager) Daemon (HTTP/API)"),
     (65533, false, "erlenv (Erlang Version Manager) Daemon (HTTP/API)"),
+    (65534, false, "dartenv (Dart Version Manager) Daemon (HTTP/API)"),
+    (65535, false, "renv (R Version Manager) Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {
