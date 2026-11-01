@@ -3534,6 +3534,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "SEED-Bench AI CDN",
         "https://github.com/AILab-CVC/SEED-Bench",
     ),
+    (
+        "argoenv Dev CDN",
+        "https://github.com/argoproj-labs/argoenv",
+    ),
+    (
+        "istioenv Dev CDN",
+        "https://github.com/istioenv/istioenv",
+    ),
+    (
+        "MMBench AI CDN",
+        "https://github.com/open-compass/MMBench",
+    ),
+    (
+        "POPE AI CDN",
+        "https://github.com/RUCAIBox/POPE",
+    ),
+    (
+        "VizWiz AI CDN",
+        "https://github.com/VizWiz-Quality-Issues/VizWiz-VQA",
+    ),
+    (
+        "T-Eval AI CDN",
+        "https://github.com/open-compass/T-Eval",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6494,6 +6518,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "SEED-Bench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "argoenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "istioenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MMBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "POPE AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "VizWiz AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "T-Eval AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
