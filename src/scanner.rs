@@ -224,6 +224,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (65252, false, "kbenv (Kubectl Version Manager) Daemon (HTTP/API)"),
     (65353, false, "sopsenv (SOPS Version Manager) Daemon (HTTP/API)"),
     (65454, false, "ocenv (OpenShift Version Manager) Daemon (HTTP/API)"),
+    (65489, false, "cosignenv (Sigstore Cosign Version Manager) Daemon (HTTP/API)"),
+    (65490, false, "k3denv (k3d - K3s in Docker Version Manager) Daemon (HTTP/API)"),
     (65491, false, "kindenv (kind - Kubernetes IN Docker Version Manager) Daemon (HTTP/API)"),
     (65492, false, "fluxenv (Flux GitOps Version Manager) Daemon (HTTP/API)"),
     (65493, false, "linkerdenv (Linkerd Service Mesh Version Manager) Daemon (HTTP/API)"),

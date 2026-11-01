@@ -67684,8 +67684,8 @@ pub fn apply_hfenv_proxy(content: &str, proxy_url: &str) -> String {
                 if k_low == "hfenv_http_proxy"
                     || k_low == "hfenv_https_proxy"
                     || k_low == "hfenv_proxy"
-                    || k_low == "helmfile_http_proxy"
-                    || k_low == "helmfile_proxy"
+                    || k_low == "cosign_http_proxy"
+                    || k_low == "cosign_proxy"
                     || k_low == "http_proxy"
                     || k_low == "https_proxy"
                     || k_low == "all_proxy"
@@ -67701,16 +67701,16 @@ pub fn apply_hfenv_proxy(content: &str, proxy_url: &str) -> String {
         if lower.starts_with("export hfenv_http_proxy=")
             || lower.starts_with("export hfenv_https_proxy=")
             || lower.starts_with("export hfenv_proxy=")
-            || lower.starts_with("export helmfile_http_proxy=")
-            || lower.starts_with("export helmfile_proxy=")
+            || lower.starts_with("export cosign_http_proxy=")
+            || lower.starts_with("export cosign_proxy=")
             || lower.starts_with("export http_proxy=")
             || lower.starts_with("export https_proxy=")
             || lower.starts_with("export all_proxy=")
             || lower.starts_with("hfenv_http_proxy=")
             || lower.starts_with("hfenv_https_proxy=")
             || lower.starts_with("hfenv_proxy=")
-            || lower.starts_with("helmfile_http_proxy=")
-            || lower.starts_with("helmfile_proxy=")
+            || lower.starts_with("cosign_http_proxy=")
+            || lower.starts_with("cosign_proxy=")
             || lower.starts_with("http_proxy=")
             || lower.starts_with("https_proxy=")
             || lower.starts_with("all_proxy=")
@@ -67732,8 +67732,8 @@ pub fn apply_hfenv_proxy(content: &str, proxy_url: &str) -> String {
                 || k_trim == "hfenv_http_proxy"
                 || k_trim == "hfenv_https_proxy"
                 || k_trim == "hfenv_proxy"
-                || k_trim == "helmfile_http_proxy"
-                || k_trim == "helmfile_proxy"
+                || k_trim == "cosign_http_proxy"
+                || k_trim == "cosign_proxy"
         } else {
             false
         };
@@ -67770,7 +67770,7 @@ pub fn remove_hfenv_proxy(content: &str) -> (String, bool) {
 
     if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
         if let Some(obj) = val.as_object_mut() {
-            for key in ["http_proxy", "https_proxy", "proxy", "hfenv_proxy", "hfenv_http_proxy", "helmfile_http_proxy", "helmfile_proxy"] {
+            for key in ["http_proxy", "https_proxy", "proxy", "hfenv_proxy", "hfenv_http_proxy", "cosign_http_proxy", "cosign_proxy"] {
                 if obj.remove(key).is_some() {
                     removed = true;
                 }
@@ -67796,8 +67796,8 @@ pub fn remove_hfenv_proxy(content: &str) -> (String, bool) {
                 if k_low == "hfenv_http_proxy"
                     || k_low == "hfenv_https_proxy"
                     || k_low == "hfenv_proxy"
-                    || k_low == "helmfile_http_proxy"
-                    || k_low == "helmfile_proxy"
+                    || k_low == "cosign_http_proxy"
+                    || k_low == "cosign_proxy"
                     || k_low == "http_proxy"
                     || k_low == "https_proxy"
                     || k_low == "all_proxy"
@@ -67811,16 +67811,16 @@ pub fn remove_hfenv_proxy(content: &str) -> (String, bool) {
         if lower.starts_with("export hfenv_http_proxy=")
             || lower.starts_with("export hfenv_https_proxy=")
             || lower.starts_with("export hfenv_proxy=")
-            || lower.starts_with("export helmfile_http_proxy=")
-            || lower.starts_with("export helmfile_proxy=")
+            || lower.starts_with("export cosign_http_proxy=")
+            || lower.starts_with("export cosign_proxy=")
             || lower.starts_with("export http_proxy=")
             || lower.starts_with("export https_proxy=")
             || lower.starts_with("export all_proxy=")
             || lower.starts_with("hfenv_http_proxy=")
             || lower.starts_with("hfenv_https_proxy=")
             || lower.starts_with("hfenv_proxy=")
-            || lower.starts_with("helmfile_http_proxy=")
-            || lower.starts_with("helmfile_proxy=")
+            || lower.starts_with("cosign_http_proxy=")
+            || lower.starts_with("cosign_proxy=")
             || lower.starts_with("http_proxy=")
             || lower.starts_with("https_proxy=")
             || lower.starts_with("all_proxy=")
@@ -67840,8 +67840,8 @@ pub fn remove_hfenv_proxy(content: &str) -> (String, bool) {
                 || k_trim == "hfenv_http_proxy"
                 || k_trim == "hfenv_https_proxy"
                 || k_trim == "hfenv_proxy"
-                || k_trim == "helmfile_http_proxy"
-                || k_trim == "helmfile_proxy"
+                || k_trim == "cosign_http_proxy"
+                || k_trim == "cosign_proxy"
         } else {
             false
         };
@@ -69806,6 +69806,484 @@ pub fn unset_kindenv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_k3denv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "k3denv_http_proxy"
+                    || k_low == "k3denv_https_proxy"
+                    || k_low == "k3denv_proxy"
+                    || k_low == "k3d_http_proxy"
+                    || k_low == "k3d_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"K3DENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export k3denv_http_proxy=")
+            || lower.starts_with("export k3denv_https_proxy=")
+            || lower.starts_with("export k3denv_proxy=")
+            || lower.starts_with("export k3d_http_proxy=")
+            || lower.starts_with("export k3d_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("k3denv_http_proxy=")
+            || lower.starts_with("k3denv_https_proxy=")
+            || lower.starts_with("k3denv_proxy=")
+            || lower.starts_with("k3d_http_proxy=")
+            || lower.starts_with("k3d_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export K3DENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "k3denv_http_proxy"
+                || k_trim == "k3denv_https_proxy"
+                || k_trim == "k3denv_proxy"
+                || k_trim == "k3d_http_proxy"
+                || k_trim == "k3d_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("k3denv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"K3DENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("k3denv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_k3denv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "k3denv_proxy", "k3denv_http_proxy", "k3d_http_proxy", "k3d_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "k3denv_http_proxy"
+                    || k_low == "k3denv_https_proxy"
+                    || k_low == "k3denv_proxy"
+                    || k_low == "k3d_http_proxy"
+                    || k_low == "k3d_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export k3denv_http_proxy=")
+            || lower.starts_with("export k3denv_https_proxy=")
+            || lower.starts_with("export k3denv_proxy=")
+            || lower.starts_with("export k3d_http_proxy=")
+            || lower.starts_with("export k3d_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("k3denv_http_proxy=")
+            || lower.starts_with("k3denv_https_proxy=")
+            || lower.starts_with("k3denv_proxy=")
+            || lower.starts_with("k3d_http_proxy=")
+            || lower.starts_with("k3d_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "k3denv_http_proxy"
+                || k_trim == "k3denv_https_proxy"
+                || k_trim == "k3denv_proxy"
+                || k_trim == "k3d_http_proxy"
+                || k_trim == "k3d_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_k3denv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_k3denv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_k3denv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_k3denv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_k3denv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_k3denv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_cosignenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cosignenv_http_proxy"
+                    || k_low == "cosignenv_https_proxy"
+                    || k_low == "cosignenv_proxy"
+                    || k_low == "cosign_http_proxy"
+                    || k_low == "cosign_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    lines.push(format!("Environment=\"COSIGNENV_HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export cosignenv_http_proxy=")
+            || lower.starts_with("export cosignenv_https_proxy=")
+            || lower.starts_with("export cosignenv_proxy=")
+            || lower.starts_with("export cosign_http_proxy=")
+            || lower.starts_with("export cosign_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("cosignenv_http_proxy=")
+            || lower.starts_with("cosignenv_https_proxy=")
+            || lower.starts_with("cosignenv_proxy=")
+            || lower.starts_with("cosign_http_proxy=")
+            || lower.starts_with("cosign_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            lines.push(format!("export COSIGNENV_HTTP_PROXY=\"{}\"", proxy_url));
+            lines.push(format!("export HTTP_PROXY=\"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "cosignenv_http_proxy"
+                || k_trim == "cosignenv_https_proxy"
+                || k_trim == "cosignenv_proxy"
+                || k_trim == "cosign_http_proxy"
+                || k_trim == "cosign_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            lines.push(format!("cosignenv_http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+        lines.push(format!("Environment=\"COSIGNENV_HTTP_PROXY={}\"", proxy_url));
+        replaced_proxy = true;
+    }
+
+    if !replaced_proxy && !content.contains("[Service]") {
+        if !content.trim().is_empty() && !content.ends_with('\n') {
+            lines.push("".to_string());
+        }
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        lines.push(format!("cosignenv_http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_cosignenv_proxy(content: &str) -> (String, bool) {
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "cosignenv_proxy", "cosignenv_http_proxy", "cosign_http_proxy", "cosign_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (serde_json::to_string_pretty(&val).unwrap_or_default() + "\n", true);
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cosignenv_http_proxy"
+                    || k_low == "cosignenv_https_proxy"
+                    || k_low == "cosignenv_proxy"
+                    || k_low == "cosign_http_proxy"
+                    || k_low == "cosign_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export cosignenv_http_proxy=")
+            || lower.starts_with("export cosignenv_https_proxy=")
+            || lower.starts_with("export cosignenv_proxy=")
+            || lower.starts_with("export cosign_http_proxy=")
+            || lower.starts_with("export cosign_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("cosignenv_http_proxy=")
+            || lower.starts_with("cosignenv_https_proxy=")
+            || lower.starts_with("cosignenv_proxy=")
+            || lower.starts_with("cosign_http_proxy=")
+            || lower.starts_with("cosign_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "cosignenv_http_proxy"
+                || k_trim == "cosignenv_https_proxy"
+                || k_trim == "cosignenv_proxy"
+                || k_trim == "cosign_http_proxy"
+                || k_trim == "cosign_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_cosignenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_cosignenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_cosignenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_cosignenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_cosignenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_cosignenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -70154,6 +70632,8 @@ pub async fn turn_on(
     linkerdenv: bool,
     fluxenv: bool,
     kindenv: bool,
+    k3denv: bool,
+    cosignenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -70501,6 +70981,8 @@ pub async fn turn_on(
     let set_linkerdenv = linkerdenv || all;
     let set_fluxenv = fluxenv || all;
     let set_kindenv = kindenv || all;
+    let set_k3denv = k3denv || all;
+    let set_cosignenv = cosignenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -75592,6 +76074,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_k3denv {
+        match set_k3denv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ k3denv (k3d - K3s in Docker Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update k3denv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_cosignenv {
+        match set_cosignenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ cosignenv (Sigstore Cosign Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update cosignenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -75953,6 +76465,8 @@ pub fn turn_off(
     linkerdenv: bool,
     fluxenv: bool,
     kindenv: bool,
+    k3denv: bool,
+    cosignenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -76300,6 +76814,8 @@ pub fn turn_off(
     let unset_linkerdenv = linkerdenv || all;
     let unset_fluxenv = fluxenv || all;
     let unset_kindenv = kindenv || all;
+    let unset_k3denv = k3denv || all;
+    let unset_cosignenv = cosignenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -79581,6 +80097,34 @@ pub fn turn_off(
                 "○ kindenv kind - Kubernetes IN Docker Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update kindenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_k3denv {
+        match unset_k3denv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ k3denv k3d - K3s in Docker Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ k3denv k3d - K3s in Docker Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update k3denv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_cosignenv {
+        match unset_cosignenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ cosignenv Sigstore Cosign Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ cosignenv Sigstore Cosign Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update cosignenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -87091,6 +87635,40 @@ auth: pass123
         let dropin_updated = apply_kindenv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_kindenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_k3denv_proxy() {
+        let conf_initial = "K3DENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_k3denv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_k3denv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/k3denv\n";
+        let dropin_updated = apply_k3denv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_k3denv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cosignenv_proxy() {
+        let conf_initial = "COSIGNENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_cosignenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_cosignenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/cosignenv\n";
+        let dropin_updated = apply_cosignenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_cosignenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }

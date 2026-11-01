@@ -3606,6 +3606,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "LongVideoBench AI CDN",
         "https://github.com/DCDspace/LongVideoBench",
     ),
+    (
+        "k3denv Dev CDN",
+        "https://github.com/k3d-io/k3d",
+    ),
+    (
+        "cosignenv Dev CDN",
+        "https://github.com/sigstore/cosign",
+    ),
+    (
+        "MLVU AI CDN",
+        "https://github.com/JUNJIE99/MLVU",
+    ),
+    (
+        "CinePile AI CDN",
+        "https://github.com/royhirsch/cinepile",
+    ),
+    (
+        "EgoSchema AI CDN",
+        "https://github.com/egoschema/EgoSchema",
+    ),
+    (
+        "WorldSense AI CDN",
+        "https://github.com/WorldSense-Bench/WorldSense",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6620,6 +6644,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "LongVideoBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "k3denv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "cosignenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MLVU AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "CinePile AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "EgoSchema AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "WorldSense AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
