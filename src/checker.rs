@@ -3438,6 +3438,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "L-Eval AI CDN",
         "https://github.com/OpenLMLab/L-Eval",
     ),
+    (
+        "pklenv Dev CDN",
+        "https://github.com/pkl-community/pklenv",
+    ),
+    (
+        "opaenv Dev CDN",
+        "https://github.com/opa-env/opaenv",
+    ),
+    (
+        "OlympicArena AI CDN",
+        "https://github.com/GAIR-NLP/OlympicArena",
+    ),
+    (
+        "FinanceBench AI CDN",
+        "https://github.com/patronus-ai/financebench",
+    ),
+    (
+        "TableBench AI CDN",
+        "https://github.com/m-a-p/TableBench",
+    ),
+    (
+        "MM-SafetyBench AI CDN",
+        "https://github.com/isLinXu/MM-SafetyBench",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6326,6 +6350,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "L-Eval AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "pklenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "opaenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OlympicArena AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "FinanceBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "TableBench AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MM-SafetyBench AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

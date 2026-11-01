@@ -224,6 +224,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (65252, false, "kbenv (Kubectl Version Manager) Daemon (HTTP/API)"),
     (65353, false, "sopsenv (SOPS Version Manager) Daemon (HTTP/API)"),
     (65454, false, "ocenv (OpenShift Version Manager) Daemon (HTTP/API)"),
+    (65503, false, "pklenv (Pkl Version Manager) Daemon (HTTP/API)"),
+    (65504, false, "opaenv (Open Policy Agent Version Manager) Daemon (HTTP/API)"),
     (65505, false, "cmenv (CMake Version Manager) Daemon (HTTP/API)"),
     (65506, false, "bufenv (Buf Version Manager) Daemon (HTTP/API)"),
     (65507, false, "ctenv (Conftest Version Manager) Daemon (HTTP/API)"),
