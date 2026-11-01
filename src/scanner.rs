@@ -215,6 +215,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (57575, false, "kerl (Erlang/OTP Toolchain & Version Manager) Daemon (HTTP/API)"),
     (58585, false, "tenv (OpenTofu, Terraform, Terragrunt & Atmos Toolchain Manager) Daemon (HTTP/API)"),
     (59595, false, "tfswitch (Terraform Switcher Toolchain Manager) Daemon (HTTP/API)"),
+    (60606, false, "tgswitch (Terragrunt Switcher Toolchain Manager) Daemon (HTTP/API)"),
+    (61616, false, "tfenv (Terraform Version Manager) Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

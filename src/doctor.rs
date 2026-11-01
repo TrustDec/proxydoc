@@ -66655,6 +66655,560 @@ pub fn get_tfswitch_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_tgswitch_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("TGSWITCH_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("tgswitch.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("TGSWITCH_CUSTOM_PATH") {
+        let p = PathBuf::from(dir.trim());
+        if p.is_file() && !paths.contains(&p) {
+            paths.push(p);
+        } else {
+            let p2 = p.join(".tgswitch.toml");
+            if p2.exists() && !paths.contains(&p2) {
+                paths.push(p2);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".tgswitch.toml");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("tgswitch").join("config.toml");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".tgswitchrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("tgswitch").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".tgswitch.toml");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_rc = PathBuf::from(".tgswitchrc");
+    if local_rc.exists() && !paths.contains(&local_rc) {
+        paths.push(local_rc);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/tgswitch.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/tgswitch/config.toml");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_toml = PathBuf::from("/etc/tgswitch.toml");
+    if etc_toml.exists() && !paths.contains(&etc_toml) {
+        paths.push(etc_toml);
+    }
+    paths
+}
+
+pub fn get_tgswitch_config_path() -> Option<PathBuf> {
+    let paths = get_tgswitch_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_tgswitch_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tgswitch_write_path() -> PathBuf {
+    if let Some(p) = get_tgswitch_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("TGSWITCH_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config.toml");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let cfg_dir = home.join(".config").join("tgswitch");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config.toml");
+        }
+        return home.join(".tgswitch.toml");
+    }
+    PathBuf::from("/etc/tgswitch/config.toml")
+}
+
+pub fn parse_tgswitch_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "tgswitch_proxy", "tgswitch_http_proxy", "tg_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tgswitch_http_proxy"
+                    || k_low == "tgswitch_https_proxy"
+                    || k_low == "tgswitch_proxy"
+                    || k_low == "tg_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export tgswitch_http_proxy=")
+            || lower.starts_with("export tgswitch_https_proxy=")
+            || lower.starts_with("export tgswitch_proxy=")
+            || lower.starts_with("export tg_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("tgswitch_http_proxy=")
+            || lower.starts_with("tgswitch_https_proxy=")
+            || lower.starts_with("tgswitch_proxy=")
+            || lower.starts_with("tg_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "tgswitch_http_proxy"
+                || k_low == "tgswitch_https_proxy"
+                || k_low == "tgswitch_proxy"
+                || k_low == "tg_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tgswitch_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tgswitch_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tgswitch_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TGSWITCH_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TGSWITCH_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TGSWITCH_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TGSWITCH_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TG_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TG_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_tfenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("TFENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("tfenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("TFENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("tfenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".tfenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("tfenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".tfenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("tfenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+    }
+    let local = PathBuf::from(".tfenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".tfenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/tfenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/tfenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/tfenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_tfenv_config_path() -> Option<PathBuf> {
+    let paths = get_tfenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_tfenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tfenv_write_path() -> PathBuf {
+    if let Some(p) = get_tfenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("TFENV_CONFIG_DIR") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Ok(dir) = std::env::var("TFENV_ROOT") {
+        return PathBuf::from(dir.trim()).join("config");
+    }
+    if let Some(home) = dirs::home_dir() {
+        let tfenv_dir = home.join(".tfenv");
+        if tfenv_dir.is_dir() {
+            return tfenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("tfenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".tfenv").join("config");
+    }
+    PathBuf::from("/etc/tfenv/config")
+}
+
+pub fn parse_tfenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "tfenv_proxy", "tfenv_http_proxy", "terraform_http_proxy"] {
+                if let Some(serde_json::Value::String(s)) = obj.get(*k) {
+                    let s_trim = s.trim();
+                    if !s_trim.is_empty() {
+                        return Some(if s_trim.starts_with("http://")
+                            || s_trim.starts_with("https://")
+                            || s_trim.starts_with("socks")
+                        {
+                            s_trim.to_string()
+                        } else {
+                            format!("http://{}", s_trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "tfenv_http_proxy"
+                    || k_low == "tfenv_https_proxy"
+                    || k_low == "tfenv_proxy"
+                    || k_low == "terraform_http_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export tfenv_http_proxy=")
+            || lower.starts_with("export tfenv_https_proxy=")
+            || lower.starts_with("export tfenv_proxy=")
+            || lower.starts_with("export terraform_http_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("tfenv_http_proxy=")
+            || lower.starts_with("tfenv_https_proxy=")
+            || lower.starts_with("tfenv_proxy=")
+            || lower.starts_with("terraform_http_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "tfenv_http_proxy"
+                || k_low == "tfenv_https_proxy"
+                || k_low == "tfenv_proxy"
+                || k_low == "terraform_http_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_tfenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_tfenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_tfenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("TFENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TFENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TFENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TFENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("TERRAFORM_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:TERRAFORM_HTTP_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -77132,6 +77686,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "tfswitch Dev Proxy",
             "~/.tfswitch.toml & ~/.config/tfswitch/config.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // tgswitch Terragrunt Switcher Toolchain & Version Manager Daemon (~/.tgswitch.toml / ~/.config/tgswitch/config.toml / /etc/tgswitch/config.toml / /etc/systemd/system/tgswitch.service.d/http-proxy.conf)
+    if let Some((tgswitch_proxy, tgswitch_path)) = get_tgswitch_proxy() {
+        let ok = verify_proxy_url(&tgswitch_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "tgswitch proxy `{}` in {} is dead! (tgswitch toolchain proxy will fail)",
+                tgswitch_proxy,
+                tgswitch_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "tgswitch Dev Proxy",
+            format!("{}", tgswitch_path.display()),
+            tgswitch_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tgswitch fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "tgswitch Dev Proxy",
+            "~/.tgswitch.toml & ~/.config/tgswitch/config.toml",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // tfenv Terraform Version Manager Daemon (~/.tfenv/config / ~/.config/tfenv/config / /etc/tfenv/config / /etc/systemd/system/tfenv.service.d/http-proxy.conf)
+    if let Some((tfenv_proxy, tfenv_path)) = get_tfenv_proxy() {
+        let ok = verify_proxy_url(&tfenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "tfenv proxy `{}` in {} is dead! (tfenv toolchain proxy will fail)",
+                tfenv_proxy,
+                tfenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "tfenv Dev Proxy",
+            format!("{}", tfenv_path.display()),
+            tfenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (tfenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "tfenv Dev Proxy",
+            "~/.tfenv/config & ~/.config/tfenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -88261,5 +88879,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// tfswitch_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_tfswitch_proxy(input_comment), None);
         assert_eq!(parse_tfswitch_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tgswitch_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_tgswitch_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let toml_config = "tgswitch_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_tgswitch_proxy(toml_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_tgswitch_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// tgswitch_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_tgswitch_proxy(input_comment), None);
+        assert_eq!(parse_tgswitch_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_tfenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_tfenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "tfenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_tfenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_tfenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// tfenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_tfenv_proxy(input_comment), None);
+        assert_eq!(parse_tfenv_proxy(""), None);
     }
 }
