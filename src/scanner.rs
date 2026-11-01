@@ -209,6 +209,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (51515, false, "ghcup (Haskell Toolchain Installer & Manager) Daemon (HTTP/API)"),
     (52525, false, "zvm (Zig Version Manager) Toolchain Manager Daemon (HTTP/API)"),
     (53535, false, "juliaup (Julia Version Manager) Toolchain Manager Daemon (HTTP/API)"),
+    (54545, false, "elan (Lean Theorem Prover Toolchain Manager) Daemon (HTTP/API)"),
+    (55555, false, "choosenim (Nim Toolchain & Version Manager) Daemon (HTTP/API)"),
 ];
 
 pub async fn check_host_port(host: &str, port: u16) -> bool {

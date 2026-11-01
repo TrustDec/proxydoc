@@ -2886,6 +2886,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "V-STaR AI CDN",
         "https://github.com/AIDC-AI/V-STaR",
     ),
+    (
+        "elan Dev CDN",
+        "https://github.com/leanprover/elan",
+    ),
+    (
+        "choosenim Dev CDN",
+        "https://github.com/nim-lang/choosenim",
+    ),
+    (
+        "DeepSeek-Prover AI CDN",
+        "https://github.com/deepseek-ai/DeepSeek-Prover-V1.5",
+    ),
+    (
+        "SGLang AI CDN",
+        "https://github.com/sgl-project/sglang",
+    ),
+    (
+        "Jan AI CDN",
+        "https://github.com/janhq/jan",
+    ),
+    (
+        "MiniMax AI CDN",
+        "https://github.com/MiniMax-AI/MiniMax-01",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5360,6 +5384,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "V-STaR AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "elan Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "choosenim Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "DeepSeek-Prover AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SGLang AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Jan AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MiniMax AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
