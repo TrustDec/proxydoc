@@ -2982,6 +2982,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "TableGPT2 AI CDN",
         "https://github.com/tablegpt/TableGPT2",
     ),
+    (
+        "tgenv Dev CDN",
+        "https://github.com/tgenv/tgenv",
+    ),
+    (
+        "pkenv Dev CDN",
+        "https://github.com/iamhsa/pkenv",
+    ),
+    (
+        "WebArena AI CDN",
+        "https://github.com/web-arena-x/webarena",
+    ),
+    (
+        "VisualWebArena AI CDN",
+        "https://github.com/web-arena-x/visualwebarena",
+    ),
+    (
+        "InterCode AI CDN",
+        "https://github.com/intercode-benchmark/intercode",
+    ),
+    (
+        "OmniACT AI CDN",
+        "https://github.com/OmniACT/OmniACT",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -5528,6 +5552,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "TableGPT2 AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "tgenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "pkenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "WebArena AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "VisualWebArena AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "InterCode AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "OmniACT AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));

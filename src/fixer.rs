@@ -87,6 +87,7 @@ use crate::doctor::{
     get_coursier_proxy, get_kerl_proxy,
     get_tenv_proxy, get_tfswitch_proxy,
     get_tgswitch_proxy, get_tfenv_proxy,
+    get_tgenv_proxy, get_pkenv_proxy,
 };
 use crate::manager::{
     deactivate_jetbrains_proxy_xml, remove_vscode_proxy_json, unset_bazel_proxy, unset_bun_proxy,
@@ -170,6 +171,7 @@ use crate::manager::{
     unset_coursier_proxy, unset_kerl_proxy,
     unset_tenv_proxy, unset_tfswitch_proxy,
     unset_tgswitch_proxy, unset_tfenv_proxy,
+    unset_tgenv_proxy, unset_pkenv_proxy,
 };
 use crate::scanner;
 
@@ -7631,7 +7633,7 @@ pub async fn run() -> Result<()> {
     if let Some((volta_proxy, volta_path)) = get_volta_proxy() {
         if !verify_proxy_url(&volta_proxy).await {
             println!(
-                "  [274/301] Found dead Volta toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [274/303] Found dead Volta toolchain proxy (`{}` in {}), cleaning with backup...",
                 volta_proxy.yellow(),
                 volta_path.display()
             );
@@ -7648,17 +7650,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [274/301] Volta toolchain proxy: {}", "Reachable".green());
+            println!("  [274/303] Volta toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [274/301] Volta toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [274/303] Volta toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 275. Clean dead pyenv Python toolchain proxy in config / systemd
     if let Some((pyenv_proxy, pyenv_path)) = get_pyenv_proxy() {
         if !verify_proxy_url(&pyenv_proxy).await {
             println!(
-                "  [275/301] Found dead pyenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [275/303] Found dead pyenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 pyenv_proxy.yellow(),
                 pyenv_path.display()
             );
@@ -7675,17 +7677,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [275/301] pyenv toolchain proxy: {}", "Reachable".green());
+            println!("  [275/303] pyenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [275/301] pyenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [275/303] pyenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 276. Clean dead nvm Node Version Manager toolchain proxy in config / systemd
     if let Some((nvm_proxy, nvm_path)) = get_nvm_proxy() {
         if !verify_proxy_url(&nvm_proxy).await {
             println!(
-                "  [276/301] Found dead nvm toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [276/303] Found dead nvm toolchain proxy (`{}` in {}), cleaning with backup...",
                 nvm_proxy.yellow(),
                 nvm_path.display()
             );
@@ -7702,17 +7704,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [276/301] nvm toolchain proxy: {}", "Reachable".green());
+            println!("  [276/303] nvm toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [276/301] nvm toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [276/303] nvm toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 277. Clean dead rbenv Ruby toolchain proxy in config / systemd
     if let Some((rbenv_proxy, rbenv_path)) = get_rbenv_proxy() {
         if !verify_proxy_url(&rbenv_proxy).await {
             println!(
-                "  [277/301] Found dead rbenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [277/303] Found dead rbenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 rbenv_proxy.yellow(),
                 rbenv_path.display()
             );
@@ -7729,17 +7731,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [277/301] rbenv toolchain proxy: {}", "Reachable".green());
+            println!("  [277/303] rbenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [277/301] rbenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [277/303] rbenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 278. Clean dead gvm Go toolchain proxy in config / systemd
     if let Some((gvm_proxy, gvm_path)) = get_gvm_proxy() {
         if !verify_proxy_url(&gvm_proxy).await {
             println!(
-                "  [278/301] Found dead gvm toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [278/303] Found dead gvm toolchain proxy (`{}` in {}), cleaning with backup...",
                 gvm_proxy.yellow(),
                 gvm_path.display()
             );
@@ -7756,17 +7758,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [278/301] gvm toolchain proxy: {}", "Reachable".green());
+            println!("  [278/303] gvm toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [278/301] gvm toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [278/303] gvm toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 279. Clean dead nodenv Node.js toolchain proxy in config / systemd
     if let Some((nodenv_proxy, nodenv_path)) = get_nodenv_proxy() {
         if !verify_proxy_url(&nodenv_proxy).await {
             println!(
-                "  [279/301] Found dead nodenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [279/303] Found dead nodenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 nodenv_proxy.yellow(),
                 nodenv_path.display()
             );
@@ -7783,17 +7785,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [279/301] nodenv toolchain proxy: {}", "Reachable".green());
+            println!("  [279/303] nodenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [279/301] nodenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [279/303] nodenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 280. Clean dead jenv Java environment proxy in config / systemd
     if let Some((jenv_proxy, jenv_path)) = get_jenv_proxy() {
         if !verify_proxy_url(&jenv_proxy).await {
             println!(
-                "  [280/301] Found dead jenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [280/303] Found dead jenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 jenv_proxy.yellow(),
                 jenv_path.display()
             );
@@ -7810,17 +7812,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [280/301] jenv toolchain proxy: {}", "Reachable".green());
+            println!("  [280/303] jenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [280/301] jenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [280/303] jenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 281. Clean dead goenv Go toolchain proxy in config / systemd
     if let Some((goenv_proxy, goenv_path)) = get_goenv_proxy() {
         if !verify_proxy_url(&goenv_proxy).await {
             println!(
-                "  [281/301] Found dead goenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [281/303] Found dead goenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 goenv_proxy.yellow(),
                 goenv_path.display()
             );
@@ -7837,17 +7839,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [281/301] goenv toolchain proxy: {}", "Reachable".green());
+            println!("  [281/303] goenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [281/301] goenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [281/303] goenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 282. Clean dead phpenv PHP toolchain proxy in config / systemd
     if let Some((phpenv_proxy, phpenv_path)) = get_phpenv_proxy() {
         if !verify_proxy_url(&phpenv_proxy).await {
             println!(
-                "  [282/301] Found dead phpenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [282/303] Found dead phpenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 phpenv_proxy.yellow(),
                 phpenv_path.display()
             );
@@ -7864,17 +7866,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [282/301] phpenv toolchain proxy: {}", "Reachable".green());
+            println!("  [282/303] phpenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [282/301] phpenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [282/303] phpenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 283. Clean dead swiftenv Swift toolchain proxy in config / systemd
     if let Some((swiftenv_proxy, swiftenv_path)) = get_swiftenv_proxy() {
         if !verify_proxy_url(&swiftenv_proxy).await {
             println!(
-                "  [283/301] Found dead swiftenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [283/303] Found dead swiftenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 swiftenv_proxy.yellow(),
                 swiftenv_path.display()
             );
@@ -7891,17 +7893,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [283/301] swiftenv toolchain proxy: {}", "Reachable".green());
+            println!("  [283/303] swiftenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [283/301] swiftenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [283/303] swiftenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 284. Clean dead perlbrew Perl toolchain proxy in config / systemd
     if let Some((perlbrew_proxy, perlbrew_path)) = get_perlbrew_proxy() {
         if !verify_proxy_url(&perlbrew_proxy).await {
             println!(
-                "  [284/301] Found dead perlbrew toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [284/303] Found dead perlbrew toolchain proxy (`{}` in {}), cleaning with backup...",
                 perlbrew_proxy.yellow(),
                 perlbrew_path.display()
             );
@@ -7918,17 +7920,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [284/301] perlbrew toolchain proxy: {}", "Reachable".green());
+            println!("  [284/303] perlbrew toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [284/301] perlbrew toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [284/303] perlbrew toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 285. Clean dead luaver Lua toolchain proxy in config / systemd
     if let Some((luaver_proxy, luaver_path)) = get_luaver_proxy() {
         if !verify_proxy_url(&luaver_proxy).await {
             println!(
-                "  [285/301] Found dead luaver toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [285/303] Found dead luaver toolchain proxy (`{}` in {}), cleaning with backup...",
                 luaver_proxy.yellow(),
                 luaver_path.display()
             );
@@ -7945,17 +7947,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [285/301] luaver toolchain proxy: {}", "Reachable".green());
+            println!("  [285/303] luaver toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [285/301] luaver toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [285/303] luaver toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 286. Clean dead ghcup Haskell toolchain proxy in config / systemd
     if let Some((ghcup_proxy, ghcup_path)) = get_ghcup_proxy() {
         if !verify_proxy_url(&ghcup_proxy).await {
             println!(
-                "  [286/301] Found dead ghcup toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [286/303] Found dead ghcup toolchain proxy (`{}` in {}), cleaning with backup...",
                 ghcup_proxy.yellow(),
                 ghcup_path.display()
             );
@@ -7972,17 +7974,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [286/301] ghcup toolchain proxy: {}", "Reachable".green());
+            println!("  [286/303] ghcup toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [286/301] ghcup toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [286/303] ghcup toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 287. Clean dead zvm Zig toolchain proxy in config / systemd
     if let Some((zvm_proxy, zvm_path)) = get_zvm_proxy() {
         if !verify_proxy_url(&zvm_proxy).await {
             println!(
-                "  [287/301] Found dead zvm toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [287/303] Found dead zvm toolchain proxy (`{}` in {}), cleaning with backup...",
                 zvm_proxy.yellow(),
                 zvm_path.display()
             );
@@ -7999,17 +8001,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [287/301] zvm toolchain proxy: {}", "Reachable".green());
+            println!("  [287/303] zvm toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [287/301] zvm toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [287/303] zvm toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 288. Clean dead juliaup Julia toolchain proxy in config / systemd
     if let Some((juliaup_proxy, juliaup_path)) = get_juliaup_proxy() {
         if !verify_proxy_url(&juliaup_proxy).await {
             println!(
-                "  [288/301] Found dead juliaup toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [288/303] Found dead juliaup toolchain proxy (`{}` in {}), cleaning with backup...",
                 juliaup_proxy.yellow(),
                 juliaup_path.display()
             );
@@ -8026,17 +8028,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [288/301] juliaup toolchain proxy: {}", "Reachable".green());
+            println!("  [288/303] juliaup toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [288/301] juliaup toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [288/303] juliaup toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 289. Clean dead elan Lean toolchain proxy in config / systemd
     if let Some((elan_proxy, elan_path)) = get_elan_proxy() {
         if !verify_proxy_url(&elan_proxy).await {
             println!(
-                "  [289/301] Found dead elan toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [289/303] Found dead elan toolchain proxy (`{}` in {}), cleaning with backup...",
                 elan_proxy.yellow(),
                 elan_path.display()
             );
@@ -8053,17 +8055,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [289/301] elan toolchain proxy: {}", "Reachable".green());
+            println!("  [289/303] elan toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [289/301] elan toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [289/303] elan toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 290. Clean dead choosenim Nim toolchain proxy in config / systemd
     if let Some((choosenim_proxy, choosenim_path)) = get_choosenim_proxy() {
         if !verify_proxy_url(&choosenim_proxy).await {
             println!(
-                "  [290/301] Found dead choosenim toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [290/303] Found dead choosenim toolchain proxy (`{}` in {}), cleaning with backup...",
                 choosenim_proxy.yellow(),
                 choosenim_path.display()
             );
@@ -8080,17 +8082,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [290/301] choosenim toolchain proxy: {}", "Reachable".green());
+            println!("  [290/303] choosenim toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [290/301] choosenim toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [290/303] choosenim toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 291. Clean dead coursier Scala toolchain proxy in config / systemd
     if let Some((coursier_proxy, coursier_path)) = get_coursier_proxy() {
         if !verify_proxy_url(&coursier_proxy).await {
             println!(
-                "  [291/301] Found dead coursier toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [291/303] Found dead coursier toolchain proxy (`{}` in {}), cleaning with backup...",
                 coursier_proxy.yellow(),
                 coursier_path.display()
             );
@@ -8107,17 +8109,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [291/301] coursier toolchain proxy: {}", "Reachable".green());
+            println!("  [291/303] coursier toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [291/301] coursier toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [291/303] coursier toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 292. Clean dead kerl Erlang/OTP toolchain proxy in config / systemd
     if let Some((kerl_proxy, kerl_path)) = get_kerl_proxy() {
         if !verify_proxy_url(&kerl_proxy).await {
             println!(
-                "  [292/301] Found dead kerl toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [292/303] Found dead kerl toolchain proxy (`{}` in {}), cleaning with backup...",
                 kerl_proxy.yellow(),
                 kerl_path.display()
             );
@@ -8134,17 +8136,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [292/301] kerl toolchain proxy: {}", "Reachable".green());
+            println!("  [292/303] kerl toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [292/301] kerl toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [292/303] kerl toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 293. Clean dead tenv toolchain proxy in config / systemd
     if let Some((tenv_proxy, tenv_path)) = get_tenv_proxy() {
         if !verify_proxy_url(&tenv_proxy).await {
             println!(
-                "  [293/301] Found dead tenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [293/303] Found dead tenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 tenv_proxy.yellow(),
                 tenv_path.display()
             );
@@ -8161,17 +8163,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [293/301] tenv toolchain proxy: {}", "Reachable".green());
+            println!("  [293/303] tenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [293/301] tenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [293/303] tenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 294. Clean dead tfswitch toolchain proxy in config / systemd
     if let Some((tfswitch_proxy, tfswitch_path)) = get_tfswitch_proxy() {
         if !verify_proxy_url(&tfswitch_proxy).await {
             println!(
-                "  [294/301] Found dead tfswitch toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [294/303] Found dead tfswitch toolchain proxy (`{}` in {}), cleaning with backup...",
                 tfswitch_proxy.yellow(),
                 tfswitch_path.display()
             );
@@ -8188,17 +8190,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [294/301] tfswitch toolchain proxy: {}", "Reachable".green());
+            println!("  [294/303] tfswitch toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [294/301] tfswitch toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [294/303] tfswitch toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 295. Clean dead tgswitch toolchain proxy in config / systemd
     if let Some((tgswitch_proxy, tgswitch_path)) = get_tgswitch_proxy() {
         if !verify_proxy_url(&tgswitch_proxy).await {
             println!(
-                "  [295/301] Found dead tgswitch toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [295/303] Found dead tgswitch toolchain proxy (`{}` in {}), cleaning with backup...",
                 tgswitch_proxy.yellow(),
                 tgswitch_path.display()
             );
@@ -8215,17 +8217,17 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [295/301] tgswitch toolchain proxy: {}", "Reachable".green());
+            println!("  [295/303] tgswitch toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [295/301] tgswitch toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [295/303] tgswitch toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
     // 296. Clean dead tfenv toolchain proxy in config / systemd
     if let Some((tfenv_proxy, tfenv_path)) = get_tfenv_proxy() {
         if !verify_proxy_url(&tfenv_proxy).await {
             println!(
-                "  [296/301] Found dead tfenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                "  [296/303] Found dead tfenv toolchain proxy (`{}` in {}), cleaning with backup...",
                 tfenv_proxy.yellow(),
                 tfenv_path.display()
             );
@@ -8242,13 +8244,67 @@ pub async fn run() -> Result<()> {
                 fixed_count += 1;
             }
         } else {
-            println!("  [296/301] tfenv toolchain proxy: {}", "Reachable".green());
+            println!("  [296/303] tfenv toolchain proxy: {}", "Reachable".green());
         }
     } else {
-        println!("  [296/301] tfenv toolchain proxy: {}", "Clean or not set".dimmed());
+        println!("  [296/303] tfenv toolchain proxy: {}", "Clean or not set".dimmed());
     }
 
-    // 297. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
+    // 297. Clean dead tgenv toolchain proxy in config / systemd
+    if let Some((tgenv_proxy, tgenv_path)) = get_tgenv_proxy() {
+        if !verify_proxy_url(&tgenv_proxy).await {
+            println!(
+                "  [297/303] Found dead tgenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                tgenv_proxy.yellow(),
+                tgenv_path.display()
+            );
+            if tgenv_path.exists() {
+                let backup = tgenv_path.with_extension("bak");
+                let _ = std::fs::copy(&tgenv_path, &backup);
+            }
+            if let Ok(true) = unset_tgenv_proxy() {
+                println!(
+                    "  {} Cleared broken tgenv toolchain proxy in {} (backup saved)",
+                    "✔".green(),
+                    tgenv_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [297/303] tgenv toolchain proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [297/303] tgenv toolchain proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 298. Clean dead pkenv toolchain proxy in config / systemd
+    if let Some((pkenv_proxy, pkenv_path)) = get_pkenv_proxy() {
+        if !verify_proxy_url(&pkenv_proxy).await {
+            println!(
+                "  [298/303] Found dead pkenv toolchain proxy (`{}` in {}), cleaning with backup...",
+                pkenv_proxy.yellow(),
+                pkenv_path.display()
+            );
+            if pkenv_path.exists() {
+                let backup = pkenv_path.with_extension("bak");
+                let _ = std::fs::copy(&pkenv_path, &backup);
+            }
+            if let Ok(true) = unset_pkenv_proxy() {
+                println!(
+                    "  {} Cleared broken pkenv toolchain proxy in {} (backup saved)",
+                    "✔".green(),
+                    pkenv_path.display()
+                );
+                fixed_count += 1;
+            }
+        } else {
+            println!("  [298/303] pkenv toolchain proxy: {}", "Reachable".green());
+        }
+    } else {
+        println!("  [298/303] pkenv toolchain proxy: {}", "Clean or not set".dimmed());
+    }
+
+    // 299. Clean dead Alpine Linux apk package manager repositories in /etc/apk/repositories
     let apk_paths = get_apk_repositories_paths();
     if !apk_paths.is_empty() {
         for apath in apk_paths {
@@ -8262,7 +8318,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [297/301] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
+                        "  [299/303] Found {} dead Alpine apk repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         apath.display()
                     );
@@ -8279,17 +8335,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [297/301] Alpine Linux apk repositories: {}", "Reachable".green());
+                    println!("  [299/303] Alpine Linux apk repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [297/301] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
+                    println!("  [299/303] Alpine Linux apk repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [297/301] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
+        println!("  [299/303] Alpine Linux apk repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 298. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
+    // 300. Clean dead vcpkg registries/mirrors in vcpkg-configuration.json
     let vcpkg_paths = get_vcpkg_configuration_paths();
     if !vcpkg_paths.is_empty() {
         for vpath in vcpkg_paths {
@@ -8303,7 +8359,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_regs.is_empty() {
                     println!(
-                        "  [298/301] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
+                        "  [300/303] Found {} dead vcpkg registry mirror(s) in {}, cleaning with backup...",
                         dead_regs.len().to_string().yellow(),
                         vpath.display()
                     );
@@ -8321,17 +8377,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !regs.is_empty() {
-                    println!("  [298/301] vcpkg configuration registries: {}", "Reachable".green());
+                    println!("  [300/303] vcpkg configuration registries: {}", "Reachable".green());
                 } else {
-                    println!("  [298/301] vcpkg configuration registries: {}", "Clean or empty".dimmed());
+                    println!("  [300/303] vcpkg configuration registries: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [298/301] vcpkg configuration registries: {}", "Clean or not set".dimmed());
+        println!("  [300/303] vcpkg configuration registries: {}", "Clean or not set".dimmed());
     }
 
-    // 299. Clean dead Kubernetes Helm chart repositories in repositories.yaml
+    // 301. Clean dead Kubernetes Helm chart repositories in repositories.yaml
     let helm_paths = get_helm_repositories_paths();
     if !helm_paths.is_empty() {
         for hpath in helm_paths {
@@ -8345,7 +8401,7 @@ pub async fn run() -> Result<()> {
                 }
                 if !dead_repos.is_empty() {
                     println!(
-                        "  [299/301] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
+                        "  [301/303] Found {} dead Helm chart repository mirror(s) in {}, cleaning with backup...",
                         dead_repos.len().to_string().yellow(),
                         hpath.display()
                     );
@@ -8363,17 +8419,17 @@ pub async fn run() -> Result<()> {
                         fixed_count += 1;
                     }
                 } else if !repos.is_empty() {
-                    println!("  [299/301] Kubernetes Helm chart repositories: {}", "Reachable".green());
+                    println!("  [301/303] Kubernetes Helm chart repositories: {}", "Reachable".green());
                 } else {
-                    println!("  [299/301] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
+                    println!("  [301/303] Kubernetes Helm chart repositories: {}", "Clean or empty".dimmed());
                 }
             }
         }
     } else {
-        println!("  [299/301] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
+        println!("  [301/303] Kubernetes Helm chart repositories: {}", "Clean or not set".dimmed());
     }
 
-    // 300. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
+    // 302. Sync active system/daemon proxy to terminal with proper NO_PROXY bypass
     let active_port = match get_system_proxy() {
         Some(sys_info) if sys_info.state.http_enabled && sys_info.state.http_port > 0 => {
             if scanner::check_host_port(&sys_info.state.http_host, sys_info.state.http_port).await {
@@ -8392,7 +8448,7 @@ pub async fn run() -> Result<()> {
 
     if let Some(port) = target_port {
         println!(
-            "  [300/301] Detected healthy active proxy on port {}. Generating Shell sync...",
+            "  [302/303] Detected healthy active proxy on port {}. Generating Shell sync...",
             port.to_string().green().bold()
         );
         let proxy_url = format!("http://127.0.0.1:{}", port);
@@ -8420,12 +8476,12 @@ pub async fn run() -> Result<()> {
         fixed_count += 1;
     } else {
         println!(
-            "  [300/301] No active local proxy client found. Ensure your proxy software is open."
+            "  [302/303] No active local proxy client found. Ensure your proxy software is open."
         );
     }
 
-    // 301. Flush local DNS cache
-    println!("  [301/301] Flushing local DNS cache to fix resolution stalls...");
+    // 303. Flush local DNS cache
+    println!("  [303/303] Flushing local DNS cache to fix resolution stalls...");
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("dscacheutil").arg("-flushcache").status();
