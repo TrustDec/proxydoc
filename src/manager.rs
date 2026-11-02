@@ -73152,6 +73152,498 @@ pub fn unset_k9senv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_clusterctlenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "clusterctlenv_http_proxy"
+                    || k_low == "clusterctlenv_https_proxy"
+                    || k_low == "clusterctlenv_proxy"
+                    || k_low == "clusterctl_http_proxy"
+                    || k_low == "clusterctl_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export clusterctlenv_http_proxy=")
+            || lower.starts_with("export clusterctlenv_https_proxy=")
+            || lower.starts_with("export clusterctlenv_proxy=")
+            || lower.starts_with("export clusterctl_http_proxy=")
+            || lower.starts_with("export clusterctl_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("clusterctlenv_http_proxy=")
+            || lower.starts_with("clusterctlenv_https_proxy=")
+            || lower.starts_with("clusterctlenv_proxy=")
+            || lower.starts_with("clusterctl_http_proxy=")
+            || lower.starts_with("clusterctl_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if lower.starts_with("export ") {
+                lines.push(format!("export http_proxy=\"{}\"", proxy_url));
+            } else {
+                lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "clusterctlenv_http_proxy"
+                || k_trim == "clusterctlenv_https_proxy"
+                || k_trim == "clusterctlenv_proxy"
+                || k_trim == "clusterctl_http_proxy"
+                || k_trim == "clusterctl_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        let is_dropin = content.contains("[Service]");
+        if is_dropin {
+            if let Some(pos) = lines.iter().position(|l| l.trim() == "[Service]") {
+                lines.insert(
+                    pos + 1,
+                    format!("Environment=\"HTTP_PROXY={}\"", proxy_url),
+                );
+            } else {
+                lines.push("[Service]".to_string());
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_clusterctlenv_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "clusterctlenv_proxy", "clusterctlenv_http_proxy", "clusterctl_http_proxy", "clusterctl_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "clusterctlenv_http_proxy"
+                    || k_low == "clusterctlenv_https_proxy"
+                    || k_low == "clusterctlenv_proxy"
+                    || k_low == "clusterctl_http_proxy"
+                    || k_low == "clusterctl_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export clusterctlenv_http_proxy=")
+            || lower.starts_with("export clusterctlenv_https_proxy=")
+            || lower.starts_with("export clusterctlenv_proxy=")
+            || lower.starts_with("export clusterctl_http_proxy=")
+            || lower.starts_with("export clusterctl_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("clusterctlenv_http_proxy=")
+            || lower.starts_with("clusterctlenv_https_proxy=")
+            || lower.starts_with("clusterctlenv_proxy=")
+            || lower.starts_with("clusterctl_http_proxy=")
+            || lower.starts_with("clusterctl_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "clusterctlenv_http_proxy"
+                || k_trim == "clusterctlenv_https_proxy"
+                || k_trim == "clusterctlenv_proxy"
+                || k_trim == "clusterctl_http_proxy"
+                || k_trim == "clusterctl_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_clusterctlenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_clusterctlenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_clusterctlenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_clusterctlenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_clusterctlenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_clusterctlenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_cmctlenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cmctlenv_http_proxy"
+                    || k_low == "cmctlenv_https_proxy"
+                    || k_low == "cmctlenv_proxy"
+                    || k_low == "cmctl_http_proxy"
+                    || k_low == "cmctl_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export cmctlenv_http_proxy=")
+            || lower.starts_with("export cmctlenv_https_proxy=")
+            || lower.starts_with("export cmctlenv_proxy=")
+            || lower.starts_with("export cmctl_http_proxy=")
+            || lower.starts_with("export cmctl_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("cmctlenv_http_proxy=")
+            || lower.starts_with("cmctlenv_https_proxy=")
+            || lower.starts_with("cmctlenv_proxy=")
+            || lower.starts_with("cmctl_http_proxy=")
+            || lower.starts_with("cmctl_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if lower.starts_with("export ") {
+                lines.push(format!("export http_proxy=\"{}\"", proxy_url));
+            } else {
+                lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "cmctlenv_http_proxy"
+                || k_trim == "cmctlenv_https_proxy"
+                || k_trim == "cmctlenv_proxy"
+                || k_trim == "cmctl_http_proxy"
+                || k_trim == "cmctl_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        let is_dropin = content.contains("[Service]");
+        if is_dropin {
+            if let Some(pos) = lines.iter().position(|l| l.trim() == "[Service]") {
+                lines.insert(
+                    pos + 1,
+                    format!("Environment=\"HTTP_PROXY={}\"", proxy_url),
+                );
+            } else {
+                lines.push("[Service]".to_string());
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_cmctlenv_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "cmctlenv_proxy", "cmctlenv_http_proxy", "cmctl_http_proxy", "cmctl_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "cmctlenv_http_proxy"
+                    || k_low == "cmctlenv_https_proxy"
+                    || k_low == "cmctlenv_proxy"
+                    || k_low == "cmctl_http_proxy"
+                    || k_low == "cmctl_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export cmctlenv_http_proxy=")
+            || lower.starts_with("export cmctlenv_https_proxy=")
+            || lower.starts_with("export cmctlenv_proxy=")
+            || lower.starts_with("export cmctl_http_proxy=")
+            || lower.starts_with("export cmctl_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("cmctlenv_http_proxy=")
+            || lower.starts_with("cmctlenv_https_proxy=")
+            || lower.starts_with("cmctlenv_proxy=")
+            || lower.starts_with("cmctl_http_proxy=")
+            || lower.starts_with("cmctl_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "cmctlenv_http_proxy"
+                || k_trim == "cmctlenv_https_proxy"
+                || k_trim == "cmctlenv_proxy"
+                || k_trim == "cmctl_http_proxy"
+                || k_trim == "cmctl_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_cmctlenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_cmctlenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_cmctlenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_cmctlenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_cmctlenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_cmctlenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -73514,6 +74006,8 @@ pub async fn turn_on(
     sternenv: bool,
     veleroenv: bool,
     k9senv: bool,
+    clusterctlenv: bool,
+    cmctlenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -73875,6 +74369,8 @@ pub async fn turn_on(
     let set_sternenv = sternenv || all;
     let set_veleroenv = veleroenv || all;
     let set_k9senv = k9senv || all;
+    let set_clusterctlenv = clusterctlenv || all;
+    let set_cmctlenv = cmctlenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -79176,6 +79672,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_clusterctlenv {
+        match set_clusterctlenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ clusterctlenv (Kubernetes Cluster API Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update clusterctlenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_cmctlenv {
+        match set_cmctlenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ cmctlenv (cert-manager CLI Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update cmctlenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -79551,6 +80077,8 @@ pub fn turn_off(
     sternenv: bool,
     veleroenv: bool,
     k9senv: bool,
+    clusterctlenv: bool,
+    cmctlenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -79912,6 +80440,8 @@ pub fn turn_off(
     let unset_sternenv = sternenv || all;
     let unset_veleroenv = veleroenv || all;
     let unset_k9senv = k9senv || all;
+    let unset_clusterctlenv = clusterctlenv || all;
+    let unset_cmctlenv = cmctlenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -83389,6 +83919,34 @@ pub fn turn_off(
                 "○ k9senv k9s Kubernetes Terminal UI Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update k9senv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_clusterctlenv {
+        match unset_clusterctlenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ clusterctlenv Kubernetes Cluster API Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ clusterctlenv Kubernetes Cluster API Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update clusterctlenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_cmctlenv {
+        match unset_cmctlenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ cmctlenv cert-manager CLI Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ cmctlenv cert-manager CLI Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update cmctlenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -91137,6 +91695,40 @@ auth: pass123
         let dropin_updated = apply_k9senv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_k9senv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_clusterctlenv_proxy() {
+        let conf_initial = "CLUSTERCTLENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_clusterctlenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_clusterctlenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/clusterctlenv\n";
+        let dropin_updated = apply_clusterctlenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_clusterctlenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_cmctlenv_proxy() {
+        let conf_initial = "CMCTLENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_cmctlenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_cmctlenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/cmctlenv\n";
+        let dropin_updated = apply_cmctlenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_cmctlenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }
