@@ -75098,6 +75098,492 @@ pub fn unset_kedaenv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_kptenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kptenv_http_proxy"
+                    || k_low == "kptenv_https_proxy"
+                    || k_low == "kptenv_proxy"
+                    || k_low == "kpt_http_proxy"
+                    || k_low == "kpt_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export kptenv_http_proxy=")
+            || lower.starts_with("export kptenv_https_proxy=")
+            || lower.starts_with("export kptenv_proxy=")
+            || lower.starts_with("export kpt_http_proxy=")
+            || lower.starts_with("export kpt_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("kptenv_http_proxy=")
+            || lower.starts_with("kptenv_https_proxy=")
+            || lower.starts_with("kptenv_proxy=")
+            || lower.starts_with("kpt_http_proxy=")
+            || lower.starts_with("kpt_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if lower.starts_with("export ") {
+                lines.push(format!("export http_proxy=\"{}\"", proxy_url));
+            } else {
+                lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "kptenv_http_proxy"
+                || k_trim == "kptenv_https_proxy"
+                || k_trim == "kptenv_proxy"
+                || k_trim == "kpt_http_proxy"
+                || k_trim == "kpt_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+    } else if !replaced_proxy && !content.contains("[Service]") {
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_kptenv_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "http_proxy",
+                "https_proxy",
+                "proxy",
+                "kptenv_proxy",
+                "kptenv_http_proxy",
+                "kpt_http_proxy",
+                "kpt_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "kptenv_http_proxy"
+                    || k_low == "kptenv_https_proxy"
+                    || k_low == "kptenv_proxy"
+                    || k_low == "kpt_http_proxy"
+                    || k_low == "kpt_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export kptenv_http_proxy=")
+            || lower.starts_with("export kptenv_https_proxy=")
+            || lower.starts_with("export kptenv_proxy=")
+            || lower.starts_with("export kpt_http_proxy=")
+            || lower.starts_with("export kpt_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("kptenv_http_proxy=")
+            || lower.starts_with("kptenv_https_proxy=")
+            || lower.starts_with("kptenv_proxy=")
+            || lower.starts_with("kpt_http_proxy=")
+            || lower.starts_with("kpt_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "kptenv_http_proxy"
+                || k_trim == "kptenv_https_proxy"
+                || k_trim == "kptenv_proxy"
+                || k_trim == "kpt_http_proxy"
+                || k_trim == "kpt_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_kptenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_kptenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_kptenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_kptenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_kptenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_kptenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_yttenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "yttenv_http_proxy"
+                    || k_low == "yttenv_https_proxy"
+                    || k_low == "yttenv_proxy"
+                    || k_low == "ytt_http_proxy"
+                    || k_low == "ytt_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export yttenv_http_proxy=")
+            || lower.starts_with("export yttenv_https_proxy=")
+            || lower.starts_with("export yttenv_proxy=")
+            || lower.starts_with("export ytt_http_proxy=")
+            || lower.starts_with("export ytt_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("yttenv_http_proxy=")
+            || lower.starts_with("yttenv_https_proxy=")
+            || lower.starts_with("yttenv_proxy=")
+            || lower.starts_with("ytt_http_proxy=")
+            || lower.starts_with("ytt_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if lower.starts_with("export ") {
+                lines.push(format!("export http_proxy=\"{}\"", proxy_url));
+            } else {
+                lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "yttenv_http_proxy"
+                || k_trim == "yttenv_https_proxy"
+                || k_trim == "yttenv_proxy"
+                || k_trim == "ytt_http_proxy"
+                || k_trim == "ytt_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_dropin && content.contains("[Service]") {
+        lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+    } else if !replaced_proxy && !content.contains("[Service]") {
+        lines.push(format!("http_proxy = \"{}\"", proxy_url));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_yttenv_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in [
+                "http_proxy",
+                "https_proxy",
+                "proxy",
+                "yttenv_proxy",
+                "yttenv_http_proxy",
+                "ytt_http_proxy",
+                "ytt_proxy",
+            ] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "yttenv_http_proxy"
+                    || k_low == "yttenv_https_proxy"
+                    || k_low == "yttenv_proxy"
+                    || k_low == "ytt_http_proxy"
+                    || k_low == "ytt_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export yttenv_http_proxy=")
+            || lower.starts_with("export yttenv_https_proxy=")
+            || lower.starts_with("export yttenv_proxy=")
+            || lower.starts_with("export ytt_http_proxy=")
+            || lower.starts_with("export ytt_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("yttenv_http_proxy=")
+            || lower.starts_with("yttenv_https_proxy=")
+            || lower.starts_with("yttenv_proxy=")
+            || lower.starts_with("ytt_http_proxy=")
+            || lower.starts_with("ytt_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "yttenv_http_proxy"
+                || k_trim == "yttenv_https_proxy"
+                || k_trim == "yttenv_proxy"
+                || k_trim == "ytt_http_proxy"
+                || k_trim == "ytt_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_yttenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_yttenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_yttenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_yttenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_yttenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_yttenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -75468,6 +75954,8 @@ pub async fn turn_on(
     crossplaneenv: bool,
     kappenv: bool,
     kedaenv: bool,
+    kptenv: bool,
+    yttenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -75837,6 +76325,8 @@ pub async fn turn_on(
     let set_crossplaneenv = crossplaneenv || all;
     let set_kappenv = kappenv || all;
     let set_kedaenv = kedaenv || all;
+    let set_kptenv = kptenv || all;
+    let set_yttenv = yttenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -81258,6 +81748,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_kptenv {
+        match set_kptenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ kptenv (Google kpt CLI Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update kptenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_yttenv {
+        match set_yttenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ yttenv (Carvel ytt CLI Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update yttenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -81641,6 +82161,8 @@ pub fn turn_off(
     crossplaneenv: bool,
     kappenv: bool,
     kedaenv: bool,
+    kptenv: bool,
+    yttenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -82010,6 +82532,8 @@ pub fn turn_off(
     let unset_crossplaneenv = crossplaneenv || all;
     let unset_kappenv = kappenv || all;
     let unset_kedaenv = kedaenv || all;
+    let unset_kptenv = kptenv || all;
+    let unset_yttenv = yttenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -85599,6 +86123,34 @@ pub fn turn_off(
                 "○ kedaenv KEDA CLI Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update kedaenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_kptenv {
+        match unset_kptenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ kptenv Google kpt CLI Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ kptenv Google kpt CLI Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update kptenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_yttenv {
+        match unset_yttenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ yttenv Carvel ytt CLI Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ yttenv Carvel ytt CLI Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update yttenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -93483,6 +94035,40 @@ auth: pass123
         let dropin_updated = apply_kedaenv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_kedaenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_kptenv_proxy() {
+        let conf_initial = "KPTENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_kptenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_kptenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/kptenv\n";
+        let dropin_updated = apply_kptenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_kptenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_yttenv_proxy() {
+        let conf_initial = "YTTENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_yttenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_yttenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/yttenv\n";
+        let dropin_updated = apply_yttenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_yttenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }
