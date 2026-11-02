@@ -84736,6 +84736,626 @@ pub fn get_orasenv_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_skopeoenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("SKOPEOENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("skopeoenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("SKOPEOENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("skopeoenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".skopeoenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("skopeoenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".skopeoenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("skopeoenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".skopeoenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".skopeoenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".skopeoenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/skopeoenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/skopeoenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/skopeoenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_skopeoenv_config_path() -> Option<PathBuf> {
+    let paths = get_skopeoenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_skopeoenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_skopeoenv_write_path() -> PathBuf {
+    if let Some(p) = get_skopeoenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("SKOPEOENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Ok(dir) = std::env::var("SKOPEOENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let skopeoenv_dir = home.join(".skopeoenv");
+        if skopeoenv_dir.is_dir() {
+            return skopeoenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("skopeoenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".skopeoenv").join("config");
+    }
+    PathBuf::from("/etc/skopeoenv/config")
+}
+
+pub fn parse_skopeoenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "skopeoenv_proxy", "skopeoenv_http_proxy", "skopeo_http_proxy", "skopeo_proxy"] {
+                if let Some(v) = obj.get(*k).and_then(|x| x.as_str()) {
+                    let trim = v.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "skopeoenv_http_proxy"
+                    || k_low == "skopeoenv_https_proxy"
+                    || k_low == "skopeoenv_proxy"
+                    || k_low == "skopeo_http_proxy"
+                    || k_low == "skopeo_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export skopeoenv_http_proxy=")
+            || lower.starts_with("export skopeoenv_https_proxy=")
+            || lower.starts_with("export skopeoenv_proxy=")
+            || lower.starts_with("export skopeo_http_proxy=")
+            || lower.starts_with("export skopeo_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("skopeoenv_http_proxy=")
+            || lower.starts_with("skopeoenv_https_proxy=")
+            || lower.starts_with("skopeoenv_proxy=")
+            || lower.starts_with("skopeo_http_proxy=")
+            || lower.starts_with("skopeo_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "skopeoenv_http_proxy"
+                || k_low == "skopeoenv_https_proxy"
+                || k_low == "skopeoenv_proxy"
+                || k_low == "skopeo_http_proxy"
+                || k_low == "skopeo_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_skopeoenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_skopeoenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_skopeoenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("SKOPEOENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SKOPEOENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SKOPEOENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SKOPEOENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SKOPEO_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SKOPEO_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("SKOPEO_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:SKOPEO_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_packenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("PACKENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("packenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("PACKENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("packenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".packenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("packenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".packenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("packenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".packenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".packenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".packenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/packenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/packenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/packenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_packenv_config_path() -> Option<PathBuf> {
+    let paths = get_packenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_packenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_packenv_write_path() -> PathBuf {
+    if let Some(p) = get_packenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("PACKENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Ok(dir) = std::env::var("PACKENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let packenv_dir = home.join(".packenv");
+        if packenv_dir.is_dir() {
+            return packenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("packenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".packenv").join("config");
+    }
+    PathBuf::from("/etc/packenv/config")
+}
+
+pub fn parse_packenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &["http_proxy", "https_proxy", "proxy", "packenv_proxy", "packenv_http_proxy", "pack_http_proxy", "pack_proxy"] {
+                if let Some(v) = obj.get(*k).and_then(|x| x.as_str()) {
+                    let trim = v.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with(';') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "packenv_http_proxy"
+                    || k_low == "packenv_https_proxy"
+                    || k_low == "packenv_proxy"
+                    || k_low == "pack_http_proxy"
+                    || k_low == "pack_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export packenv_http_proxy=")
+            || lower.starts_with("export packenv_https_proxy=")
+            || lower.starts_with("export packenv_proxy=")
+            || lower.starts_with("export pack_http_proxy=")
+            || lower.starts_with("export pack_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("packenv_http_proxy=")
+            || lower.starts_with("packenv_https_proxy=")
+            || lower.starts_with("packenv_proxy=")
+            || lower.starts_with("pack_http_proxy=")
+            || lower.starts_with("pack_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "packenv_http_proxy"
+                || k_low == "packenv_https_proxy"
+                || k_low == "packenv_proxy"
+                || k_low == "pack_http_proxy"
+                || k_low == "pack_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_packenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_packenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_packenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("PACKENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PACKENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PACKENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PACKENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PACK_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PACK_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("PACK_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:PACK_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -97197,6 +97817,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "orasenv Dev Proxy",
             "~/.orasenv/config & ~/.config/orasenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // skopeoenv Containers Skopeo Version Manager Daemon (~/.skopeoenv/config / ~/.config/skopeoenv/config / /etc/skopeoenv/config / /etc/systemd/system/skopeoenv.service.d/http-proxy.conf)
+    if let Some((skopeoenv_proxy, skopeoenv_path)) = get_skopeoenv_proxy() {
+        let ok = verify_proxy_url(&skopeoenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "skopeoenv proxy `{}` in {} is dead! (skopeoenv toolchain proxy will fail)",
+                skopeoenv_proxy,
+                skopeoenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "skopeoenv Dev Proxy",
+            format!("{}", skopeoenv_path.display()),
+            skopeoenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (skopeoenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "skopeoenv Dev Proxy",
+            "~/.skopeoenv/config & ~/.config/skopeoenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // packenv CNCF Buildpacks pack CLI Version Manager Daemon (~/.packenv/config / ~/.config/packenv/config / /etc/packenv/config / /etc/systemd/system/packenv.service.d/http-proxy.conf)
+    if let Some((packenv_proxy, packenv_path)) = get_packenv_proxy() {
+        let ok = verify_proxy_url(&packenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "packenv proxy `{}` in {} is dead! (packenv toolchain proxy will fail)",
+                packenv_proxy,
+                packenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "packenv Dev Proxy",
+            format!("{}", packenv_path.display()),
+            packenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (packenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "packenv Dev Proxy",
+            "~/.packenv/config & ~/.config/packenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -109876,5 +110560,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// orasenv_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_orasenv_proxy(input_comment), None);
         assert_eq!(parse_orasenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_skopeoenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_skopeoenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "skopeoenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_skopeoenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_skopeoenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// skopeoenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_skopeoenv_proxy(input_comment), None);
+        assert_eq!(parse_skopeoenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_packenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_packenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "packenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_packenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_packenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// packenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_packenv_proxy(input_comment), None);
+        assert_eq!(parse_packenv_proxy(""), None);
     }
 }
