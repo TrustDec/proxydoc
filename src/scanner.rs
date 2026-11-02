@@ -224,6 +224,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (65252, false, "kbenv (Kubectl Version Manager) Daemon (HTTP/API)"),
     (65353, false, "sopsenv (SOPS Version Manager) Daemon (HTTP/API)"),
     (65454, false, "ocenv (OpenShift Version Manager) Daemon (HTTP/API)"),
+    (65461, false, "helmfileenv (Helmfile CLI Version Manager) Daemon (HTTP/API)"),
+    (65462, false, "vclusterenv (vcluster Virtual Kubernetes Clusters CLI Version Manager) Daemon (HTTP/API)"),
     (65463, false, "vendirenv (Carvel vendir CLI Version Manager) Daemon (HTTP/API)"),
     (65464, false, "krewenv (Kubernetes Krew CLI Version Manager) Daemon (HTTP/API)"),
     (65465, false, "kbldenv (Carvel kbld CLI Version Manager) Daemon (HTTP/API)"),

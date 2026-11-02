@@ -90998,6 +90998,642 @@ pub fn get_krewenv_proxy() -> Option<(String, PathBuf)> {
     None
 }
 
+pub fn get_helmfileenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("HELMFILENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("helmfileenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("HELMFILENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("helmfileenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".helmfileenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("helmfileenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".helmfileenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("helmfileenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".helmfileenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".helmfileenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".helmfileenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/helmfileenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/helmfileenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/helmfileenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_helmfileenv_config_path() -> Option<PathBuf> {
+    let paths = get_helmfileenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_helmfileenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_helmfileenv_write_path() -> PathBuf {
+    if let Some(p) = get_helmfileenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("HELMFILENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Ok(dir) = std::env::var("HELMFILENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let helmfileenv_dir = home.join(".helmfileenv");
+        if helmfileenv_dir.is_dir() {
+            return helmfileenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("helmfileenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".helmfileenv").join("config");
+    }
+    PathBuf::from("/etc/helmfileenv/config")
+}
+
+pub fn parse_helmfileenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &[
+                "http_proxy",
+                "https_proxy",
+                "proxy",
+                "helmfileenv_proxy",
+                "helmfileenv_http_proxy",
+                "helmfile_http_proxy",
+                "helmfile_proxy",
+            ] {
+                if let Some(v) = obj.get(*k).and_then(|x| x.as_str()) {
+                    let trim = v.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with("//") || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "helmfileenv_http_proxy"
+                    || k_low == "helmfileenv_https_proxy"
+                    || k_low == "helmfileenv_proxy"
+                    || k_low == "helmfile_http_proxy"
+                    || k_low == "helmfile_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export helmfileenv_http_proxy=")
+            || lower.starts_with("export helmfileenv_https_proxy=")
+            || lower.starts_with("export helmfileenv_proxy=")
+            || lower.starts_with("export helmfile_http_proxy=")
+            || lower.starts_with("export helmfile_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("helmfileenv_http_proxy=")
+            || lower.starts_with("helmfileenv_https_proxy=")
+            || lower.starts_with("helmfileenv_proxy=")
+            || lower.starts_with("helmfile_http_proxy=")
+            || lower.starts_with("helmfile_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "helmfileenv_http_proxy"
+                || k_low == "helmfileenv_https_proxy"
+                || k_low == "helmfileenv_proxy"
+                || k_low == "helmfile_http_proxy"
+                || k_low == "helmfile_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_helmfileenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_helmfileenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_helmfileenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("HELMFILENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HELMFILENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HELMFILENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HELMFILENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HELMFILE_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HELMFILE_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("HELMFILE_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:HELMFILE_PROXY")));
+        }
+    }
+    None
+}
+
+pub fn get_vclusterenv_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(dir) = std::env::var("VCLUSTERENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("vclusterenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("config.json");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Ok(dir) = std::env::var("VCLUSTERENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = PathBuf::from(dir.trim()).join("vclusterenvrc");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = PathBuf::from(dir.trim()).join("vars");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".vclusterenv").join("config");
+        if p.exists() && !paths.contains(&p) {
+            paths.push(p);
+        }
+        let p2 = home.join(".config").join("vclusterenv").join("config");
+        if p2.exists() && !paths.contains(&p2) {
+            paths.push(p2);
+        }
+        let p3 = home.join(".vclusterenvrc");
+        if p3.exists() && !paths.contains(&p3) {
+            paths.push(p3);
+        }
+        let p4 = home.join(".config").join("vclusterenv").join("config.json");
+        if p4.exists() && !paths.contains(&p4) {
+            paths.push(p4);
+        }
+        let p5 = home.join(".vclusterenv").join("vars");
+        if p5.exists() && !paths.contains(&p5) {
+            paths.push(p5);
+        }
+    }
+    let local = PathBuf::from(".vclusterenvrc");
+    if local.exists() && !paths.contains(&local) {
+        paths.push(local);
+    }
+    let local_config = PathBuf::from(".vclusterenv/config");
+    if local_config.exists() && !paths.contains(&local_config) {
+        paths.push(local_config);
+    }
+    let dropin = PathBuf::from("/etc/systemd/system/vclusterenv.service.d/http-proxy.conf");
+    if dropin.exists() && !paths.contains(&dropin) {
+        paths.push(dropin);
+    }
+    let etc_config = PathBuf::from("/etc/vclusterenv/config");
+    if etc_config.exists() && !paths.contains(&etc_config) {
+        paths.push(etc_config);
+    }
+    let etc_rc = PathBuf::from("/etc/vclusterenvrc");
+    if etc_rc.exists() && !paths.contains(&etc_rc) {
+        paths.push(etc_rc);
+    }
+    paths
+}
+
+pub fn get_vclusterenv_config_path() -> Option<PathBuf> {
+    let paths = get_vclusterenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if parse_vclusterenv_proxy(&content).is_some() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+pub fn get_vclusterenv_write_path() -> PathBuf {
+    if let Some(p) = get_vclusterenv_config_path() {
+        return p;
+    }
+    if let Ok(dir) = std::env::var("VCLUSTERENV_CONFIG_DIR") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Ok(dir) = std::env::var("VCLUSTERENV_ROOT") {
+        let p = PathBuf::from(dir.trim()).join("config");
+        return p;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let vclusterenv_dir = home.join(".vclusterenv");
+        if vclusterenv_dir.is_dir() {
+            return vclusterenv_dir.join("config");
+        }
+        let cfg_dir = home.join(".config").join("vclusterenv");
+        if cfg_dir.is_dir() {
+            return cfg_dir.join("config");
+        }
+        return home.join(".vclusterenv").join("config");
+    }
+    PathBuf::from("/etc/vclusterenv/config")
+}
+
+pub fn parse_vclusterenv_proxy(content: &str) -> Option<String> {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object() {
+            for k in &[
+                "http_proxy",
+                "https_proxy",
+                "proxy",
+                "vclusterenv_proxy",
+                "vclusterenv_http_proxy",
+                "vcluster_http_proxy",
+                "vcluster_proxy",
+            ] {
+                if let Some(v) = obj.get(*k).and_then(|x| x.as_str()) {
+                    let trim = v.trim();
+                    if !trim.is_empty() {
+                        return Some(if trim.starts_with("http://")
+                            || trim.starts_with("https://")
+                            || trim.starts_with("socks")
+                        {
+                            trim.to_string()
+                        } else {
+                            format!("http://{}", trim)
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with("//") || trimmed.starts_with(';') {
+            continue;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, v)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "vclusterenv_http_proxy"
+                    || k_low == "vclusterenv_https_proxy"
+                    || k_low == "vclusterenv_proxy"
+                    || k_low == "vcluster_http_proxy"
+                    || k_low == "vcluster_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if !val.is_empty() {
+                        return Some(if val.starts_with("http://")
+                            || val.starts_with("https://")
+                            || val.starts_with("socks")
+                        {
+                            val.to_string()
+                        } else {
+                            format!("http://{}", val)
+                        });
+                    }
+                }
+            }
+        }
+
+        if lower.starts_with("export vclusterenv_http_proxy=")
+            || lower.starts_with("export vclusterenv_https_proxy=")
+            || lower.starts_with("export vclusterenv_proxy=")
+            || lower.starts_with("export vcluster_http_proxy=")
+            || lower.starts_with("export vcluster_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("vclusterenv_http_proxy=")
+            || lower.starts_with("vclusterenv_https_proxy=")
+            || lower.starts_with("vclusterenv_proxy=")
+            || lower.starts_with("vcluster_http_proxy=")
+            || lower.starts_with("vcluster_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if let Some((_, v)) = trimmed.split_once('=') {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_low = k.trim().to_ascii_lowercase();
+            k_low == "proxy"
+                || k_low == "http_proxy"
+                || k_low == "https_proxy"
+                || k_low == "http-proxy"
+                || k_low == "https-proxy"
+                || k_low == "vclusterenv_http_proxy"
+                || k_low == "vclusterenv_https_proxy"
+                || k_low == "vclusterenv_proxy"
+                || k_low == "vcluster_http_proxy"
+                || k_low == "vcluster_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            if let Some((_, v)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+                let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if !val.is_empty() {
+                    return Some(if val.starts_with("http://")
+                        || val.starts_with("https://")
+                        || val.starts_with("socks")
+                    {
+                        val.to_string()
+                    } else {
+                        format!("http://{}", val)
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_vclusterenv_proxy() -> Option<(String, PathBuf)> {
+    let paths = get_vclusterenv_config_paths();
+    for p in paths {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Some(proxy) = parse_vclusterenv_proxy(&content) {
+                return Some((proxy, p));
+            }
+        }
+    }
+    if let Ok(val) = std::env::var("VCLUSTERENV_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VCLUSTERENV_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VCLUSTERENV_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VCLUSTERENV_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VCLUSTER_HTTP_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VCLUSTER_HTTP_PROXY")));
+        }
+    }
+    if let Ok(val) = std::env::var("VCLUSTER_PROXY") {
+        let trim = val.trim();
+        if !trim.is_empty() {
+            let proxy = if trim.starts_with("http://")
+                || trim.starts_with("https://")
+                || trim.starts_with("socks")
+            {
+                trim.to_string()
+            } else {
+                format!("http://{}", trim)
+            };
+            return Some((proxy, PathBuf::from("env:VCLUSTER_PROXY")));
+        }
+    }
+    None
+}
+
 pub fn get_apk_repositories_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(p_str) = std::env::var("APK_REPOSITORIES_PATH") {
@@ -104099,6 +104735,70 @@ pub async fn run(_verbose: bool, json_output: bool) -> Result<()> {
         items.push(DiagItem::new(
             "krewenv Dev Proxy",
             "~/.krewenv/config & ~/.config/krewenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // helmfileenv Helmfile CLI Version Manager Daemon (~/.helmfileenv/config / ~/.config/helmfileenv/config / /etc/helmfileenv/config / /etc/systemd/system/helmfileenv.service.d/http-proxy.conf)
+    if let Some((helmfileenv_proxy, helmfileenv_path)) = get_helmfileenv_proxy() {
+        let ok = verify_proxy_url(&helmfileenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "helmfileenv proxy `{}` in {} is dead! (helmfileenv toolchain proxy will fail)",
+                helmfileenv_proxy,
+                helmfileenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "helmfileenv Dev Proxy",
+            format!("{}", helmfileenv_path.display()),
+            helmfileenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (helmfileenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "helmfileenv Dev Proxy",
+            "~/.helmfileenv/config & ~/.config/helmfileenv/config",
+            "(not set)".dimmed().to_string(),
+            "○ Inherits Shell or Direct".dimmed().to_string(),
+        ));
+    }
+
+    // vclusterenv vcluster CLI Version Manager Daemon (~/.vclusterenv/config / ~/.config/vclusterenv/config / /etc/vclusterenv/config / /etc/systemd/system/vclusterenv.service.d/http-proxy.conf)
+    if let Some((vclusterenv_proxy, vclusterenv_path)) = get_vclusterenv_proxy() {
+        let ok = verify_proxy_url(&vclusterenv_proxy).await;
+        if !ok {
+            root_issues.push(format!(
+                "vclusterenv proxy `{}` in {} is dead! (vclusterenv toolchain proxy will fail)",
+                vclusterenv_proxy,
+                vclusterenv_path.display()
+            ));
+        }
+        items.push(DiagItem::new(
+            "vclusterenv Dev Proxy",
+            format!("{}", vclusterenv_path.display()),
+            vclusterenv_proxy,
+            if ok {
+                "● Active Daemon Proxy".green().to_string()
+            } else {
+                "▲ DEAD PROXY PORT! (vclusterenv fails)"
+                    .red()
+                    .bold()
+                    .to_string()
+            },
+        ));
+    } else {
+        items.push(DiagItem::new(
+            "vclusterenv Dev Proxy",
+            "~/.vclusterenv/config & ~/.config/vclusterenv/config",
             "(not set)".dimmed().to_string(),
             "○ Inherits Shell or Direct".dimmed().to_string(),
         ));
@@ -117278,5 +117978,55 @@ Environment="VOLTA_PROXY=http://10.0.0.5:8888"
         let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// krewenv_proxy = \"socks5://127.0.0.1:1080\"\n";
         assert_eq!(parse_krewenv_proxy(input_comment), None);
         assert_eq!(parse_krewenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_helmfileenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_helmfileenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "helmfileenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_helmfileenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_helmfileenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// helmfileenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_helmfileenv_proxy(input_comment), None);
+        assert_eq!(parse_helmfileenv_proxy(""), None);
+    }
+
+    #[test]
+    fn test_parse_vclusterenv_proxy() {
+        let json_config = r#"{"http_proxy": "http://127.0.0.1:7890"}"#;
+        assert_eq!(
+            parse_vclusterenv_proxy(json_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let kv_config = "vclusterenv_http_proxy = \"http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_vclusterenv_proxy(kv_config),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let dropin = "[Service]\nEnvironment=\"HTTP_PROXY=http://127.0.0.1:7890\"\n";
+        assert_eq!(
+            parse_vclusterenv_proxy(dropin),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+
+        let input_comment = "# http_proxy = \"http://127.0.0.1:7890\"\n// vclusterenv_proxy = \"socks5://127.0.0.1:1080\"\n";
+        assert_eq!(parse_vclusterenv_proxy(input_comment), None);
+        assert_eq!(parse_vclusterenv_proxy(""), None);
     }
 }
