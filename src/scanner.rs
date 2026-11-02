@@ -224,6 +224,8 @@ pub const COMMON_PORTS: &[(u16, bool, &'static str)] = &[
     (65252, false, "kbenv (Kubectl Version Manager) Daemon (HTTP/API)"),
     (65353, false, "sopsenv (SOPS Version Manager) Daemon (HTTP/API)"),
     (65454, false, "ocenv (OpenShift Version Manager) Daemon (HTTP/API)"),
+    (65473, false, "tknenv (Tekton Pipelines CLI Version Manager) Daemon (HTTP/API)"),
+    (65474, false, "talosenv (Talos Linux CLI Version Manager) Daemon (HTTP/API)"),
     (65475, false, "cmctlenv (cert-manager CLI Version Manager) Daemon (HTTP/API)"),
     (65476, false, "clusterctlenv (Kubernetes Cluster API Version Manager) Daemon (HTTP/API)"),
     (65477, false, "k9senv (k9s Kubernetes Terminal UI Version Manager) Daemon (HTTP/API)"),

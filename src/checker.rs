@@ -3798,6 +3798,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "WildVision AI CDN",
         "https://github.com/WildVision-AI/WildVision-Bench",
     ),
+    (
+        "talosenv Dev CDN",
+        "https://github.com/siderolabs/talos",
+    ),
+    (
+        "tknenv Dev CDN",
+        "https://github.com/tektoncd/cli",
+    ),
+    (
+        "Spider2-V AI CDN",
+        "https://github.com/xlang-ai/Spider2-V",
+    ),
+    (
+        "WindowsAgentArena AI CDN",
+        "https://github.com/microsoft/WindowsAgentArena",
+    ),
+    (
+        "GUI-World AI CDN",
+        "https://github.com/RAIVN-Lab/GUI-World",
+    ),
+    (
+        "SWE-rebench AI CDN",
+        "https://github.com/swe-rebench/swe-rebench",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6956,6 +6980,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "WildVision AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "talosenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "tknenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Spider2-V AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "WindowsAgentArena AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "GUI-World AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SWE-rebench AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
