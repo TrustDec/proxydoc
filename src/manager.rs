@@ -74136,6 +74136,498 @@ pub fn unset_tknenv_proxy() -> Result<bool> {
     Ok(any_removed)
 }
 
+pub fn apply_knenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "knenv_http_proxy"
+                    || k_low == "knenv_https_proxy"
+                    || k_low == "knenv_proxy"
+                    || k_low == "kn_http_proxy"
+                    || k_low == "kn_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export knenv_http_proxy=")
+            || lower.starts_with("export knenv_https_proxy=")
+            || lower.starts_with("export knenv_proxy=")
+            || lower.starts_with("export kn_http_proxy=")
+            || lower.starts_with("export kn_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("knenv_http_proxy=")
+            || lower.starts_with("knenv_https_proxy=")
+            || lower.starts_with("knenv_proxy=")
+            || lower.starts_with("kn_http_proxy=")
+            || lower.starts_with("kn_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if lower.starts_with("export ") {
+                lines.push(format!("export http_proxy=\"{}\"", proxy_url));
+            } else {
+                lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "knenv_http_proxy"
+                || k_trim == "knenv_https_proxy"
+                || k_trim == "knenv_proxy"
+                || k_trim == "kn_http_proxy"
+                || k_trim == "kn_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        let is_dropin = content.contains("[Service]");
+        if is_dropin {
+            if let Some(pos) = lines.iter().position(|l| l.trim() == "[Service]") {
+                lines.insert(
+                    pos + 1,
+                    format!("Environment=\"HTTP_PROXY={}\"", proxy_url),
+                );
+            } else {
+                lines.push("[Service]".to_string());
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_knenv_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "knenv_proxy", "knenv_http_proxy", "kn_http_proxy", "kn_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "knenv_http_proxy"
+                    || k_low == "knenv_https_proxy"
+                    || k_low == "knenv_proxy"
+                    || k_low == "kn_http_proxy"
+                    || k_low == "kn_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export knenv_http_proxy=")
+            || lower.starts_with("export knenv_https_proxy=")
+            || lower.starts_with("export knenv_proxy=")
+            || lower.starts_with("export kn_http_proxy=")
+            || lower.starts_with("export kn_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("knenv_http_proxy=")
+            || lower.starts_with("knenv_https_proxy=")
+            || lower.starts_with("knenv_proxy=")
+            || lower.starts_with("kn_http_proxy=")
+            || lower.starts_with("kn_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "knenv_http_proxy"
+                || k_trim == "knenv_https_proxy"
+                || k_trim == "knenv_proxy"
+                || k_trim == "kn_http_proxy"
+                || k_trim == "kn_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_knenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_knenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_knenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_knenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_knenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_knenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
+pub fn apply_crossplaneenv_proxy(content: &str, proxy_url: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced_proxy = false;
+    let mut replaced_dropin = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert(
+                "http_proxy".to_string(),
+                serde_json::Value::String(proxy_url.to_string()),
+            );
+            return serde_json::to_string_pretty(&val).unwrap_or_default() + "\n";
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "crossplaneenv_http_proxy"
+                    || k_low == "crossplaneenv_https_proxy"
+                    || k_low == "crossplaneenv_proxy"
+                    || k_low == "crossplane_http_proxy"
+                    || k_low == "crossplane_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+                    replaced_dropin = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export crossplaneenv_http_proxy=")
+            || lower.starts_with("export crossplaneenv_https_proxy=")
+            || lower.starts_with("export crossplaneenv_proxy=")
+            || lower.starts_with("export crossplane_http_proxy=")
+            || lower.starts_with("export crossplane_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("crossplaneenv_http_proxy=")
+            || lower.starts_with("crossplaneenv_https_proxy=")
+            || lower.starts_with("crossplaneenv_proxy=")
+            || lower.starts_with("crossplane_http_proxy=")
+            || lower.starts_with("crossplane_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            if lower.starts_with("export ") {
+                lines.push(format!("export http_proxy=\"{}\"", proxy_url));
+            } else {
+                lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            }
+            replaced_proxy = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "crossplaneenv_http_proxy"
+                || k_trim == "crossplaneenv_https_proxy"
+                || k_trim == "crossplaneenv_proxy"
+                || k_trim == "crossplane_http_proxy"
+                || k_trim == "crossplane_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+            replaced_proxy = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    if !replaced_proxy && !replaced_dropin {
+        let is_dropin = content.contains("[Service]");
+        if is_dropin {
+            if let Some(pos) = lines.iter().position(|l| l.trim() == "[Service]") {
+                lines.insert(
+                    pos + 1,
+                    format!("Environment=\"HTTP_PROXY={}\"", proxy_url),
+                );
+            } else {
+                lines.push("[Service]".to_string());
+                lines.push(format!("Environment=\"HTTP_PROXY={}\"", proxy_url));
+            }
+        } else {
+            lines.push(format!("http_proxy = \"{}\"", proxy_url));
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub fn remove_crossplaneenv_proxy(content: &str) -> (String, bool) {
+    let mut lines = Vec::new();
+    let mut removed = false;
+
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(obj) = val.as_object_mut() {
+            for key in ["http_proxy", "https_proxy", "proxy", "crossplaneenv_proxy", "crossplaneenv_http_proxy", "crossplane_http_proxy", "crossplane_proxy"] {
+                if obj.remove(key).is_some() {
+                    removed = true;
+                }
+            }
+            if removed {
+                return (
+                    serde_json::to_string_pretty(&val).unwrap_or_default() + "\n",
+                    true,
+                );
+            }
+        }
+    }
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        if lower.starts_with("environment=") {
+            let env_part = trimmed["environment=".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'');
+            if let Some((k, _)) = env_part.split_once('=') {
+                let k_low = k.trim().to_ascii_lowercase();
+                if k_low == "crossplaneenv_http_proxy"
+                    || k_low == "crossplaneenv_https_proxy"
+                    || k_low == "crossplaneenv_proxy"
+                    || k_low == "crossplane_http_proxy"
+                    || k_low == "crossplane_proxy"
+                    || k_low == "http_proxy"
+                    || k_low == "https_proxy"
+                    || k_low == "all_proxy"
+                {
+                    removed = true;
+                    continue;
+                }
+            }
+        }
+
+        if lower.starts_with("export crossplaneenv_http_proxy=")
+            || lower.starts_with("export crossplaneenv_https_proxy=")
+            || lower.starts_with("export crossplaneenv_proxy=")
+            || lower.starts_with("export crossplane_http_proxy=")
+            || lower.starts_with("export crossplane_proxy=")
+            || lower.starts_with("export http_proxy=")
+            || lower.starts_with("export https_proxy=")
+            || lower.starts_with("export all_proxy=")
+            || lower.starts_with("crossplaneenv_http_proxy=")
+            || lower.starts_with("crossplaneenv_https_proxy=")
+            || lower.starts_with("crossplaneenv_proxy=")
+            || lower.starts_with("crossplane_http_proxy=")
+            || lower.starts_with("crossplane_proxy=")
+            || lower.starts_with("http_proxy=")
+            || lower.starts_with("https_proxy=")
+            || lower.starts_with("all_proxy=")
+        {
+            removed = true;
+            continue;
+        }
+
+        let clean = trimmed.trim_start_matches('-').trim().to_ascii_lowercase();
+        let is_target_key = if let Some((k, _)) = clean.split_once('=').or_else(|| clean.split_once(':')) {
+            let k_trim = k.trim();
+            k_trim == "proxy"
+                || k_trim == "http_proxy"
+                || k_trim == "https_proxy"
+                || k_trim == "http-proxy"
+                || k_trim == "https-proxy"
+                || k_trim == "crossplaneenv_http_proxy"
+                || k_trim == "crossplaneenv_https_proxy"
+                || k_trim == "crossplaneenv_proxy"
+                || k_trim == "crossplane_http_proxy"
+                || k_trim == "crossplane_proxy"
+        } else {
+            false
+        };
+
+        if is_target_key {
+            removed = true;
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    (lines.join("\n") + "\n", removed)
+}
+
+pub fn set_crossplaneenv_proxy(proxy_url: &str) -> Result<PathBuf> {
+    let path = crate::doctor::get_crossplaneenv_write_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let new_content = apply_crossplaneenv_proxy(&content, proxy_url);
+    std::fs::write(&path, new_content)?;
+    Ok(path)
+}
+
+pub fn unset_crossplaneenv_proxy() -> Result<bool> {
+    let mut any_removed = false;
+    for path in crate::doctor::get_crossplaneenv_config_paths() {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let (new_content, removed) = remove_crossplaneenv_proxy(&content);
+                if removed {
+                    let _ = std::fs::write(&path, new_content);
+                    any_removed = true;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if any_removed {
+        let _ = Command::new("systemctl").arg("daemon-reload").status();
+    }
+    Ok(any_removed)
+}
+
 pub async fn turn_on(
     target: &str,
     git: bool,
@@ -74502,6 +74994,8 @@ pub async fn turn_on(
     cmctlenv: bool,
     talosenv: bool,
     tknenv: bool,
+    knenv: bool,
+    crossplaneenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -74867,6 +75361,8 @@ pub async fn turn_on(
     let set_cmctlenv = cmctlenv || all;
     let set_talosenv = talosenv || all;
     let set_tknenv = tknenv || all;
+    let set_knenv = knenv || all;
+    let set_crossplaneenv = crossplaneenv || all;
     let set_curl = curl;
     let set_wget = wget;
 
@@ -80228,6 +80724,36 @@ pub async fn turn_on(
         }
     }
 
+    if set_knenv {
+        match set_knenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ knenv (Knative CLI Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update knenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if set_crossplaneenv {
+        match set_crossplaneenv_proxy(&proxy_url) {
+            Ok(p) => eprintln!(
+                "{}",
+                format!(
+                    "✔ crossplaneenv (Crossplane CLI Version Manager) toolchain daemon ({}) set to {}",
+                    p.display(),
+                    proxy_url
+                )
+                .green()
+            ),
+            Err(e) => eprintln!("{} Failed to update crossplaneenv config: {}", "▲".yellow(), e),
+        }
+    }
+
     eprintln!(
         "{}",
         format!("🟢 Proxy enabled! Target: {}", proxy_url)
@@ -80607,6 +81133,8 @@ pub fn turn_off(
     cmctlenv: bool,
     talosenv: bool,
     tknenv: bool,
+    knenv: bool,
+    crossplaneenv: bool,
     all: bool,
     shell: Option<&str>,
 ) -> Result<()> {
@@ -80972,6 +81500,8 @@ pub fn turn_off(
     let unset_cmctlenv = cmctlenv || all;
     let unset_talosenv = talosenv || all;
     let unset_tknenv = tknenv || all;
+    let unset_knenv = knenv || all;
+    let unset_crossplaneenv = crossplaneenv || all;
     let unset_curl = curl;
     let unset_wget = wget;
 
@@ -84505,6 +85035,34 @@ pub fn turn_off(
                 "○ tknenv Tekton Pipelines CLI Version Manager toolchain daemon proxy was not set".dimmed()
             ),
             Err(e) => eprintln!("{} Failed to update tknenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_knenv {
+        match unset_knenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ knenv Knative CLI Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ knenv Knative CLI Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update knenv config: {}", "▲".yellow(), e),
+        }
+    }
+
+    if unset_crossplaneenv {
+        match unset_crossplaneenv_proxy() {
+            Ok(true) => eprintln!(
+                "{}",
+                "✔ crossplaneenv Crossplane CLI Version Manager toolchain daemon proxy unset".green()
+            ),
+            Ok(false) => eprintln!(
+                "{}",
+                "○ crossplaneenv Crossplane CLI Version Manager toolchain daemon proxy was not set".dimmed()
+            ),
+            Err(e) => eprintln!("{} Failed to update crossplaneenv config: {}", "▲".yellow(), e),
         }
     }
 
@@ -92321,6 +92879,40 @@ auth: pass123
         let dropin_updated = apply_tknenv_proxy(dropin_initial, "http://10.0.0.128:7890");
         assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
         let (dropin_cleaned, dropin_removed) = remove_tknenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_knenv_proxy() {
+        let conf_initial = "KNENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_knenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_knenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/knenv\n";
+        let dropin_updated = apply_knenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_knenv_proxy(&dropin_updated);
+        assert!(dropin_removed);
+        assert!(!dropin_cleaned.contains("10.0.0.128"));
+    }
+
+    #[test]
+    fn test_apply_and_remove_crossplaneenv_proxy() {
+        let conf_initial = "CROSSPLANEENV_AUTO_INSTALL=true\n";
+        let conf_updated = apply_crossplaneenv_proxy(conf_initial, "http://10.0.0.128:7890");
+        assert!(conf_updated.contains("http_proxy = \"http://10.0.0.128:7890\""));
+        let (conf_cleaned, conf_removed) = remove_crossplaneenv_proxy(&conf_updated);
+        assert!(conf_removed);
+        assert!(!conf_cleaned.contains("10.0.0.128"));
+
+        let dropin_initial = "[Service]\nExecStart=/usr/bin/crossplaneenv\n";
+        let dropin_updated = apply_crossplaneenv_proxy(dropin_initial, "http://10.0.0.128:7890");
+        assert!(dropin_updated.contains("Environment=\"HTTP_PROXY=http://10.0.0.128:7890\""));
+        let (dropin_cleaned, dropin_removed) = remove_crossplaneenv_proxy(&dropin_updated);
         assert!(dropin_removed);
         assert!(!dropin_cleaned.contains("10.0.0.128"));
     }
