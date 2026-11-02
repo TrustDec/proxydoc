@@ -3726,6 +3726,30 @@ pub const TEST_TARGETS: &[(&str, &str)] = &[
         "SWE-bench-Multimodal AI CDN",
         "https://github.com/princeton-nlp/SWE-bench",
     ),
+    (
+        "koenv Dev CDN",
+        "https://github.com/ko-build/ko",
+    ),
+    (
+        "sternenv Dev CDN",
+        "https://github.com/stern/stern",
+    ),
+    (
+        "SWE-bench-Verified AI CDN",
+        "https://github.com/swe-bench/experiments",
+    ),
+    (
+        "Design2Code AI CDN",
+        "https://github.com/Nalam-Sadhana/Design2Code",
+    ),
+    (
+        "MMAU AI CDN",
+        "https://github.com/apple/ml-mmau",
+    ),
+    (
+        "Math-Odyssey AI CDN",
+        "https://github.com/Math-Odyssey/Math-Odyssey",
+    ),
 ];
 
 pub fn parse_cf_trace(body: &str) -> EgressInfo {
@@ -6830,6 +6854,24 @@ mod tests {
         assert!(standard
             .iter()
             .any(|(name, _)| *name == "SWE-bench-Multimodal AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "koenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "sternenv Dev CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "SWE-bench-Verified AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Design2Code AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "MMAU AI CDN"));
+        assert!(standard
+            .iter()
+            .any(|(name, _)| *name == "Math-Odyssey AI CDN"));
         assert!(!standard.iter().any(|(name, _)| *name == "Custom Target"));
 
         let with_custom = build_target_list(Some("https://api.example.com"));
